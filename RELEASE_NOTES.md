@@ -13,3 +13,6 @@ files moved. See .github/scripts/release_notes.py.
 ### Improve
 
 ### Fix
+
+- **WebGPU long-strip reader:** very tall pages (long webtoon strips) no longer fail to build their preview levels — zoomed-out reading through them is sharp again instead of sampling the full-resolution image
+- **WebGPU long-strip reader:** scrolling down through a page no longer drops an unrelated page in below it, cutting the current page off, until you scroll far enough for it to correct itself

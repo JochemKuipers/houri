@@ -244,6 +244,20 @@ internal fun WebGpuViewer.resolveFetchedPage(index: Int): ImagePage? {
 }
 
 internal fun WebGpuViewer.continuousPage(index: Int): ViewerPage? {
+    // KMK --> Reconcile a loader page-list swap before the window answers, not only on the next
+    // page crossing. A split replaces an oversized page with its segments mid-session, and every
+    // entry the window still holds names the list as it was: the superseded parent (whose
+    // neighbour chain then steps straight over its own segments) or a pre-split neighbour the
+    // segments have pushed further down. Scrolling *within* the current page crosses nothing, so
+    // preloadPages - the only syncPageList caller - never runs, and the frame draws whichever
+    // stale shell the window hands back directly under the page being read: a later page attached
+    // to the current one, cutting it off, until the reader scrolls into the misplaced page and
+    // the crossing finally reconciles (which is why it looked like it fixed itself). The version
+    // compare is three volatile reads when nothing changed, and the legacy webtoon viewer
+    // reconciles from its own scroll callback for exactly this reason.
+    viewerChapters?.let { syncPageList(it) }
+    // KMK <--
+
     val window = continuousPageWindow
     if (index !in -window.radius..window.radius) {
         return walkContinuousPage(index)

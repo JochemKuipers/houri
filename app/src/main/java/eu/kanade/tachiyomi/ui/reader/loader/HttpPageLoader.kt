@@ -57,8 +57,8 @@ internal class HttpPageLoader(
     /**
      * Tallest page the readers will decode, in pixels.
      *
-     * The decoder rejects anything past 16384px on a side and the WebGPU renderer's resize path
-     * caps at 8192px, so a segment is held to the stricter of the two.
+     * The decoder rejects anything past 16384px on a side (the renderer's mipmap resize accepts
+     * the same bound), so 8192 keeps a segment's texture plus its mip chain comfortably inside it.
      */
     private val maxSegmentHeight = 8192
 
