@@ -60,6 +60,9 @@ class WebGpuViewerContinuous(activity: ReaderActivity, val useGap: Boolean = fal
         state.doubleTapZoomEnabled = config.resolveDoubleTapZoom()
         // KMK --> The webtoon pinch preference, which the legacy webtoon viewer already honors.
         state.pinchZoomEnabled = readerPreferences.webtoonPinchToZoomEnabled().get()
+        // The border-crop preference, which the paged viewer applies by trimming at decode.
+        // Continuous draws the trim the decoder already measured, cropped to the viewport width.
+        state.cropBorders = config.imageCropBorders
         // KMK <--
         config.reseedDiffBaseline()
         // KMK <--

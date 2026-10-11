@@ -22,6 +22,7 @@ import ca.mpreg.webgpuviewer.reader.ReaderState
 import ca.mpreg.webgpuviewer.reader.SettingsImpact
 import ca.mpreg.webgpuviewer.renderer.UpscalerArtCnn
 import ca.mpreg.webgpuviewer.viewer.ImagePage
+import ca.mpreg.webgpuviewer.viewer.ImageViewerContinuousState
 import com.google.android.material.color.MaterialColors
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
@@ -498,6 +499,11 @@ open class WebGpuViewer(
         config.onSettingsChanged = listener@{ diff ->
             if (isDestroyed) return@listener
             pager.state.doubleTapZoomEnabled = config.resolveDoubleTapZoom()
+            // KMK --> Only the continuous viewer crops; the paged one trims at decode instead.
+            if (isContinuous) {
+                (pager.state as? ImageViewerContinuousState)?.cropBorders = config.imageCropBorders
+            }
+            // KMK <--
 
             if (diff.previous.doubleTapZoom != diff.current.doubleTapZoom ||
                 diff.previous.disableZoomIn != diff.current.disableZoomIn
