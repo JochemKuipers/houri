@@ -175,17 +175,18 @@ internal fun WebGpuViewer.traceStage(
  */
 internal fun WebGpuViewer.startDecodeStallWatchdog() {
     scope.launch {
-        try {
-            while (!isDestroyed) {
+        while (!isDestroyed) {
+            try {
                 delay(DECODE_WATCHDOG_TICK_MS)
                 val summary = decodeQueueSummary()
                 activeDecode?.reportStallIfDue(System.currentTimeMillis(), summary)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // A watchdog that dies takes the only diagnosis with it, so a failed tick restarts
+                // the loop rather than ending it. The wait is the first thing each pass does, so a
+                // tick that keeps failing still only costs one attempt a second and cannot spin.
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Exception) {
-            // A watchdog that dies takes the only diagnosis with it, so a failed tick restarts the
-            // loop rather than ending it. Cheap, and it only runs once a second.
         }
     }
 }
