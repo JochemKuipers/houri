@@ -59,5 +59,5 @@ No migration needed unless DB contains `manga_sync` rows with that `syncId` — 
 - `core/TrackerId.kt` — ID constants
 - `core/TrackerLoginMode.kt` — UI login routing
 - `core/AbstractCookieTrackerInterceptor.kt` — shared cookie jar
-- `interceptor/` — `AnimePlanetInterceptor`/`ComicKInterceptor` now 12-line subclasses
+- `interceptor/` — `AnimePlanetInterceptor` (12-line subclass; ComicK moved to OAuth bearer auth)
 - `template/TrackerTemplate.kt` — copy-paste starter with status/score stubs

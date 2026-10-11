@@ -5,38 +5,32 @@ import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.database.models.Track
 import eu.kanade.tachiyomi.data.track.BaseTracker
 import eu.kanade.tachiyomi.data.track.DeletableTracker
-import eu.kanade.tachiyomi.data.track.comick.ComicKApi.Companion.TYPE_COMPLETED
-import eu.kanade.tachiyomi.data.track.comick.ComicKApi.Companion.TYPE_DROPPED
-import eu.kanade.tachiyomi.data.track.comick.ComicKApi.Companion.TYPE_ON_HOLD
-import eu.kanade.tachiyomi.data.track.comick.ComicKApi.Companion.TYPE_PLANNING
-import eu.kanade.tachiyomi.data.track.comick.ComicKApi.Companion.TYPE_READING
-import eu.kanade.tachiyomi.data.track.comick.ComicKApi.Companion.TYPE_UNFOLLOW
+import eu.kanade.tachiyomi.data.track.comick.dto.ComickOAuth
 import eu.kanade.tachiyomi.data.track.core.TrackerLoginMode
 import eu.kanade.tachiyomi.data.track.model.TrackMangaMetadata
 import eu.kanade.tachiyomi.data.track.model.TrackSearch
-import eu.kanade.tachiyomi.ui.setting.track.ComicKLoginActivity
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.serialization.json.Json
+import logcat.LogPriority
+import mihon.app.di.globalAppGraph
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import tachiyomi.domain.track.model.Track as DomainTrack
 
+/**
+ * Comick tracker (https://comick.dev) — OAuth 2.0 Authorization Code + S256 PKCE
+ * against the official Library API (api.comick.dev/integrations/v1).
+ *
+ * Ported from mihonapp/mihon#4056 ("Add Comick Tracker", @MajorTanya), adapted to
+ * this repo's tracker framework (login mode, token preferences, `ComicK` naming).
+ *
+ * Note: the tracker only works once [ComicKApi]'s CLIENT_ID is filled in — see the
+ * registration instructions there.
+ */
 class ComicK(id: Long) : BaseTracker(id, "ComicK"), DeletableTracker {
 
-    companion object {
-        // Tracker status constants
-        const val READING = 1L
-        const val COMPLETED = 2L
-        const val ON_HOLD = 3L
-        const val PLAN_TO_READ = 4L
-        const val DROPPED = 5L
-
-        private val SCORE_LIST = (0..10)
-            .map { if (it == 0) "-" else it.toString() }
-            .toImmutableList()
-
-        private const val SEARCH_ID_PREFIX = "id:"
-        private const val ANON_USERNAME = "comick-user"
-    }
+    private val json: Json by lazy { globalAppGraph.json }
 
     private val interceptor by lazy { ComicKInterceptor(this) }
 
@@ -69,59 +63,40 @@ class ComicK(id: Long) : BaseTracker(id, "ComicK"), DeletableTracker {
 
     override fun displayScore(track: DomainTrack): String = track.score.toInt().toString()
 
-    /**
-     * Map tracker status to ComicK API type.
-     */
-    private fun statusToApiType(status: Long): Int = when (status) {
-        READING -> TYPE_READING
-        COMPLETED -> TYPE_COMPLETED
-        ON_HOLD -> TYPE_ON_HOLD
-        PLAN_TO_READ -> TYPE_PLANNING
-        DROPPED -> TYPE_DROPPED
-        else -> TYPE_UNFOLLOW
-    }
+    override fun hasNotStartedReading(status: Long): Boolean = status == PLAN_TO_READ
 
-    /**
-     * Map ComicK API type to tracker status.
-     */
-    private fun apiTypeToStatus(type: Int): Long = when (type) {
-        TYPE_READING -> READING
-        TYPE_COMPLETED -> COMPLETED
-        TYPE_ON_HOLD -> ON_HOLD
-        TYPE_PLANNING -> PLAN_TO_READ
-        TYPE_DROPPED -> DROPPED
-        else -> PLAN_TO_READ
-    }
+    override fun getLoginMode(): TrackerLoginMode = TrackerLoginMode.OAUTH
+
+    override fun getAuthUrl(): String? = ComicKApi.authUrl().toString()
 
     override suspend fun update(track: Track, didReadChapter: Boolean): Track {
-        if (track.status != COMPLETED) {
-            if (didReadChapter) {
-                track.status = READING
-                if (track.started_reading_date == 0L) {
-                    track.started_reading_date = System.currentTimeMillis()
-                }
+        if (track.status != COMPLETED && track.status != READING && didReadChapter) {
+            track.status = READING
+            if (track.last_chapter_read == 1.0) {
+                track.started_reading_date = System.currentTimeMillis()
             }
         }
-        api.followComic(track.remote_id, statusToApiType(track.status))
-        return track
+
+        return api.updateLibManga(track)
     }
 
     override suspend fun bind(track: Track, hasReadChapters: Boolean): Track {
-        val remoteId = track.remote_id
-        if (remoteId == 0L) return track
+        val remoteTrack = api.findLibManga(track) ?: run {
+            track.status = if (hasReadChapters) READING else PLAN_TO_READ
+            track.score = 0.0
 
-        // Check if already following
-        val followStatus = api.getFollowStatus(remoteId)
-        if (followStatus != null) {
-            // Already following - read current status
-            track.status = apiTypeToStatus(followStatus.t)
-        } else {
-            // Not following - set initial status
-            val status = if (hasReadChapters) READING else PLAN_TO_READ
-            track.status = status
-            api.followComic(remoteId, statusToApiType(status))
+            return api.addLibManga(track)
         }
-        return track
+        // Keep the remote status/score/progress; only adjust status locally.
+        track.copyPersonalFrom(remoteTrack)
+        track.title = remoteTrack.title
+        track.remote_id = remoteTrack.remote_id
+
+        if (track.status != COMPLETED && hasReadChapters) {
+            track.status = READING
+        }
+
+        return update(track)
     }
 
     override suspend fun search(query: String): List<TrackSearch> {
@@ -130,80 +105,85 @@ class ComicK(id: Long) : BaseTracker(id, "ComicK"), DeletableTracker {
                 return api.getMangaDetails(hid)?.let { listOf(it) } ?: emptyList()
             }
         }
+
         return api.search(query)
     }
 
     override suspend fun refresh(track: Track): Track {
-        val followStatus = api.getFollowStatus(track.remote_id)
-        if (followStatus != null) {
-            track.status = apiTypeToStatus(followStatus.t)
-        }
+        val remoteTrack = api.findLibManga(track) ?: throw Exception("Could not find manga")
+        track.copyPersonalFrom(remoteTrack)
+        track.remote_id = remoteTrack.remote_id
+        track.title = remoteTrack.title
         return track
     }
 
     override suspend fun getMangaMetadata(track: DomainTrack): TrackMangaMetadata {
-        val remote = api.getMangaDetails(track.remoteId.toString()) ?: throw Exception("Could not find manga")
+        val remote = api.getMangaDetails(track.remoteId.toHid())
+            ?: throw Exception("Could not find manga")
         return TrackMangaMetadata(
             remoteId = track.remoteId,
             title = remote.title,
             thumbnailUrl = remote.cover_url,
             description = remote.summary,
-            authors = remote.authors.joinToString(", ").ifBlank { null },
         )
     }
 
-    override suspend fun login(username: String, password: String) = loginWithCookie(password, username)
+    override suspend fun login(username: String, password: String) = login(password)
 
     /**
-     * Login with session cookie. The cookie is the value of the ory_kratos_session cookie.
+     * Complete the OAuth flow with the authorization code from the redirect.
+     * Requires the user to have granted `offline_access` (refresh token) and
+     * `library:write`, otherwise [ComickMissingScopesException] propagates.
      */
-    suspend fun loginWithCookie(sessionCookie: String, username: String = "") {
-        saveCredentials(username.ifBlank { ANON_USERNAME }, sessionCookie)
-        interceptor.newAuth(sessionCookie)
-    }
-
-    fun restoreSession(): String? {
-        return trackPreferences.trackPassword(this).get().ifBlank { null }
-    }
-
-    /**
-     * Persist the current cookie header string to preferences so the
-     * [ComicKInterceptor] can restore its [CookieJar] on restart.
-     */
-    fun saveCookieHeader(cookieHeader: String) {
-        trackPreferences.trackPassword(this).set(cookieHeader)
-    }
-
-    /**
-     * Returns the full cookie header string for API requests.
-     * Backward-compatible: old installs stored just the session value,
-     * new installs store the full "name=value; name2=value2" cookie header.
-     */
-    fun restoreCookieHeader(): String? {
-        val stored = trackPreferences.trackPassword(this).get().ifBlank { null } ?: return null
-        return if (stored.contains("=") && stored.contains("; ")) {
-            stored
-        } else if (stored.contains("=")) {
-            stored
-        } else {
-            // Legacy: bare value without key — assume it's the session cookie
-            "ory_kratos_session=$stored"
+    suspend fun login(code: String) {
+        try {
+            val oauth = api.getAccessToken(code)
+            interceptor.setAuth(oauth)
+            val currentUser = api.getCurrentUser()
+            saveCredentials(currentUser.username ?: currentUser.id, oauth.accessToken)
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "ComicK OAuth login failed" }
+            logout()
+            if (e is ComickMissingScopesException) throw e
         }
     }
 
-    override fun hasNotStartedReading(status: Long): Boolean = status == PLAN_TO_READ
-
-    override fun getLoginMode(): TrackerLoginMode = TrackerLoginMode.WEBVIEW_COOKIE
-
-    override fun createCookieLoginIntent(context: android.content.Context): android.content.Intent? =
-        ComicKLoginActivity.newIntent(context)
-
-    override suspend fun delete(track: DomainTrack) {
-        api.unfollowComic(track.remoteId)
+    fun saveToken(oauth: ComickOAuth?) {
+        trackPreferences.trackToken(this).set(json.encodeToString(oauth))
     }
+
+    fun restoreToken(): ComickOAuth? {
+        return try {
+            json.decodeFromString(trackPreferences.trackToken(this).get())
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun verifyOAuthState(state: String): Boolean = api.verifyOAuthState(state)
 
     override fun logout() {
         super.logout()
-        interceptor.newAuth(null)
+        trackPreferences.trackToken(this).delete()
+        interceptor.setAuth(null)
+    }
+
+    override suspend fun delete(track: DomainTrack) {
+        api.deleteLibManga(track)
+    }
+
+    companion object {
+        // Tracker status constants
+        const val READING = 1L
+        const val COMPLETED = 2L
+        const val ON_HOLD = 3L
+        const val PLAN_TO_READ = 4L
+        const val DROPPED = 5L
+
+        private val SCORE_LIST = (0..10)
+            .map { if (it == 0) "-" else it.toString() }
+            .toImmutableList()
+
+        private const val SEARCH_ID_PREFIX = "id:"
     }
 }

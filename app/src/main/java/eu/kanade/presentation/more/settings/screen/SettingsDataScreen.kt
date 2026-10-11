@@ -3,6 +3,7 @@ package eu.kanade.presentation.more.settings.screen
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -98,6 +99,7 @@ import tachiyomi.i18n.kmk.KMR
 import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
+import java.io.IOException
 
 object SettingsDataScreen : SearchableSettings {
     @Suppress("unused")
@@ -679,8 +681,17 @@ object SettingsDataScreen : SearchableSettings {
             Preference.PreferenceItem.TextPreference(
                 title = stringResource(SYMR.strings.pref_google_drive_sign_in),
                 onClick = {
-                    val intent = googleDriveSync.getSignInIntent()
-                    context.startActivity(intent)
+                    // KMK --> a build without the client_secrets.json asset (CI injects it)
+                    // used to crash the screen; surface it as a toast instead.
+                    try {
+                        context.startActivity(googleDriveSync.getSignInIntent())
+                    } catch (e: IOException) {
+                        context.toast(
+                            context.stringResource(SYMR.strings.google_drive_login_failed, e.message.orEmpty()),
+                            Toast.LENGTH_LONG,
+                        )
+                    }
+                    // KMK <--
                 },
             ),
             getGoogleDrivePurge(),

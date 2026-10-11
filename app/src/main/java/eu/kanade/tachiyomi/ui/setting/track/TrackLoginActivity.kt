@@ -1,8 +1,15 @@
 package eu.kanade.tachiyomi.ui.setting.track
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.lifecycle.lifecycleScope
+import eu.kanade.tachiyomi.data.track.comick.ComickMissingScopesException
+import eu.kanade.tachiyomi.util.system.toast
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
 
 class TrackLoginActivity : BaseOAuthLoginActivity() {
 
@@ -20,15 +27,23 @@ class TrackLoginActivity : BaseOAuthLoginActivity() {
             }
             .orEmpty()
 
+        // KMK --> ComicK's native redirect is RFC 8252 form (scheme + path, no authority),
+        // so its callback arrives with a null host; fall back to the first path segment.
+        val authHost = uri.host ?: uri.path?.trimStart('/')?.substringBefore('/')
+        // KMK <--
+
         lifecycleScope.launch {
             try {
-                when (uri.host) {
+                when (authHost) {
                     "anilist-auth" -> handleAniList(data["access_token"])
                     "bangumi-auth" -> handleBangumi(data["code"])
                     "hikka-auth" -> handleHikka(data["reference"])
                     "mangabaka-auth" -> handleMangaBaka(data["code"], data["state"])
                     "myanimelist-auth" -> handleMyAnimeList(data["code"])
                     "shikimori-auth" -> handleShikimori(data["code"])
+                    // KMK -->
+                    "comick-auth" -> handleComick(data["code"], data["state"])
+                    // KMK <--
                 }
             } finally {
                 returnToSettings()
@@ -51,6 +66,31 @@ class TrackLoginActivity : BaseOAuthLoginActivity() {
             trackerManager.bangumi.logout()
         }
     }
+
+    // KMK -->
+    private suspend fun handleComick(code: String?, state: String?) {
+        if (state == null) {
+            logcat(LogPriority.WARN) { "Did not receive state parameter from ComicK OAuth" }
+            return
+        }
+        if (code != null) {
+            if (!trackerManager.comicK.verifyOAuthState(state)) {
+                logcat(LogPriority.WARN) { "Received wrong OAuth state back from ComicK" }
+                return
+            }
+            try {
+                trackerManager.comicK.login(code)
+            } catch (e: ComickMissingScopesException) {
+                withContext(Dispatchers.Main) {
+                    this@TrackLoginActivity.toast(e.message, Toast.LENGTH_LONG)
+                }
+                return
+            }
+        } else {
+            trackerManager.comicK.logout()
+        }
+    }
+    // KMK <--
 
     private suspend fun handleHikka(reference: String?) {
         if (reference != null) {

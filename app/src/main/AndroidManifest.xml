@@ -208,15 +208,21 @@
                 <data android:host="myanimelist-auth" />
                 <data android:host="shikimori-auth" />
             </intent-filter>
+
+            <!-- KMK: Comick native redirects use RFC 8252 form (scheme + path, no
+                 authority), so this filter has no host and matches the path instead. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="app.houri" android:pathPrefix="/comick-auth" />
+            </intent-filter>
         </activity>
         <!-- KMK: AnimePlanet webview login (no OAuth redirect; launched directly) -->
         <activity
             android:name=".ui.setting.track.AnimePlanetLoginActivity"
-            android:exported="false"
-            android:label="@string/track_activity_name" />
-        <!-- KMK: ComicK webview login (Cloudflare-protected, no OAuth redirect) -->
-        <activity
-            android:name=".ui.setting.track.ComicKLoginActivity"
             android:exported="false"
             android:label="@string/track_activity_name" />
         <activity
