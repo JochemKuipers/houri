@@ -58,6 +58,9 @@ class WebGpuViewerContinuous(activity: ReaderActivity, val useGap: Boolean = fal
         // assigned after super construction, and reseeding the diff baseline so
         // the first emission compares against the continuous-mode profile.
         state.doubleTapZoomEnabled = config.resolveDoubleTapZoom()
+        // KMK --> The webtoon pinch preference, which the legacy webtoon viewer already honors.
+        state.pinchZoomEnabled = readerPreferences.webtoonPinchToZoomEnabled().get()
+        // KMK <--
         config.reseedDiffBaseline()
         // KMK <--
         // Scrolling clear of a transition page is the only point this mode can call the chapter
