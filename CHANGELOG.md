@@ -37,6 +37,25 @@ The format is a modified version of [Keep a Changelog](https://keepachangelog.co
 - Fix app not reading `tachiyomix.extensionLib` extension metadata ([@AntsyLich](https://github.com/AntsyLich)) ([#3545](https://github.com/mihonapp/mihon/pull/3545), [#3559](https://github.com/mihonapp/mihon/pull/3559))
 - Fix reader navigator slider steps not updating after changing chapter ([@AntsyLich](https://github.com/AntsyLich)) ([#3549](https://github.com/mihonapp/mihon/pull/3549))
 
+## [v1.23.17] - 2026-10-11
+### New
+- **HDR reading in the WebGPU reader:** HDR-tagged pages (PQ/HLG and UltraHDR) now display with the display's full brightness on HDR-capable panels, and tone-map cleanly to SDR everywhere else
+- **Tracker manager:** swipe a tracker row left to log out of it, even when that tracker still shows as logged in — handy when a session has expired or stale credentials are lingering and tapping the row only reopens the login screen
+### Improve
+- **WebGPU continuous reader:** border cropping now works in the strip too — with crop-borders on, each page's borders are trimmed away and the page fills the screen edge to edge, like the paged reader already did
+- **WebGPU reader:** smoother long sessions — GPU objects are released properly as pages scroll by, tiles cache up to what your device's texture limit allows, and an idle reader no longer redraws frames for nothing
+- **WebGPU reader:** the webtoon pinch-to-zoom preference is now honored in the WebGPU reader too, and pinch can be turned off outright
+- **WebGPU reader:** more stable on device loss and surface resize — a lost GPU device is recovered without crashing, and rotating or resizing rebuilds the surface instead of showing a stale frame
+### Fix
+- **Library folders:** folder tiles now render as compact rows in list display mode instead of a single oversized card that swallowed most of the screen — the grid layout is unchanged
+- **Discord rich presence:** the presence art and download button are Houri's own — it was still showing Komikku's emoji, and its download button sent you to Komikku's page instead of ours. Every screen shares the app icon for now; distinct per-screen art comes back once Houri has its own assets in the Discord developer portal
+- **WebGPU page transitions:** turning a page no longer crashes when the GPU refuses to create a texture view — the transition cache falls back to drawing without cached art instead of failing the whole turn
+- **ComicK tracker:** rebuilt on Comick's official API — logging in opens your browser (grant "keep me signed in" and library write access), and your reading status, progress, and ratings sync properly again. Existing ComicK links need a one-time re-login and re-link to your Comick account
+- **Google Drive sync:** signing in no longer crashes or gets stuck when Google rejects the authorization code — failures now show a clear message in the app, and re-linking keeps your existing refresh token instead of silently breaking sync
+- **WebGPU long-strip reader:** very tall pages (long webtoon strips) no longer fail to build their preview levels — zoomed-out reading through them is sharp again instead of sampling the full-resolution image
+- **WebGPU long-strip reader:** scrolling down through a page no longer drops an unrelated page in below it, cutting the current page off, until you scroll far enough for it to correct itself
+
+
 ## [v1.23.16] - 2026-10-10
 ### Fix
 - **Fixed pages refusing to load in the WebGPU long-strip reader.** A long page is cut into pieces to be decodable, and if the device dropped one of those pieces from its cache the reader kept asking for a file that was no longer there and never recovered — leaving a blank strip at that spot, most often when a new chapter started loading while you were still scrolling. The reader now asks the source for that piece again, and a page it has retried too many times is handed back to be retried instead of being abandoned for the rest of the session.
