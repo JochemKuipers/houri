@@ -458,7 +458,7 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
                 null
             }
 
-            traceStage(trace, "gpuUpload", "dims=${frameWidth}x$frameHeight mipmaps=true")
+            traceStage(trace, "gpuUpload", "dims=${frameWidth}x$frameHeight mipmaps=true hdr=${dec.isHdr}")
             val firstImage = Image(
                 framePixels,
                 frameWidth,
@@ -467,6 +467,11 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
                 trimColors = trimColors,
                 trimThreshold = 0.15f,
                 backgroundColor = backgroundColor,
+                // KMK --> The decoder flags PQ/HLG (and UltraHDR) content; the library either
+                // presents it with the display's headroom or tone-maps it once, here, when the
+                // panel cannot. Animated pages stay SDR - HDR per frame is not a thing.
+                hdr = dec.isHdr,
+                // KMK <--
             )
 
             ImagePage.ImageSingle(firstImage)
