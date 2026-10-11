@@ -218,6 +218,9 @@ internal fun PreferenceItem(
                     onLongClick = item.onLongClick?.takeIf { interactive && isLoggedIn }?.let { longClick ->
                         { longClick() }
                     },
+                    // KMK --> swipe always reaches logout, even when the row reads as
+                    // logged out; without it there is no way to clear stale credentials.
+                    onSwipeLogout = if (interactive) item.logout else null,
                     // KMK <--
                 )
             }
