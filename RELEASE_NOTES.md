@@ -14,6 +14,7 @@ files moved. See .github/scripts/release_notes.py.
 
 ### Improve
 
+- **WebGPU continuous reader:** border cropping now works in the strip too — with crop-borders on, each page's borders are trimmed away and the page fills the screen edge to edge, like the paged reader already did
 - **WebGPU reader:** smoother long sessions — GPU objects are released properly as pages scroll by, tiles cache up to what your device's texture limit allows, and an idle reader no longer redraws frames for nothing
 - **WebGPU reader:** the webtoon pinch-to-zoom preference is now honored in the WebGPU reader too, and pinch can be turned off outright
 - **WebGPU reader:** more stable on device loss and surface resize — a lost GPU device is recovered without crashing, and rotating or resizing rebuilds the surface instead of showing a stale frame
