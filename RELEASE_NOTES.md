@@ -11,6 +11,7 @@ files moved. See .github/scripts/release_notes.py.
 ### New
 
 - **HDR reading in the WebGPU reader:** HDR-tagged pages (PQ/HLG and UltraHDR) now display with the display's full brightness on HDR-capable panels, and tone-map cleanly to SDR everywhere else
+- **Tracker manager:** swipe a tracker row left to log out of it, even when that tracker still shows as logged in — handy when a session has expired or stale credentials are lingering and tapping the row only reopens the login screen
 
 ### Improve
 
@@ -21,5 +22,7 @@ files moved. See .github/scripts/release_notes.py.
 
 ### Fix
 
+- **ComicK tracker:** rebuilt on Comick's official API — logging in opens your browser (grant "keep me signed in" and library write access), and your reading status, progress, and ratings sync properly again. Existing ComicK links need a one-time re-login and re-link to your Comick account
+- **Google Drive sync:** signing in no longer crashes or gets stuck when Google rejects the authorization code — failures now show a clear message in the app, and re-linking keeps your existing refresh token instead of silently breaking sync
 - **WebGPU long-strip reader:** very tall pages (long webtoon strips) no longer fail to build their preview levels — zoomed-out reading through them is sharp again instead of sampling the full-resolution image
 - **WebGPU long-strip reader:** scrolling down through a page no longer drops an unrelated page in below it, cutting the current page off, until you scroll far enough for it to correct itself
