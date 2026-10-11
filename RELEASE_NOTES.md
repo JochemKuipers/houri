@@ -10,7 +10,13 @@ files moved. See .github/scripts/release_notes.py.
 
 ### New
 
+- **HDR reading in the WebGPU reader:** HDR-tagged pages (PQ/HLG and UltraHDR) now display with the display's full brightness on HDR-capable panels, and tone-map cleanly to SDR everywhere else
+
 ### Improve
+
+- **WebGPU reader:** smoother long sessions — GPU objects are released properly as pages scroll by, tiles cache up to what your device's texture limit allows, and an idle reader no longer redraws frames for nothing
+- **WebGPU reader:** the webtoon pinch-to-zoom preference is now honored in the WebGPU reader too, and pinch can be turned off outright
+- **WebGPU reader:** more stable on device loss and surface resize — a lost GPU device is recovered without crashing, and rotating or resizing rebuilds the surface instead of showing a stale frame
 
 ### Fix
 
