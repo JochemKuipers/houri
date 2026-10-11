@@ -22,6 +22,9 @@ files moved. See .github/scripts/release_notes.py.
 
 ### Fix
 
+- **Library folders:** folder tiles now render as compact rows in list display mode instead of a single oversized card that swallowed most of the screen — the grid layout is unchanged
+- **Discord rich presence:** the presence art and download button are Houri's own — it was still showing Komikku's emoji, and its download button sent you to Komikku's page instead of ours. Every screen shares the app icon for now; distinct per-screen art comes back once Houri has its own assets in the Discord developer portal
+- **WebGPU page transitions:** turning a page no longer crashes when the GPU refuses to create a texture view — the transition cache falls back to drawing without cached art instead of failing the whole turn
 - **ComicK tracker:** rebuilt on Comick's official API — logging in opens your browser (grant "keep me signed in" and library write access), and your reading status, progress, and ratings sync properly again. Existing ComicK links need a one-time re-login and re-link to your Comick account
 - **Google Drive sync:** signing in no longer crashes or gets stuck when Google rejects the authorization code — failures now show a clear message in the app, and re-linking keeps your existing refresh token instead of silently breaking sync
 - **WebGPU long-strip reader:** very tall pages (long webtoon strips) no longer fail to build their preview levels — zoomed-out reading through them is sharp again instead of sampling the full-resolution image

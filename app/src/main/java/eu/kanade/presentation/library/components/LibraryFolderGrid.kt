@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -77,6 +79,7 @@ internal fun LibraryFolderGrid(
                 category = category,
                 items = items,
                 onClick = { onClickFolder(category) },
+                isListMode = displayMode == LibraryDisplayMode.List,
             )
         }
 
@@ -185,6 +188,7 @@ private fun LibraryFolderItem(
     category: Category,
     items: List<LibraryItem>,
     onClick: () -> Unit,
+    isListMode: Boolean = false,
 ) {
     // Mirrors MangaCompactGridItem structure so folder tiles match manga entry heights
     Box(
@@ -193,11 +197,130 @@ private fun LibraryFolderItem(
             .combinedClickable(onClick = onClick)
             .padding(4.dp),
     ) {
+        // KMK --> In List mode the grid is one column, so a Book-ratio tile would be as tall as
+        // the screen is wide (~1.5x the viewport width) - a page-swallowing card next to 56dp
+        // rows. A fixed-height strip matching MangaListItem instead, whose square preview sits
+        // left of the name.
+        if (isListMode) {
+            ListModeFolderTile(category = category, items = items)
+        } else {
+            GridFolderTile(category = category, items = items)
+        }
+        // KMK <--
+    }
+}
+
+@Composable
+private fun GridFolderTile(
+    category: Category,
+    items: List<LibraryItem>,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(MangaCover.Book.ratio)
+            .clip(MaterialTheme.shapes.large)
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        val previews = remember(items) { items.take(FOLDER_PREVIEW_COUNT) }
+        Column(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth(0.82f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            previews.chunked(FOLDER_PREVIEW_COLUMNS).forEach { rowItems ->
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    rowItems.forEach { item ->
+                        val manga = item.libraryManga.manga
+                        val coverData = remember(manga.id) {
+                            MangaCoverModel(
+                                mangaId = manga.id,
+                                sourceId = manga.source,
+                                isMangaFavorite = manga.favorite,
+                                ogUrl = manga.thumbnailUrl,
+                                lastModified = manga.coverLastModified,
+                            )
+                        }
+                        val censorPreviewEnabled by globalAppGraph.uiPreferences.censorLewdManga()
+                            .collectAsState()
+                        val previewShouldCensor = censorPreviewEnabled && manga.isLewd()
+                        MangaCover.Square(
+                            data = coverData,
+                            modifier = Modifier.weight(1f)
+                                .then(if (previewShouldCensor) Modifier.blur(12.dp) else Modifier),
+                            shape = MaterialTheme.shapes.extraSmall,
+                        )
+                    }
+                    repeat(FOLDER_PREVIEW_COLUMNS - rowItems.size) {
+                        Box(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
         Box(
             modifier = Modifier
+                .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .aspectRatio(MangaCover.Book.ratio)
-                .clip(MaterialTheme.shapes.large)
+                .fillMaxHeight(0.33f)
+                .background(
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        1f to Color(0xAA000000),
+                    ),
+                ),
+        )
+
+        Text(
+            text = items.size.toString(),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(6.dp)
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+                .padding(horizontal = 6.dp, vertical = 1.dp),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+
+        Text(
+            text = category.name,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(8.dp),
+            style = MaterialTheme.typography.titleSmall.copy(
+                color = Color.White,
+                shadow = Shadow(
+                    color = Color.Black,
+                    blurRadius = 4f,
+                ),
+            ),
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/**
+ * The folder's List-mode presentation: a fixed-height strip, square preview block on the left,
+ * name and item count beside it.
+ *
+ * Sized to sit in a row of [MangaListItem]s rather than to be a tile - the grid path above keeps
+ * its Book ratio, which only reads correctly when the grid has several columns.
+ */
+@Composable
+private fun ListModeFolderTile(category: Category, items: List<LibraryItem>) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(LIST_FOLDER_HEIGHT),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(LIST_FOLDER_HEIGHT)
+                .clip(MaterialTheme.shapes.small)
                 .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
             val previews = remember(items) { items.take(FOLDER_PREVIEW_COUNT) }
@@ -210,23 +333,15 @@ private fun LibraryFolderItem(
                 previews.chunked(FOLDER_PREVIEW_COLUMNS).forEach { rowItems ->
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                         rowItems.forEach { item ->
-                            val manga = item.libraryManga.manga
-                            val coverData = remember(manga.id) {
-                                MangaCoverModel(
-                                    mangaId = manga.id,
-                                    sourceId = manga.source,
-                                    isMangaFavorite = manga.favorite,
-                                    ogUrl = manga.thumbnailUrl,
-                                    lastModified = manga.coverLastModified,
-                                )
-                            }
-                            val censorPreviewEnabled by globalAppGraph.uiPreferences.censorLewdManga()
-                                .collectAsState()
-                            val previewShouldCensor = censorPreviewEnabled && manga.isLewd()
                             MangaCover.Square(
-                                data = coverData,
-                                modifier = Modifier.weight(1f)
-                                    .then(if (previewShouldCensor) Modifier.blur(12.dp) else Modifier),
+                                data = MangaCoverModel(
+                                    mangaId = item.libraryManga.manga.id,
+                                    sourceId = item.libraryManga.manga.source,
+                                    isMangaFavorite = item.libraryManga.manga.favorite,
+                                    ogUrl = item.libraryManga.manga.thumbnailUrl,
+                                    lastModified = item.libraryManga.manga.coverLastModified,
+                                ),
+                                modifier = Modifier.weight(1f),
                                 shape = MaterialTheme.shapes.extraSmall,
                             )
                         }
@@ -236,50 +351,28 @@ private fun LibraryFolderItem(
                     }
                 }
             }
-
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .fillMaxHeight(0.33f)
-                    .background(
-                        Brush.verticalGradient(
-                            0f to Color.Transparent,
-                            1f to Color(0xAA000000),
-                        ),
-                    ),
-            )
-
-            Text(
-                text = items.size.toString(),
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(6.dp)
-                    .clip(MaterialTheme.shapes.small)
-                    .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
-                    .padding(horizontal = 6.dp, vertical = 1.dp),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-
-            Text(
-                text = category.name,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(8.dp),
-                style = MaterialTheme.typography.titleSmall.copy(
-                    color = Color.White,
-                    shadow = Shadow(
-                        color = Color.Black,
-                        blurRadius = 4f,
-                    ),
-                ),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
+
+        Text(
+            text = category.name,
+            modifier = Modifier
+                .weight(1f)
+                .padding(horizontal = 12.dp),
+            style = MaterialTheme.typography.titleMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        Text(
+            text = items.size.toString(),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
+
+// val, not const val: .dp is a computed property, so it is not a compile-time constant.
+private val LIST_FOLDER_HEIGHT = 56.dp
 
 private const val FOLDER_PREVIEW_COLUMNS = 2
 private const val FOLDER_PREVIEW_COUNT = FOLDER_PREVIEW_COLUMNS * 2

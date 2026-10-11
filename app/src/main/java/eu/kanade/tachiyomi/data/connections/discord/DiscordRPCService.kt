@@ -275,6 +275,21 @@ class DiscordRPCService : Service() {
             }
 
         private const val MP_PREFIX = "mp:"
+
+        /**
+         * Discord asset reference for a presence image.
+         *
+         * An mp: path is Discord's media proxy and only resolves for paths on their own CDN
+         * (emojis/<snowflake>.webp). An already-proxied value - what the external-assets API
+         * hands back - has to be left alone. Anything else is an external URL, which Discord
+         * fetches directly and which must NOT carry the prefix: mp:https://... is not a path on
+         * their CDN and renders as a broken asset.
+         */
+        private fun toRpcImage(imageUrl: String): String = when {
+            imageUrl.startsWith(MP_PREFIX) -> imageUrl
+            imageUrl.startsWith("http") -> imageUrl
+            else -> "$MP_PREFIX$imageUrl"
+        }
         private const val EXTERNAL_PREFIX = "external/"
         private const val ID_MARKER = "\"id\": \""
         private val json = Json {
@@ -396,8 +411,8 @@ class DiscordRPCService : Service() {
                     type = ActivityType.WATCHING.value,
                     timestamps = timestamps,
                     assets = Activity.Assets(
-                        largeImage = "$MP_PREFIX$imageUrl",
-                        smallImage = "$MP_PREFIX${DiscordScreen.APP.imageUrl}",
+                        largeImage = toRpcImage(imageUrl),
+                        smallImage = toRpcImage(DiscordScreen.APP.imageUrl),
                         largeText = buildString {
                             append(
                                 context.getString(

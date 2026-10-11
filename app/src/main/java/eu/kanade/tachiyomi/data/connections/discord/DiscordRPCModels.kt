@@ -8,7 +8,6 @@ package eu.kanade.tachiyomi.data.connections.discord
 
 import androidx.annotation.StringRes
 import eu.kanade.tachiyomi.R
-import eu.kanade.tachiyomi.util.system.isPreviewBuildType
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -17,10 +16,12 @@ import kotlinx.serialization.json.JsonElement
 const val RICH_PRESENCE_TAG = "discord_rpc"
 
 // Constant for application id
-internal const val RICH_PRESENCE_APPLICATION_ID = "1424627741256585271"
+internal const val RICH_PRESENCE_APPLICATION_ID = "1558950409090113596"
 
 val DOWNLOAD_BUTTON_LABEL_RES = R.string.discord_download_button
-const val DOWNLOAD_BUTTON_URL = "https://komikku-app.github.io/download/"
+// Houri's own releases. This was Komikku's download page, so a presence button reading
+// "Read on Houri" sent users to Komikku's APK.
+const val DOWNLOAD_BUTTON_URL = "https://github.com/PineappleTwilight/komikku-pineapple/releases/latest"
 const val DISCORD_BUTTON_LABEL = "Discord"
 const val DISCORD_BUTTON_URL = "https://discord.gg/JcQZYvCbYH"
 
@@ -185,32 +186,40 @@ data class ReaderData(
     // KMK <--
 )
 
+// Rich Presence art.
+//
+// These were Komikku's server emoji, served as mp:emojis/<snowflake>.webp. A snowflake is
+// scoped to the server that uploaded it, so those ids belong to Komikku's Discord and render
+// Komikku's branding in a Houri presence - and are useless to us, because we cannot mint new
+// ones without an upload to our own server.
+//
+// Discord's IPC accepts an externally-reachable URL for large_image/small_image, and the
+// repository carries Houri's own icon, so that is what goes here instead. Raw GitHub serves it
+// at a stable path and needs no token.
+//
+// 192x192 rather than the 1024 Discord prefers: it is the icon the repo already publishes, and
+// the presence slot renders far smaller than that anyway.
+//
+// Every screen shares it until we upload per-screen art of our own; screenArt() is where that
+// per-screen override slots back in.
+private const val HOURI_ICON_URL =
+    "https://raw.githubusercontent.com/PineappleTwilight/komikku-pineapple/master/.github/readme-images/app-icon.png"
+
+private fun screenArt(perScreenUrl: String?) = perScreenUrl ?: HOURI_ICON_URL
+
 // Enum class for standard Rich Presence in-app screens
 enum class DiscordScreen(
     @StringRes val text: Int,
     @StringRes val details: Int,
-    val imageUrl: String,
+    val imageUrl: String = screenArt(null),
 ) {
-    APP(R.string.app_name, R.string.discord_status_using, KOMIKKU_IMAGE),
-    LIBRARY(R.string.label_library, R.string.discord_status_browsing, LIBRARY_IMAGE_URL),
-    UPDATES(R.string.label_recent_updates, R.string.discord_status_scrolling, UPDATES_IMAGE_URL),
-    HISTORY(R.string.label_recent_manga, R.string.discord_status_scrolling, HISTORY_IMAGE_URL),
-    BROWSE(R.string.label_sources, R.string.discord_status_browsing, BROWSE_IMAGE_URL),
-    MORE(R.string.label_settings, R.string.discord_status_messing, MORE_IMAGE_URL),
-    WEBVIEW(R.string.action_web_view, R.string.discord_status_browsing, WEBVIEW_IMAGE_URL),
-    MANGA(R.string.manga, R.string.reading, MANGA_IMAGE_URL),
+    APP(R.string.app_name, R.string.discord_status_using),
+    LIBRARY(R.string.label_library, R.string.discord_status_browsing),
+    UPDATES(R.string.label_recent_updates, R.string.discord_status_scrolling),
+    HISTORY(R.string.label_recent_manga, R.string.discord_status_scrolling),
+    BROWSE(R.string.label_sources, R.string.discord_status_browsing),
+    MORE(R.string.label_settings, R.string.discord_status_messing),
+    WEBVIEW(R.string.action_web_view, R.string.discord_status_browsing),
+    MANGA(R.string.manga, R.string.reading),
 }
-
-// Constants for standard Rich Presence image urls
-private const val KOMIKKU_IMAGE_URL = "emojis/1365538288894738532.webp?quality=lossless"
-private const val KOMIKKU_PREVIEW_IMAGE_URL = "emojis/1365538288894738532.webp?quality=lossless"
-
-private val KOMIKKU_IMAGE = if (isPreviewBuildType) KOMIKKU_PREVIEW_IMAGE_URL else KOMIKKU_IMAGE_URL
-private const val LIBRARY_IMAGE_URL = "emojis/1365262809050644591.webp?quality=lossless"
-private const val UPDATES_IMAGE_URL = "emojis/1365261957883625492.webp?quality=lossless"
-private const val HISTORY_IMAGE_URL = "emojis/1365262076787949598.webp?quality=lossless"
-private const val BROWSE_IMAGE_URL = "emojis/1365263374992146576.webp?quality=lossless"
-private const val MORE_IMAGE_URL = "emojis/1365261438276599849.webp?quality=lossless"
-private const val WEBVIEW_IMAGE_URL = "emojis/1365262268811579443.webp?quality=lossless"
-private const val MANGA_IMAGE_URL = "emojis/1365263962622529576.webp?quality=lossless"
 // <-- AM (DISCORD)
