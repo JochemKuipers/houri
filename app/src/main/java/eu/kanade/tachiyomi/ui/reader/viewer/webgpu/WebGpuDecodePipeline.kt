@@ -73,6 +73,7 @@ internal fun WebGpuViewer.startPageLoad(page: ViewerReaderPage) {
         if (!pageInCache(page) || isDestroyed) return
         if (page.state != PageState.IDLE && page.state != PageState.QUEUED && page.state != PageState.DECODING) return
         page.state = PageState.LOADING
+        loadingSince[pageKey(page)] = System.currentTimeMillis()
     }
 
     if (page.page.status == Page.State.Queue) {
@@ -155,6 +156,7 @@ internal fun WebGpuViewer.startPageLoad(page: ViewerReaderPage) {
                 if (page.state == PageState.LOADING) {
                     page.state = PageState.IDLE
                 }
+                loadingSince.remove(pageKey(page))
                 if (isDestroyed || !pageInCache(page)) return@synchronized
                 when (val s = page.page.status) {
                     Page.State.Ready -> {
@@ -230,11 +232,27 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
             cached
         }
         trace?.complete("no-stream")
+        // First miss: ask the loader to re-resolve, which is right when the bytes are fine and
+        // only the page went missing. A *repeat* means the re-resolve already ran and changed
+        // nothing - which is exactly what `retryPage` does when `chapterCache.isImageInCache` is
+        // true and the download is skipped. The cache entry is then the defect, and only evicting
+        // it produces fresh bytes, so escalate to the requery that evicts first. Without this the
+        // page settles into a LOADING state the sweep used to be blind to and never recovers.
+        // lastDecodeOutcome is still the *previous* attempt here: this one's is recorded by the
+        // worker after this function returns.
+        val repeat = lastDecodeOutcome(page) == "no-stream"
         logcat(LogPriority.WARN) {
             "No stream ch=${page.page.chapter.chapter.id}/i=${page.page.index} " +
-                "segment=${page.page.splitSegment} - resolving the page again through its loader"
+                "segment=${page.page.splitSegment} repeat=$repeat - " +
+                if (repeat) "evicting the cached bytes and re-fetching" else "resolving the page again through its loader"
         }
-        if (stillWanted) askLoaderToResolvePage(page)
+        if (stillWanted) {
+            if (repeat) {
+                requerySuspectPage(page, "no-stream after a loader re-resolve")
+            } else {
+                askLoaderToResolvePage(page)
+            }
+        }
         return
     }
 

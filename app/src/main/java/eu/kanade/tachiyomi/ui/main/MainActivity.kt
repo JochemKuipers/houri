@@ -61,6 +61,7 @@ import eu.kanade.presentation.browse.ExtensionErrorDisableSystemDialog
 import eu.kanade.presentation.browse.ExtensionErrorReportDialog
 import eu.kanade.presentation.browse.ExtensionErrorVersionSuppressDialog
 import eu.kanade.presentation.components.AppStateBanners
+import eu.kanade.presentation.components.CloudflareBypassBannerBackgroundColor
 import eu.kanade.presentation.components.DownloadedOnlyBannerBackgroundColor
 import eu.kanade.presentation.components.IncognitoModeBannerBackgroundColor
 import eu.kanade.presentation.components.IndexingBannerBackgroundColor
@@ -89,6 +90,7 @@ import eu.kanade.tachiyomi.data.updater.RELEASE_URL
 import eu.kanade.tachiyomi.extension.ExtensionErrorReport
 import eu.kanade.tachiyomi.extension.api.ExtensionApi
 import eu.kanade.tachiyomi.extension.copyExtensionErrorToClipboard
+import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassStatus
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
 import eu.kanade.tachiyomi.ui.browse.source.feed.SourceFeedScreen
@@ -114,6 +116,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.launchIn
@@ -138,6 +141,7 @@ import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.util.collectAsState
 import java.util.LinkedList
+import kotlin.time.Duration.Companion.milliseconds
 
 class MainActivity : BaseActivity() {
 
@@ -242,6 +246,14 @@ class MainActivity : BaseActivity() {
             val updatingProgress by libraryUpdateStatus.progress.collectAsState()
             // KMK <--
 
+            // KMK --> Ported from jobobby04/TachiyomiSY#1124. Debounced because the status flow
+            // ticks twice per bypass (entering and leaving), which would otherwise flash it.
+            // Declared here, not next to the Scaffold, because statusBarBackgroundColor below reads it.
+            val cloudflareBypass by remember {
+                CloudflareBypassStatus.active.debounce(500.milliseconds)
+            }.collectAsState(initial = emptyList())
+            // KMK <--
+
             val isSystemInDarkTheme = isSystemInDarkTheme()
             val statusBarBackgroundColor = when {
                 // KMK -->
@@ -250,6 +262,11 @@ class MainActivity : BaseActivity() {
                 restoring -> RestoringBannerBackgroundColor
                 // KMK <--
                 indexing -> IndexingBannerBackgroundColor
+                // KMK --> Otherwise the banner strip renders under a differently-coloured status bar
+                // and reads as detached from what it is reporting. Placed after the updating/syncing
+                // states so those, which block the UI, keep priority over a solve in progress.
+                // KMK <--
+                cloudflareBypass.isNotEmpty() -> CloudflareBypassBannerBackgroundColor
                 downloadOnly -> DownloadedOnlyBannerBackgroundColor
                 incognito -> IncognitoModeBannerBackgroundColor
                 else -> MaterialTheme.colorScheme.surface
@@ -318,6 +335,9 @@ class MainActivity : BaseActivity() {
                             progress = updatingProgress.takeIf { updating }
                                 ?: syncingProgress.takeIf { syncing }
                                 ?: restoringProgress.takeIf { restoring },
+                            // KMK <--
+                            // KMK -->
+                            cloudflareBypass = cloudflareBypass.firstOrNull(),
                             // KMK <--
                             modifier = Modifier.windowInsetsPadding(scaffoldInsets),
                         )

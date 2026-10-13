@@ -128,7 +128,18 @@ class ViewerReaderPage(
     private val viewer: WebGpuViewer,
     val page: ReaderPage,
 ) : ViewerPage() {
-    /** Cached spread ImagePage when this page is the anchor of a dual-page spread */
+    /**
+     * Cached spread ImagePage when this page is the anchor of a dual-page spread.
+     *
+     * Volatile, like every other mutable field here, and for the same reason: the render thread
+     * builds and retires this in [buildSpreadPage], while `releasePageResources` clears it from
+     * whichever thread happened to drop the shell - the device-loss handler, the stuck-page sweep
+     * and `onTrimMemory` are all main-thread, while the render thread is not. Without the fence
+     * the render thread reads back a spread whose textures were already released (a dead grid,
+     * drawn as garbage), and two threads can each install a spread with nothing left to clean up
+     * the one that lost.
+     */
+    @Volatile
     var spreadPage: ImagePage.ImageSpread? = null
 
     private val prevLink = NeighborLink()

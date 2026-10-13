@@ -23,12 +23,15 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.runInterruptible
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Semaphore
+import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import mihon.core.concurrency.AppDispatchersHolder
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.TallPageSplitter
 import tachiyomi.core.common.util.system.logcat
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.PriorityBlockingQueue
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
@@ -72,6 +75,23 @@ internal class HttpPageLoader(
      * check and the insert have to happen together.
      */
     private val splitLock = Any()
+
+    /**
+     * Serialises the download half of [internalLoadPage] per source image URL.
+     *
+     * Keyed on the bare source URL, not the page, so a split parent and its segments - which share
+     * one image - also collapse onto a single fetch. Bounded by the chapter's page count and
+     * dropped with the loader; the loader serves one chapter and is recreated per chapter.
+     *
+     * A [Semaphore] rather than a monitor: the download is a suspending call, and
+     * [kotlinx.coroutines] forbids a suspension point inside `synchronized` - a monitor cannot be
+     * held across one, because the coroutine may resume on a different thread. Acquiring *before*
+     * the `try` is deliberate: a cancelled `acquire` must not release a permit it never took.
+     */
+    private val downloadLocks = ConcurrentHashMap<String, Semaphore>()
+
+    private fun downloadLockFor(imageUrl: String): Semaphore =
+        downloadLocks.getOrPut(imageUrl) { Semaphore(1) }
 
     private val preloadSize = /* SY --> */ readerPreferences.preloadSize().get() // SY <--
 
@@ -279,14 +299,31 @@ internal class HttpPageLoader(
             // which TallPageSplitter reports as "fits as-is" and the page then drew as the whole
             // strip - or as nothing, since the strip is the very image the decoder refuses.
             if (!chapterCache.isImageInCache(imageUrl)) {
-                page.status = Page.State.DownloadImage
-                // Repointing at the bare image URL is a repair, for a page list cached by a build
-                // that stored segment keys as if they were source URLs. A segment page must keep
-                // its own: the suffix is the only record of which slice it is, and dropping it
-                // sends every segment of the strip to segment 0.
-                if (!page.splitSegment) page.imageUrl = imageUrl
-                val imageResponse = source.getImage(page, dataSaver)
-                chapterCache.putImageToCache(imageUrl, imageResponse)
+                // Serialised per source image, because the queue admits the same page twice by
+                // construction and readerThreads workers drain it concurrently. preloadNextPages
+                // runs inside every loadPage, so page N offers N+1..N+k and page N+1 offers
+                // N+2..N+1+k - every page from the third onward is queued at least twice, and
+                // two workers both reading "not in cache" both fetch it. That doubles a chapter's
+                // traffic on its own, and on a rate-limited or fragile source it is the amplifier
+                // behind the retry paths offering yet more duplicates. Re-checking inside the lock
+                // turns the loser into the no-op the duplicate was for: it falls through to the
+                // stream assignment it was always going to do.
+                val lock = downloadLockFor(imageUrl)
+                lock.acquire()
+                try {
+                    if (!chapterCache.isImageInCache(imageUrl)) {
+                        page.status = Page.State.DownloadImage
+                        // Repointing at the bare image URL is a repair, for a page list cached by a build
+                        // that stored segment keys as if they were source URLs. A segment page must keep
+                        // its own: the suffix is the only record of which slice it is, and dropping it
+                        // sends every segment of the strip to segment 0.
+                        if (!page.splitSegment) page.imageUrl = imageUrl
+                        val imageResponse = source.getImage(page, dataSaver)
+                        chapterCache.putImageToCache(imageUrl, imageResponse)
+                    }
+                } finally {
+                    lock.release()
+                }
             }
 
             if (page.splitSegment) {
@@ -416,7 +453,25 @@ internal class HttpPageLoader(
             // Segment numbering is the real one (0..k-1), matching both segmentKey and the index
             // loadSegment recovers from the key, so a segment page resolves to the same segment
             // whichever path re-reads it.
-            val segments = keys.mapIndexed { segmentNumber, key ->
+            //
+            // Ordered by the index in the key rather than by the order they arrived, and required
+            // to be a gapless 0..k-1 run. [TallPageSplitter.split] now fails rather than skipping a
+            // segment it could not decode, so this should hold - but the page index and the index
+            // inside the key are two different identifiers that silently diverge the moment one
+            // segment is missing, and a strip rendered from them is wrong in a way no viewer can
+            // detect. Falling back to the whole image is the recoverable answer.
+            val orderedKeys = keys.sortedBy { segmentNumberOf(it) }
+            val segmentNumbers = orderedKeys.map { segmentNumberOf(it) }
+            // Against a List, not against indices: IntRange is an IntProgression, not a List, so
+            // comparing the two directly is never equal and this would reject every split.
+            if (segmentNumbers != orderedKeys.indices.toList()) {
+                logcat(LogPriority.ERROR) {
+                    "Split of $imageUrl produced non-contiguous segments " +
+                        "$segmentNumbers - keeping the whole image"
+                }
+                return null
+            }
+            val segments = orderedKeys.mapIndexed { segmentNumber, key ->
                 ReaderPage(index = segmentIndex(page, segmentNumber), url = page.url, imageUrl = key).apply {
                     chapter = page.chapter
                     splitSegment = true
@@ -444,6 +499,15 @@ internal class HttpPageLoader(
         }
 
     private fun segmentKey(imageUrl: String, index: Int) = "$imageUrl$SEGMENT_KEY_SUFFIX$index"
+
+    /**
+     * The segment index a key names, or -1 when it names none.
+     *
+     * -1 rather than 0 so a key that is not a segment fails a contiguity check instead of
+     * quietly colliding with segment 0.
+     */
+    private fun segmentNumberOf(key: String): Int =
+        key.substringAfter(SEGMENT_KEY_SUFFIX, "").toIntOrNull() ?: -1
 
     // EXH -->
     fun boostPage(page: ReaderPage) {

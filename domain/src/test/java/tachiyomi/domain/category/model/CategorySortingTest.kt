@@ -99,4 +99,29 @@ class CategorySortingTest {
         CategorySortOrder.fromStored(99) shouldBe CategorySortOrder.MANUAL
         CategorySortOrder.fromStored(CategorySortOrder.NAME_DESC.ordinal) shouldBe CategorySortOrder.NAME_DESC
     }
+
+    @Test
+    fun `appending the count based modes did not renumber the stored ones`() {
+        CategorySortOrder.values().toList() shouldBe listOf(
+            CategorySortOrder.MANUAL,
+            CategorySortOrder.NAME_ASC,
+            CategorySortOrder.NAME_DESC,
+            CategorySortOrder.DATE_ADDED_NEWEST,
+            CategorySortOrder.DATE_ADDED_OLDEST,
+            CategorySortOrder.DATE_MODIFIED_NEWEST,
+            CategorySortOrder.DATE_MODIFIED_OLDEST,
+            CategorySortOrder.MOST_ITEMS,
+            CategorySortOrder.LEAST_ITEMS,
+        )
+    }
+
+    @Test
+    fun `count based modes keep the stored order here since a category list carries no counts`() {
+        val categories = listOf(category(1, "Beta", order = 2), category(2, "Alpha", order = 1))
+
+        // The library reorders the grouped tabs itself, where the counts exist. Falling through to
+        // the date branch instead would sort by a date the reader never asked for.
+        names(categories.sortedForDisplay(CategorySortOrder.MOST_ITEMS)) shouldBe listOf("Alpha", "Beta")
+        names(categories.sortedForDisplay(CategorySortOrder.LEAST_ITEMS)) shouldBe listOf("Alpha", "Beta")
+    }
 }

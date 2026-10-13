@@ -73,6 +73,22 @@ class CategoriesRestorer(
                         categoriesQueries.selectLastInsertedRowId()
                     }
                     siblings.add(trimmed.lowercase())
+                    // KMK --> The insert statement leaves track_status NULL, and it cannot be passed
+                    // through because coalesce-style updates read NULL as "leave alone", so a
+                    // restored binding is applied with its own statement.
+                    // Read through a local because these are `var` properties, so they cannot be
+                    // smart-cast after the null check.
+                    it.trackStatus?.let { trackStatus ->
+                        handler.await {
+                            categoriesQueries.updateTrackStatus(trackStatus.toLong(), newId)
+                        }
+                    }
+                    it.updateInterval?.let { updateInterval ->
+                        handler.await {
+                            categoriesQueries.updateUpdateInterval(updateInterval.toLong(), newId)
+                        }
+                    }
+                    // KMK <--
                     if (it.id != 0L) restoredIdsByBackupId[it.id] = newId
                     if (it.parentId != 0L) pendingParents[newId] = it.parentId
                     it.toCategory(newId).copy(order = orderForParent, parentId = 0L, name = trimmed)

@@ -36,6 +36,15 @@ private val spreadHeightRetries: MutableMap<ViewerReaderPage, Job> =
 private val spreadHeightAttempts: MutableMap<ViewerReaderPage, Int> =
     Collections.synchronizedMap(WeakHashMap())
 
+/**
+ * Bounded attempts per anchor so an undecodable spread can never retry forever.
+ *
+ * Counted when a retry actually **fires**, not when one is requested: `maybeScheduleSpreadHeightMatch`
+ * is reached from `buildSpreadPage`, which `fetchPage(0)` calls once per rendered frame, so charging
+ * every request spent the whole budget in about a third of a second at 60fps - and a spread whose
+ * partner simply took longer than that to decode was abandoned permanently instead of matching.
+ * One firing per coalesced job makes the budget wall-clock again (~150ms apart).
+ */
 internal const val MAX_SPREAD_HEIGHT_ATTEMPTS = 20
 
 internal fun WebGpuViewer.retrySpreadHeightMatchSoon(
@@ -45,14 +54,12 @@ internal fun WebGpuViewer.retrySpreadHeightMatchSoon(
     delayMs: Long = 150,
 ) {
     if (isDestroyed || !config.matchDoublePageHeights) return
-    // Read-increment-write in one atomic block: two separate synchronized sections let
-    // a concurrent caller observe a stale count and under/over-count attempts.
-    val attempts = synchronized(spreadHeightAttempts) {
-        val next = (spreadHeightAttempts[anchorPage] ?: 0) + 1
-        spreadHeightAttempts[anchorPage] = next
-        next
+    // Out of budget: stop scheduling at all. Checking here as well as in the job is what keeps a
+    // spent anchor from arming a fresh 150ms delay on every frame for the rest of its residency.
+    val spent = synchronized(spreadHeightAttempts) {
+        (spreadHeightAttempts[anchorPage] ?: 0) >= MAX_SPREAD_HEIGHT_ATTEMPTS
     }
-    if (attempts > MAX_SPREAD_HEIGHT_ATTEMPTS) {
+    if (spent) {
         cancelSpreadHeightRetry(anchorPage)
         return
     }
@@ -63,7 +70,15 @@ internal fun WebGpuViewer.retrySpreadHeightMatchSoon(
         } catch (_: CancellationException) {
             return@launch
         }
+        // Read-increment-write in one atomic block: two separate synchronized sections let
+        // a concurrent caller observe a stale count and under/over-count attempts.
+        val attempts = synchronized(spreadHeightAttempts) {
+            val next = (spreadHeightAttempts[anchorPage] ?: 0) + 1
+            spreadHeightAttempts[anchorPage] = next
+            next
+        }
         synchronized(spreadHeightRetries) { spreadHeightRetries.remove(anchorPage) }
+        if (attempts > MAX_SPREAD_HEIGHT_ATTEMPTS) return@launch
         if (viewer.isDestroyed || !viewer.config.matchDoublePageHeights) return@launch
         // Evicted anchor: terminal noop. Retrying a dead spread was the persistent storm.
         val anchored = synchronized(viewer.lock) { viewer.pageInCache(anchorPage) }
@@ -168,6 +183,13 @@ internal fun WebGpuViewer.maybeScheduleSpreadHeightMatch(
     // claiming the page, so a torn read here can at worst queue one redundant attempt that is then
     // dropped there.
     if (!shouldAttemptSpreadRescale(shorterPage.spreadBytes != null, shorterPage.rescaleInFlight, plan)) return
+    // Refill the anchor's budget, because it is about to do real work rather than wait. The counter
+    // is keyed on the anchor while the rescale and its reset are keyed on the shorter side, so
+    // without this a spread whose partner was the shorter one kept its spent count forever and the
+    // next mismatch (a rotation, a re-decode) got no retries at all. Placed here rather than on
+    // `both images decoded`, which runs every frame and would unbind the budget for the branches
+    // above that are exactly the ones meant to be bounded.
+    resetSpreadHeightRetry(anchorPage)
     scheduleSpreadHeightMatch(shorterPage, plan.targetHeight)
 }
 

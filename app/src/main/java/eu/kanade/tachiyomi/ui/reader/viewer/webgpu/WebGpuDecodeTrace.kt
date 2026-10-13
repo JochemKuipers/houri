@@ -118,12 +118,14 @@ internal class DecodeTrace(
      * repeating line rather than 3600 of them, while a page that recovers between two ticks says
      * nothing at all.
      *
-     * [queueSummary] is passed in rather than read here: what is behind this page in the queue lives
-     * on the viewer, and a decode worker that is wedged in native code cannot be asked for it.
+     * [queueSummary] is passed in as a supplier rather than a string because the watchdog ticks
+     * every second and almost every tick is a page that is *not* stalled. Building the summary
+     * eagerly meant taking the viewer's global lock and stringifying every queued page sixty times
+     * a minute to throw it away; the only reader is the log line below.
      *
      * @return true when a stall line was emitted.
      */
-    fun reportStallIfDue(nowMs: Long, queueSummary: String): Boolean {
+    fun reportStallIfDue(nowMs: Long, queueSummary: () -> String): Boolean {
         if (finished) return false
         val heldFor = nowMs - stageSinceMs
         if (heldFor < DECODE_STALL_WARN_MS) return false
@@ -132,7 +134,7 @@ internal class DecodeTrace(
         lastReportedAtMs = nowMs
         logcat(LogPriority.WARN) {
             "DecodeTrace STALL ch=$chapterId/i=$pageIndex stage=$stage stuck=${heldFor}ms total=" +
-                "${nowMs - startedAtMs}ms ${describe()} queued=$queueSummary"
+                "${nowMs - startedAtMs}ms ${describe()} queued=${queueSummary()}"
         }
         return true
     }
@@ -178,8 +180,9 @@ internal fun WebGpuViewer.startDecodeStallWatchdog() {
         while (!isDestroyed) {
             try {
                 delay(DECODE_WATCHDOG_TICK_MS)
-                val summary = decodeQueueSummary()
-                activeDecode?.reportStallIfDue(System.currentTimeMillis(), summary)
+                // A lambda, not a value: reportStallIfDue only invokes it on a tick that actually
+                // reports, so a healthy decode never pays for the lock or the string building.
+                activeDecode?.reportStallIfDue(System.currentTimeMillis(), ::decodeQueueSummary)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {

@@ -60,6 +60,7 @@ import eu.kanade.tachiyomi.network.PREF_DOH_NJALLA
 import eu.kanade.tachiyomi.network.PREF_DOH_QUAD101
 import eu.kanade.tachiyomi.network.PREF_DOH_QUAD9
 import eu.kanade.tachiyomi.network.PREF_DOH_SHECAN
+import eu.kanade.tachiyomi.network.interceptor.FlareSolverr
 import eu.kanade.tachiyomi.source.AndroidSourceManager
 import eu.kanade.tachiyomi.ui.more.OnboardingScreen
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
@@ -79,11 +80,14 @@ import exh.util.toAnnotatedString
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import okhttp3.Headers
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import tachiyomi.core.common.i18n.pluralStringResource
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.launchNonCancellable
@@ -104,6 +108,7 @@ import tachiyomi.presentation.core.components.LabeledCheckbox
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import java.io.File
+import tachiyomi.core.common.preference.Preference as BasePreference
 
 object SettingsAdvancedScreen : SearchableSettings {
     @Suppress("unused")
@@ -288,6 +293,30 @@ object SettingsAdvancedScreen : SearchableSettings {
         )
     }
 
+    // KMK --> FlareSolverr, ported from jobobby04/TachiyomiSY#1124.
+    private suspend fun testFlareSolverrAndUpdateUserAgent(
+        userAgentPref: BasePreference<String>,
+        context: android.content.Context,
+    ) {
+        try {
+            val response = withContext(Dispatchers.IO) {
+                globalAppGraph.flareSolverr.request(url = "https://www.google.com/")
+            }
+            val solution = response.solution
+            if (response.status == "ok" && solution != null) {
+                userAgentPref.set(solution.userAgent)
+                context.toast(KMR.strings.flare_solver_user_agent_update_success)
+            } else {
+                logcat(LogPriority.ERROR, tag = "FlareSolverr") { "FlareSolverr test failed: ${response.message}" }
+                context.toast(KMR.strings.flare_solver_update_user_agent_failed)
+            }
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e, tag = "FlareSolverr") { "Failed to contact FlareSolverr" }
+            context.toast(KMR.strings.flare_solver_error)
+        }
+    }
+    // KMK <--
+
     @Composable
     private fun getNetworkGroup(
         networkPreferences: NetworkPreferences,
@@ -297,6 +326,13 @@ object SettingsAdvancedScreen : SearchableSettings {
 
         val userAgentPref = networkPreferences.defaultUserAgent()
         val userAgent by userAgentPref.collectAsState()
+
+        // KMK --> FlareSolverr, ported from jobobby04/TachiyomiSY#1124.
+        val scope = rememberCoroutineScope()
+        val flareSolverrUrlPref = networkPreferences.flareSolverrUrl
+        val enableFlareSolverrPref = networkPreferences.enableFlareSolverr
+        val enableFlareSolverr by enableFlareSolverrPref.collectAsState()
+        // KMK <--
 
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.label_network),
@@ -376,6 +412,30 @@ object SettingsAdvancedScreen : SearchableSettings {
                         context.toast(MR.strings.requires_app_restart)
                     },
                 ),
+                // KMK -->
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = enableFlareSolverrPref,
+                    title = stringResource(KMR.strings.pref_enable_flare_solverr),
+                    subtitle = stringResource(KMR.strings.pref_enable_flare_solverr_summary),
+                ),
+                Preference.PreferenceItem.EditTextPreference(
+                    preference = flareSolverrUrlPref,
+                    title = stringResource(KMR.strings.pref_flare_solverr_url),
+                    enabled = enableFlareSolverr,
+                    subtitle = stringResource(KMR.strings.pref_flare_solverr_url_summary),
+                    onValueChanged = { it.trim().toHttpUrlOrNull() != null },
+                ),
+                Preference.PreferenceItem.TextPreference(
+                    title = stringResource(KMR.strings.pref_test_flare_solverr_and_update_user_agent),
+                    enabled = enableFlareSolverr,
+                    subtitle = stringResource(KMR.strings.pref_test_flare_solverr_and_update_user_agent_summary),
+                    onClick = {
+                        scope.launch {
+                            testFlareSolverrAndUpdateUserAgent(userAgentPref, context)
+                        }
+                    },
+                ),
+                // KMK <--
             ),
         )
     }

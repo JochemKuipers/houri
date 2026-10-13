@@ -6,6 +6,7 @@ import eu.kanade.domain.track.model.toDbTrack
 import eu.kanade.domain.track.model.toDomainTrack
 import eu.kanade.domain.track.service.DelayedTrackingUpdateJob
 import eu.kanade.domain.track.store.DelayedTrackingStore
+import eu.kanade.tachiyomi.data.track.TrackStatus
 import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.data.track.mdlist.MdList
 import exh.md.utils.FollowStatus
@@ -14,6 +15,7 @@ import kotlinx.coroutines.awaitAll
 import logcat.LogPriority
 import tachiyomi.core.common.util.lang.withNonCancellableContext
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.domain.category.interactor.SyncCategoriesWithTrackStatus
 import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.domain.track.interactor.InsertTrack
 import tachiyomi.domain.track.service.TrackerProgressSync
@@ -24,6 +26,9 @@ class TrackChapter(
     private val trackerManager: TrackerManager,
     private val insertTrack: InsertTrack,
     private val delayedTrackingStore: DelayedTrackingStore,
+    // KMK -->
+    private val syncCategoriesWithTrackStatus: SyncCategoriesWithTrackStatus,
+    // KMK <--
 ) {
 
     /**
@@ -104,7 +109,29 @@ class TrackChapter(
                                     withCompletion
                                 }
                             // KMK <--
-                            service.update(withStartDate.toDbTrack(), true)
+                            // KMK --> The remote service is what promotes the track to Reading/Completed on a chapter read;
+                            // this interactor persists only the local completion decision, so READING
+                            // never lands in the local row. Without this the status categories wait
+                            // for a RefreshTracks run, which is manual-only - and never fire at all
+                            // for the completion case, because by then the local status already
+                            // equals the remote one and RefreshTracks' "did not change" guard skips it.
+                            val remoteUpdated = service.update(withStartDate.toDbTrack(), true)
+                            val effectiveStatus = if (withStartDate.status != refreshed.status) {
+                                withStartDate.status
+                            } else {
+                                remoteUpdated.status
+                            }
+                            if (effectiveStatus != track.status) {
+                                runCatching {
+                                    val parsed = TrackStatus.parseTrackerStatus(
+                                        trackerManager,
+                                        track.trackerId,
+                                        effectiveStatus,
+                                    )
+                                    syncCategoriesWithTrackStatus.await(track.mangaId, parsed?.int)
+                                }
+                            }
+                            // KMK <--
                             insertTrack.await(withStartDate)
                             delayedTrackingStore.remove(track.id)
                         } catch (e: Exception) {

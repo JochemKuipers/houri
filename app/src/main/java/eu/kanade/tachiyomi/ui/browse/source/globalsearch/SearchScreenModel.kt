@@ -59,6 +59,10 @@ abstract class SearchScreenModel(
     private var lastSourceFilter: SourceFilter? = null
     // KMK -->
     private var lastSourceCategory: String? = null
+
+    // KMK -->
+    private var lastExactAuthorMatch: Boolean? = null
+    // KMK <--
     // KMK <--
 
     protected var extensionFilter: String? = null
@@ -86,6 +90,11 @@ abstract class SearchScreenModel(
         screenModelScope.launch {
             preferences.globalSearchSourceCategory().changes().collectLatest { category ->
                 mutableState.update { it.copy(sourceCategory = category) }
+            }
+        }
+        screenModelScope.launch {
+            preferences.globalSearchExactAuthorMatch().changes().collectLatest { exact ->
+                mutableState.update { it.copy(exactAuthorMatch = exact) }
             }
         }
         // KMK <--
@@ -164,21 +173,40 @@ abstract class SearchScreenModel(
         preferences.globalSearchFilterState().toggle()
     }
 
+    // KMK -->
+    fun toggleExactAuthorMatch() {
+        // Sets the concrete next value rather than calling toggle(), because the flow collector above
+        // also writes this field. Negating it here as well would undo the collector if it lands first.
+        val next = !state.value.exactAuthorMatch
+        preferences.globalSearchExactAuthorMatch().set(next)
+        mutableState.update { it.copy(exactAuthorMatch = next) }
+        search()
+    }
+    // KMK <--
+
     fun search() {
         val query = state.value.searchQuery
         val sourceFilter = state.value.sourceFilter
         // KMK --> Part of the cache key too, or changing category would early-return
         val sourceCategory = state.value.sourceCategory
+        val exactAuthorMatch = state.value.exactAuthorMatch
         // KMK <--
 
         if (query.isNullOrBlank()) return
 
         val sameQuery = this.lastQuery == query
-        if (sameQuery && this.lastSourceFilter == sourceFilter && this.lastSourceCategory == sourceCategory) return
+        if (sameQuery &&
+            this.lastSourceFilter == sourceFilter &&
+            this.lastSourceCategory == sourceCategory &&
+            this.lastExactAuthorMatch == exactAuthorMatch
+        ) {
+            return
+        }
 
         this.lastQuery = query
         this.lastSourceFilter = sourceFilter
         this.lastSourceCategory = sourceCategory
+        this.lastExactAuthorMatch = exactAuthorMatch
 
         searchJob?.cancel()
 
@@ -227,8 +255,17 @@ abstract class SearchScreenModel(
                         }
                         // KMK <--
 
+                        // KMK --> Narrowed after the counter above, so a source that answered and was
+                        // then filtered out is not scored as one that had nothing to say.
+                        val matches = if (exactAuthorMatch) {
+                            titles.filter { it.matchesCreatorExactly(query) }
+                        } else {
+                            titles
+                        }
+                        // KMK <--
+
                         if (isActive) {
-                            updateItem(source, SearchItemResult.Success(titles))
+                            updateItem(source, SearchItemResult.Success(matches))
                         }
                     } catch (e: Exception) {
                         // KMK --> Recorded but never prompted. A global search queries every source
@@ -289,6 +326,10 @@ abstract class SearchScreenModel(
         val sourceCategory: String = "",
         // KMK <--
         val onlyShowHasResults: Boolean = false,
+        // KMK --> Narrows results to entries whose author or artist is exactly the query. Toggling it
+        // re-runs the search, so it is part of the cached query identity rather than a display filter.
+        val exactAuthorMatch: Boolean = false,
+        // KMK <--
         val items: PersistentMap<Source, SearchItemResult> = persistentMapOf(),
         val dialog: Dialog? = null,
     ) {

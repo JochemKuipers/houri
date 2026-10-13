@@ -84,6 +84,7 @@ import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.extension.util.ExtensionInstallActivity
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.NetworkPreferences
+import eu.kanade.tachiyomi.network.interceptor.FlareSolverr
 import eu.kanade.tachiyomi.ui.base.delegate.SecureActivityDelegateImpl
 import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
@@ -139,9 +140,12 @@ import tachiyomi.domain.category.interactor.MergeCategories
 import tachiyomi.domain.category.interactor.RenameCategory
 import tachiyomi.domain.category.interactor.ReorderCategory
 import tachiyomi.domain.category.interactor.ResetCategoryFlags
+import tachiyomi.domain.category.interactor.SetCategoryTrackStatus
+import tachiyomi.domain.category.interactor.SetCategoryUpdateInterval
 import tachiyomi.domain.category.interactor.SetDisplayMode
 import tachiyomi.domain.category.interactor.SetMangaCategories
 import tachiyomi.domain.category.interactor.SetSortModeForCategory
+import tachiyomi.domain.category.interactor.SyncCategoriesWithTrackStatus
 import tachiyomi.domain.category.interactor.UpdateCategory
 import tachiyomi.domain.chapter.interactor.DeleteChapters
 import tachiyomi.domain.chapter.interactor.GetBookmarkedChaptersByMangaId
@@ -181,6 +185,7 @@ import tachiyomi.domain.manga.interactor.GetFavoriteEntries
 import tachiyomi.domain.manga.interactor.GetFavorites
 import tachiyomi.domain.manga.interactor.GetFlatMetadataById
 import tachiyomi.domain.manga.interactor.GetIdsOfFavoriteMangaWithMetadata
+import tachiyomi.domain.manga.interactor.GetLibraryDuplicates
 import tachiyomi.domain.manga.interactor.GetLibraryManga
 import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.manga.interactor.GetMangaByUrlAndSourceId
@@ -284,6 +289,9 @@ interface AppGraph : ViewModelGraph {
     val chapterCache: ChapterCache
     val downloadCache: DownloadCache
     val networkHelper: NetworkHelper
+    // KMK --> FlareSolverr, ported from jobobby04/TachiyomiSY#1124.
+    val flareSolverr: FlareSolverr
+    // KMK <--
     val json: Json
     val storageManager: StorageManager
     val imageSaver: ImageSaver
@@ -390,6 +398,7 @@ interface AppGraph : ViewModelGraph {
     val getIdsOfFavoriteMangaWithMetadata: GetIdsOfFavoriteMangaWithMetadata
     val getIncognitoState: GetIncognitoState
     val getLanguagesWithSources: GetLanguagesWithSources
+    val getLibraryDuplicates: GetLibraryDuplicates
     val getLibraryManga: GetLibraryManga
     val getLibraryUpdateErrorMessages: GetLibraryUpdateErrorMessages
     val getLibraryUpdateErrorWithRelations: GetLibraryUpdateErrorWithRelations
@@ -439,6 +448,8 @@ interface AppGraph : ViewModelGraph {
     val reorderFeed: ReorderFeed
     val reorderSortTag: ReorderSortTag
     val searchEngine: SearchEngine
+    val setCategoryTrackStatus: SetCategoryTrackStatus
+    val setCategoryUpdateInterval: SetCategoryUpdateInterval
     val setDisplayMode: SetDisplayMode
     val setExcludedScanlators: SetExcludedScanlators
     val setMangaCategories: SetMangaCategories
@@ -453,6 +464,7 @@ interface AppGraph : ViewModelGraph {
     val setSourceCategories: SetSourceCategories
     val syncPreferences: SyncPreferences
     val syncStatus: SyncStatus
+    val syncCategoriesWithTrackStatus: SyncCategoriesWithTrackStatus
     val toggleExcludeFromDataSaver: ToggleExcludeFromDataSaver
     val toggleIncognito: ToggleIncognito
     val toggleLanguage: ToggleLanguage

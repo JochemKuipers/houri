@@ -214,13 +214,21 @@ fun MangaCoverDialog(
                 // just replaced. `coverLastModified` is the same signal MangaKeyer keys the cache on,
                 // so this cannot drift from what Coil considers a different image.
                 val coverKey = manga.id to manga.coverLastModified
-                val state = remember(coverKey) { ImageViewerState() }
+                // The renderer is keyed on the manga ONLY - never on coverKey. ViewerSurface's
+                // onSurface callback fires when the SurfaceView is created or resized, not when the
+                // state changes, so a state rebuilt on a cover change is never init()ed: its render
+                // loop never starts, fetchPage yields nothing, and the swapchain keeps the frame it
+                // already had - which is the previous cover, indefinitely. The cover is data; the
+                // state is the renderer, and swapping the data must not swap the renderer.
+                val state = remember(manga.id) { ImageViewerState() }
                 val scope = rememberCoroutineScope()
                 // The page the renderer is fed, held here rather than captured in a fetch closure so
                 // a re-keyed request can free the one it replaces: an ImagePage owns uploaded GPU
-                // textures, and dropping the last reference leaks them.
-                val installedPage = remember(coverKey) { AtomicReference<ImagePage.ImageSingle?>(null) }
-                DisposableEffect(state, installedPage) {
+                // textures, and dropping the last reference leaks them. Keyed on the manga for the
+                // same reason as the state above - a per-cover reference orphans the page it held,
+                // which is exactly the leak this holder exists to prevent.
+                val installedPage = remember(manga.id) { AtomicReference<ImagePage.ImageSingle?>(null) }
+                DisposableEffect(state) {
                     state.fetchPage = { index -> if (index == 0) installedPage.get() else null }
                     onDispose {
                         state.fetchPage = { null }

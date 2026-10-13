@@ -12,8 +12,10 @@ import androidx.compose.material.icons.outlined.DragHandle
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Badge
@@ -72,6 +74,8 @@ fun ReorderableCollectionItemScope.CategoryListItem(
     onToggleExpand: (() -> Unit)? = null,
     selected: Boolean? = null,
     onToggleSelection: (() -> Unit)? = null,
+    onClickTrackStatus: (() -> Unit)? = null,
+    onClickUpdateInterval: (() -> Unit)? = null,
     // KMK <--
     modifier: Modifier = Modifier,
 ) {
@@ -146,6 +150,8 @@ fun ReorderableCollectionItemScope.CategoryListItem(
                         onHide = onHide,
                         onDelete = onDelete,
                         onCreateSubcategory = onCreateSubcategory?.takeIf { isTopLevel },
+                        onClickTrackStatus = onClickTrackStatus,
+                        onClickUpdateInterval = onClickUpdateInterval,
                     )
                 } else {
                     IconButton(onClick = onRename) {
@@ -176,6 +182,28 @@ fun ReorderableCollectionItemScope.CategoryListItem(
                             )
                         },
                     )
+                    if (onClickTrackStatus != null) {
+                        IconButton(onClick = onClickTrackStatus) {
+                            Icon(
+                                imageVector = Icons.Outlined.Flag,
+                                contentDescription = stringResource(KMR.strings.category_track_status),
+                                // Same dimming the hidden state uses above, rather than a second
+                                // glyph: an unbound category still needs this as its entry point, and
+                                // one icon that reads as "not set" beats a near-identical pair.
+                                tint = LocalContentColor.current.let {
+                                    if (category.trackStatus != null) it else it.copy(alpha = 0.6f)
+                                },
+                            )
+                        }
+                    }
+                    if (onClickUpdateInterval != null) {
+                        IconButton(onClick = onClickUpdateInterval) {
+                            Icon(
+                                imageVector = Icons.Outlined.Schedule,
+                                contentDescription = stringResource(KMR.strings.category_update_interval),
+                            )
+                        }
+                    }
                     // KMK <--
                     IconButton(onClick = onDelete) {
                         Icon(
@@ -195,6 +223,8 @@ private fun CategoryActionsOverflow(
     onHide: () -> Unit,
     onDelete: () -> Unit,
     onCreateSubcategory: (() -> Unit)?,
+    onClickTrackStatus: (() -> Unit)? = null,
+    onClickUpdateInterval: (() -> Unit)? = null,
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -222,6 +252,26 @@ private fun CategoryActionsOverflow(
                 onClick = {
                     expanded = false
                     onCreateSubcategory()
+                },
+            )
+        }
+        if (onClickTrackStatus != null) {
+            DropdownMenuItem(
+                text = { Text(stringResource(KMR.strings.category_track_status)) },
+                leadingIcon = { Icon(Icons.Outlined.Flag, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onClickTrackStatus()
+                },
+            )
+        }
+        if (onClickUpdateInterval != null) {
+            DropdownMenuItem(
+                text = { Text(stringResource(KMR.strings.category_update_interval)) },
+                leadingIcon = { Icon(Icons.Outlined.Schedule, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onClickUpdateInterval()
                 },
             )
         }

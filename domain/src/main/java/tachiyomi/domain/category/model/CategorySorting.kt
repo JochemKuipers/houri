@@ -13,6 +13,9 @@ enum class CategorySortOrder {
     DATE_ADDED_OLDEST,
     DATE_MODIFIED_NEWEST,
     DATE_MODIFIED_OLDEST,
+    // Appended, so the ordinals above keep matching the values already on disk.
+    MOST_ITEMS,
+    LEAST_ITEMS,
     ;
 
     companion object {
@@ -31,6 +34,13 @@ enum class CategorySortOrder {
  */
 fun List<Category>.sortedForDisplay(sortOrder: CategorySortOrder): List<Category> {
     if (sortOrder == CategorySortOrder.MANUAL) return sortedBy { it.order }
+    // The count-based orders need item counts, which a bare Category list does not carry. The
+    // caller that has them - the library's grouped tabs - applies them itself, over the groups it
+    // just built. Returning manual here rather than falling through to the date branch below is
+    // deliberate: otherwise these would silently sort by a date the reader never asked for.
+    if (sortOrder == CategorySortOrder.MOST_ITEMS || sortOrder == CategorySortOrder.LEAST_ITEMS) {
+        return sortedBy { it.order }
+    }
 
     val byName = when (sortOrder) {
         CategorySortOrder.NAME_DESC -> compareBy(String.CASE_INSENSITIVE_ORDER, Category::name).reversed()

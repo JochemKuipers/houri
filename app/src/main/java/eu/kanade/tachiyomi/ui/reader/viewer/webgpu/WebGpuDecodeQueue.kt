@@ -158,6 +158,10 @@ internal fun WebGpuViewer.requeueStuckPage(page: ViewerReaderPage): StuckRecover
         if (now - record.lastAttemptAt < STUCK_REDRIVE_COOLDOWN_MS) return StuckRecovery.DEFERRED
         record.lastAttemptAt = now
         record.attempts++
+        // A re-driven page gets a fresh load deadline. Without this the stamp from the attempt that
+        // just timed out is still there, so the next startPageLoad overwrites it but a requeue that
+        // does not reach a load at all would measure against the old entry and be rescued instantly.
+        loadingSince.remove(pageKey(page))
 
         when {
             record.attempts <= STUCK_REDRIVE_SOFT_LIMIT -> page.state = PageState.IDLE
@@ -190,6 +194,22 @@ internal fun WebGpuViewer.requeueStuckPage(page: ViewerReaderPage): StuckRecover
 
     queueForDecode(page, prioritize = currentPage?.let { pageKey(it) == pageKey(page) } ?: false)
     return StuckRecovery.REDRIVEN
+}
+
+/**
+ * How long a page may sit in [PageState.LOADING] before the sweep treats it as stranded.
+ *
+ * A fetch that is genuinely slow must be left alone, so this is well above a slow connection
+ * pulling a large image on a weak device. It exists for the page whose load coroutine ended with
+ * the status stranded at Queue/LoadPage/DownloadImage: no further emission will ever arrive, so
+ * without a deadline that page is LOADING for the rest of the session and matches no sweep branch.
+ */
+internal const val STUCK_LOAD_DEADLINE_MS = 30_000L
+
+/** How long [page] has been LOADING, or 0 when it is not currently loading. */
+internal fun WebGpuViewer.loadingFor(page: ViewerReaderPage): Long {
+    val since = synchronized(lock) { loadingSince[pageKey(page)] } ?: return 0L
+    return System.currentTimeMillis() - since
 }
 
 /** What one recovery attempt on a stuck page actually did. */

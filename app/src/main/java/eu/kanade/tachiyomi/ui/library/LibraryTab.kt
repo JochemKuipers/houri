@@ -54,6 +54,7 @@ import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.ui.browse.source.SourcesScreen
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
+import eu.kanade.tachiyomi.ui.duplicates.DuplicateMangaScreen
 import eu.kanade.tachiyomi.ui.home.HomeScreen
 import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.manga.MangaScreen
@@ -212,6 +213,11 @@ data object LibraryTab : Tab {
                         globalAppGraph.downloadCache.invalidateCache()
                         context.toast(MR.strings.download_cache_invalidated)
                     },
+                    // KMK --> Standalone duplicate finder (#34).
+                    onClickFindDuplicates = {
+                        if (canNavigate()) navigator.push(DuplicateMangaScreen())
+                    },
+                    // KMK <--
                     // For scroll overlay when no tab
                     scrollBehavior = scrollBehavior.takeIf { !state.showCategoryTabs },
                 )

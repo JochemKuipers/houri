@@ -115,6 +115,7 @@ class GlobalSearchScreen(
                 hasPinnedSources = screenModel.hasPinnedSources(),
                 sourceCategories = sourceCategories,
                 onChangeSourceCategory = screenModel::setSourceCategory,
+                onToggleExactAuthorMatch = screenModel::toggleExactAuthorMatch,
                 // KMK <--
             )
         }

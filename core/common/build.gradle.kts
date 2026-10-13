@@ -22,6 +22,9 @@ dependencies {
     // SY -->
     implementation(projects.i18nSy)
     // SY <--
+    // KMK -->
+    implementation(projects.i18nKmk)
+    // KMK <--
 
     api(libs.logcat)
 

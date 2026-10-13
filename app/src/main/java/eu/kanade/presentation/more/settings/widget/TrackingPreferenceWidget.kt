@@ -1,6 +1,8 @@
 package eu.kanade.presentation.more.settings.widget
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -26,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.more.settings.LocalPreferenceEnabled
@@ -35,6 +38,10 @@ import eu.kanade.tachiyomi.data.track.Tracker
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
+
+// KMK -->
+private const val TRAILING_FADE_MILLIS = 120
+// KMK <--
 
 @Composable
 fun TrackingPreferenceWidget(
@@ -63,6 +70,12 @@ fun TrackingPreferenceWidget(
         positionalThreshold = { totalDistance -> totalDistance * 0.25f },
     )
     val latestSwipeLogout by rememberUpdatedState(onSwipeLogout)
+    val swiping = dismissState.dismissDirection != Settled
+    val trailingAlpha by animateFloatAsState(
+        targetValue = if (swiping) 0f else 1f,
+        animationSpec = tween(TRAILING_FADE_MILLIS),
+        label = "trackerTrailingAlpha",
+    )
     // KMK <--
     // KMK --> Keys on settledValue so logout fires once the finger lifts rather than
     // mid-drag, then resets the row — logout keeps the row, so it must slide back.
@@ -115,6 +128,7 @@ fun TrackingPreferenceWidget(
                     Icon(
                         imageVector = Icons.Filled.Star,
                         modifier = Modifier
+                            .alpha(trailingAlpha)
                             .padding(4.dp)
                             .size(32.dp),
                         tint = Color(0xFFFFC107),
@@ -126,6 +140,7 @@ fun TrackingPreferenceWidget(
                     Icon(
                         imageVector = Icons.Outlined.Done,
                         modifier = Modifier
+                            .alpha(trailingAlpha)
                             .padding(4.dp)
                             .size(32.dp),
                         tint = Color(0xFF4CAF50),
@@ -141,14 +156,23 @@ fun TrackingPreferenceWidget(
 // KMK -->
 @Composable
 private fun LogoutDismissBackground(state: SwipeToDismissBoxState) {
+    val swiping = state.dismissDirection != Settled
     val backgroundColor by animateColorAsState(
-        when (state.dismissDirection) {
-            Settled -> MaterialTheme.colorScheme.surface
-            else ->
-                MaterialTheme.colorScheme.errorContainer
-                    .copy(alpha = if (state.targetValue == Settled) 0.45f else 1f)
+        if (!swiping) {
+            MaterialTheme.colorScheme.surface
+        } else {
+            MaterialTheme.colorScheme.errorContainer
+                .copy(alpha = if (state.targetValue == Settled) 0.45f else 1f)
         },
     )
+    // KMK --> The row body is transparent, so an always-drawn icon would sit under
+    // the star/checkmark at rest. Reveal it only for the drag that can trigger it.
+    val iconAlpha by animateFloatAsState(
+        targetValue = if (swiping) 1f else 0f,
+        animationSpec = tween(TRAILING_FADE_MILLIS),
+        label = "logoutIconAlpha",
+    )
+    // KMK <--
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -160,6 +184,7 @@ private fun LogoutDismissBackground(state: SwipeToDismissBoxState) {
             imageVector = Icons.AutoMirrored.Outlined.Logout,
             contentDescription = stringResource(MR.strings.logout),
             tint = MaterialTheme.colorScheme.onErrorContainer,
+            modifier = Modifier.alpha(iconAlpha),
         )
     }
 }

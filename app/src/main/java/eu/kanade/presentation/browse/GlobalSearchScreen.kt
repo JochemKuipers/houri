@@ -43,6 +43,7 @@ fun GlobalSearchScreen(
     hasPinnedSources: Boolean,
     sourceCategories: List<String>,
     onChangeSourceCategory: (String) -> Unit,
+    onToggleExactAuthorMatch: () -> Unit,
     // KMK <--
 ) {
     // KMK -->
@@ -93,6 +94,8 @@ fun GlobalSearchScreen(
                     sourceCategory = state.sourceCategory,
                     sourceCategories = sourceCategories,
                     onChangeSourceCategory = onChangeSourceCategory,
+                    exactAuthorMatch = state.exactAuthorMatch,
+                    onToggleExactAuthorMatch = onToggleExactAuthorMatch,
                     // KMK <--
                 )
             }

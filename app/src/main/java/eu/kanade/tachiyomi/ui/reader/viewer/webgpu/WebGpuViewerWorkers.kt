@@ -174,9 +174,18 @@ internal fun WebGpuViewer.startStuckPageSweep() {
 
                             // LOADING is only released when the bytes are already there: a page
                             // genuinely fetching must keep its state, and queueForDecode will
-                            // promote it the moment it reports Ready.
+                            // promote it the moment it reports Ready. A page that has been
+                            // LOADING past its deadline and still has not reported Ready is the
+                            // one shape nothing else can see: its load coroutine died with the
+                            // status stranded mid-flight, so it matches no other branch and
+                            // queueForDecode keeps treating it as in-flight. It gets a deadline
+                            // here instead of a lifetime.
                             PageState.LOADING ->
-                                if (page.page.status == Page.State.Ready) "loading-done" else null
+                                when {
+                                    page.page.status == Page.State.Ready -> "loading-done"
+                                    loadingFor(page) >= STUCK_LOAD_DEADLINE_MS -> "loading-stalled"
+                                    else -> null
+                                }
 
                             // The terminal case: not being worked on at all. The renderer
                             // reached this page (fetchPage called ensureDecoding), so it is on
@@ -298,6 +307,7 @@ internal fun WebGpuViewer.resetDecodedPagesAfterDeviceLoss() {
         }
         pageCache.clear()
         stuckRecords.clear()
+        loadingSince.clear()
         requeryRecords.clear()
         loneIndices.clear()
         continuousPageWindow.reset(null)

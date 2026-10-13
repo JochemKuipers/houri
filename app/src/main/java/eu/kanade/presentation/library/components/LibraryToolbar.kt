@@ -23,6 +23,7 @@ import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.SearchToolbar
 import kotlinx.collections.immutable.persistentListOf
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.components.Pill
 import tachiyomi.presentation.core.i18n.stringResource
@@ -49,6 +50,9 @@ fun LibraryToolbar(
     onSearchQueryChange: (String?) -> Unit,
     scrollBehavior: TopAppBarScrollBehavior?,
     onInvalidateDownloadCache: (Context) -> Unit,
+    // KMK --> Entry point for the standalone duplicate finder (#34).
+    onClickFindDuplicates: () -> Unit = {},
+    // KMK <--
 ) = when {
     selectedCount > 0 -> LibrarySelectionToolbar(
         selectedCount = selectedCount,
@@ -72,6 +76,7 @@ fun LibraryToolbar(
         // SY <--
         scrollBehavior = scrollBehavior,
         onInvalidateDownloadCache = onInvalidateDownloadCache,
+        onClickFindDuplicates = onClickFindDuplicates,
     )
 }
 
@@ -92,6 +97,9 @@ private fun LibraryRegularToolbar(
     // SY <--
     scrollBehavior: TopAppBarScrollBehavior?,
     onInvalidateDownloadCache: (Context) -> Unit,
+    // KMK --> Entry point for the standalone duplicate finder (#34).
+    onClickFindDuplicates: () -> Unit = {},
+    // KMK <--
 ) {
     val context = LocalContext.current
     val pillAlpha = if (isSystemInDarkTheme()) 0.12f else 0.08f
@@ -137,6 +145,12 @@ private fun LibraryRegularToolbar(
                         title = stringResource(MR.strings.action_open_random_manga),
                         onClick = onClickOpenRandomManga,
                     ),
+                    // KMK -->
+                    AppBar.OverflowAction(
+                        title = stringResource(KMR.strings.find_duplicates),
+                        onClick = onClickFindDuplicates,
+                    ),
+                    // KMK <--
                     AppBar.OverflowAction(
                         title = stringResource(MR.strings.pref_invalidate_download_cache),
                         onClick = {

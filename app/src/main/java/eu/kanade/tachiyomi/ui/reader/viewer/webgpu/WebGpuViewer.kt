@@ -53,6 +53,12 @@ import kotlin.time.Duration.Companion.milliseconds
 /** Edge pages of an adjacent chapter to reserve shells for up front (see preloadChapterThenRetry). */
 private const val CHAPTER_EDGE_PRELOAD = 4
 
+/** Attempts to rebuild the GPU device after a loss; see [WebGpuViewer.recoverDeviceWithRetries]. */
+private const val DEVICE_RECOVERY_ATTEMPTS = 3
+
+/** Linear backoff base for those attempts - 250ms, then 500ms, then 750ms. */
+private const val DEVICE_RECOVERY_BACKOFF_MS = 250L
+
 /**
  * Smallest width a page or placeholder may claim.
  *
@@ -200,6 +206,21 @@ open class WebGpuViewer(
      * precisely the loop it exists to stop.
      */
     internal val stuckRecords = HashMap<PageKey, StuckPageRecord>()
+
+    /**
+     * When each page last entered [PageState.LOADING], keyed like [pageCache].
+     *
+     * Exists because LOADING had no deadline and nothing could see a page stuck in it. The
+     * sweep's LOADING branch only rescues a page that has *already* reached `Page.State.Ready`,
+     * so a page whose load coroutine died with the status stranded at Queue/LoadPage/
+     * DownloadImage was invisible - not queued-but-absent, not idle-placeholder - and
+     * `queueForDecode` treats LOADING as in-flight, so nothing re-queued it either. Viewer-level
+     * for the same reason [stuckRecords] is: a shell rebuilt by the escalation must not reset its
+     * own deadline.
+     *
+     * Guarded by [lock].
+     */
+    internal val loadingSince = HashMap<PageKey, Long>()
 
     // Decode queue - pages waiting to be decoded, processed LIFO (last = highest priority)
     internal val decodeQueue = ArrayDeque<ViewerReaderPage>()
@@ -388,7 +409,7 @@ open class WebGpuViewer(
     // KMK -->
     private val trimCallbacks = object : ComponentCallbacks2 {
         override fun onConfigurationChanged(newConfig: Configuration) = Unit
-        override fun onLowMemory() = shrinkCacheOnTrim()
+        override fun onLowMemory() = shedMemoryUnderPressure()
 
         @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
         override fun onTrimMemory(level: Int) {
@@ -404,9 +425,43 @@ open class WebGpuViewer(
                 shrinkCacheOnTrim()
             }
             // KMK <--
+            // KMK --> The library's caches are shed on a narrower set, and deliberately not on
+            // UI_HIDDEN: TileRenderer.onLowMemory pins cacheScreens down to 0.8 for the rest of
+            // the session, so letting it ride the screen-off signal would cost a permanently
+            // smaller tile budget plus a full rebuild on every single lock/unlock. These are the
+            // levels that mean memory is actually short.
+            if (
+                level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+                level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+                level == ComponentCallbacks2.TRIM_MEMORY_MODERATE ||
+                level == ComponentCallbacks2.TRIM_MEMORY_COMPLETE
+            ) {
+                shedDeviceCaches()
+            }
+            // KMK <--
         }
     }
     // KMK <--
+
+    /**
+     * Everything held under memory pressure: the decoded page shells *and* the library's
+     * device-bound caches. The two used to be the same call, which left the tile atlas - a single
+     * GPU texture sized to the whole cache budget - and the filter pool untouched on a device with
+     * under 2 GB of RAM. Tiles refill lazily, so shedding them costs a rebuild, not correctness.
+     */
+    private fun shedMemoryUnderPressure() {
+        shrinkCacheOnTrim()
+        shedDeviceCaches()
+    }
+
+    private fun shedDeviceCaches() {
+        if (isDestroyed) return
+        try {
+            pager.state.onLowMemory()
+            pager.state.invalidate()
+        } catch (_: Exception) {
+        }
+    }
 
     private val deviceLostListener =
         ca.mpreg.webgpuviewer.renderer.WebGpuRenderer.Companion.DeviceLostListener { _, _ ->
@@ -417,10 +472,7 @@ open class WebGpuViewer(
             runCatching { mihon.app.di.globalAppGraph.achievementManager.incrementCounter("webgpu_rescues") }
             scope.launch {
                 try {
-                    val recovered = pager.state.recoverFromDeviceLoss()
-                    if (!recovered) {
-                        logcat(LogPriority.ERROR) { "WebGPU device lost and recovery failed" }
-                    }
+                    recoverDeviceWithRetries()
                     resetDecodedPagesAfterDeviceLoss()
                     try {
                         pager.state.invalidate()
@@ -430,6 +482,48 @@ open class WebGpuViewer(
                 }
             }
         }
+
+    /**
+     * Rebuild the GPU device, retrying a bounded number of times before giving up.
+     *
+     * A loss on a phone is usually the app being backgrounded and the driver tearing the device
+     * down, and the immediate attempt frequently fails - the adapter is often still being
+     * reclaimed when the first `requestAdapter` runs. Recovery used to be single-shot, so one
+     * unlucky attempt latched `initError` and left `isAvailable` false for the life of the
+     * process: every later decode threw and no amount of waiting or retrying on the page side
+     * could fix it, because the ladder retries *decode* and the device was the problem.
+     *
+     * Linear backoff rather than a tight loop, and bounded rather than indefinite - an
+     * unrecoverable device must stop trying rather than spin for the rest of the session.
+     */
+    private suspend fun recoverDeviceWithRetries(): Boolean {
+        for (attempt in 1..DEVICE_RECOVERY_ATTEMPTS) {
+            val recovered = try {
+                pager.state.recoverFromDeviceLoss()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                logcat(LogPriority.ERROR, e) { "WebGPU device recovery attempt $attempt threw" }
+                false
+            }
+            if (recovered) {
+                if (attempt > 1) {
+                    logcat(LogPriority.INFO) { "WebGPU device recovered on attempt $attempt" }
+                }
+                return true
+            }
+            if (isDestroyed) return false
+            logcat(LogPriority.WARN) {
+                "WebGPU device recovery attempt $attempt/$DEVICE_RECOVERY_ATTEMPTS failed"
+            }
+            delay(DEVICE_RECOVERY_BACKOFF_MS * attempt)
+        }
+        logcat(LogPriority.ERROR) {
+            "WebGPU device lost and recovery gave up after $DEVICE_RECOVERY_ATTEMPTS attempts - " +
+                "the reader will stay on this device until it is recreated"
+        }
+        return false
+    }
 
     init {
         // KMK --> Shed off-screen decoded pages on system memory pressure.
@@ -580,6 +674,7 @@ open class WebGpuViewer(
             }
             pageCache.clear()
             stuckRecords.clear()
+            loadingSince.clear()
             loneIndices.clear()
             continuousPageWindow.reset(null)
 
@@ -635,23 +730,22 @@ open class WebGpuViewer(
                 preloadPage(shell, prioritize = false)
             } catch (_: Exception) {}
         }
-        if (!chapterPreloadGuard.tryBegin(key)) {
-            // If already in-flight but decodeQueue no longer contains its edge page, allow requeue (stale guard).
-            // The queue probe is chapter-qualified: bare index matching collides across chapters
-            // (every chapter has an index 0..3), which read the guard as stale on every boundary
-            // approach and refired the whole preload cycle in a loop.
-            val isStale = edgePages.firstOrNull()?.let { pg ->
-                val k = PageKey.Reader(chapter.chapter.id, pg.index)
-                val chapterId = chapter.chapter.id
-                synchronized(lock) {
-                    findInCache(k) == null ||
-                        decodeQueue.none { it.page.chapter.chapter.id == chapterId && it.page.index == pg.index }
-                }
-            } ?: false
-            if (!isStale) return
-            chapterPreloadGuard.end(key)
-            if (!chapterPreloadGuard.tryBegin(key)) return
-        }
+        // If already in-flight but decodeQueue no longer contains its edge page, allow requeue
+        // (stale guard). The queue probe is chapter-qualified: bare index matching collides across
+        // chapters (every chapter has an index 0..3), which read the guard as stale on every boundary
+        // approach and refired the whole preload cycle in a loop. Evaluated here rather than inside
+        // the guard call so the viewer's lock is taken before the guard's, never the reverse.
+        val isStale = edgePages.firstOrNull()?.let { pg ->
+            val k = PageKey.Reader(chapter.chapter.id, pg.index)
+            val chapterId = chapter.chapter.id
+            synchronized(lock) {
+                findInCache(k) == null ||
+                    decodeQueue.none { it.page.chapter.chapter.id == chapterId && it.page.index == pg.index }
+            }
+        } ?: false
+        // Through the guard rather than end()+tryBegin() here: the stale requeue rule lives in one
+        // place, so a second call site cannot grow its own slightly different copy.
+        if (!chapterPreloadGuard.tryBeginOrRequeueIfStale(key) { isStale }) return
 
         scope.launch(AppDispatchersHolder.get().default) {
             try {
@@ -756,6 +850,7 @@ open class WebGpuViewer(
             }
             pageCache.clear()
             stuckRecords.clear()
+            loadingSince.clear()
             loneIndices.clear()
             continuousPageWindow.reset(null)
             try {

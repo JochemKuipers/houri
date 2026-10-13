@@ -14,6 +14,7 @@ Houri (`applicationId app.houri`) — Android manga reader (min SDK 26, target 3
 |-------|--------|
 | `app/AGENTS.md` | app module: package roots, Metro DI, screens, backup/restore, theme |
 | `app/.../tachiyomi/ui/reader/AGENTS.md` | ReaderActivity, viewers (pager/webtoon), loaders, upscale, MTL hookup |
+| `app/.../tachiyomi/ui/reader/viewer/webgpu/AGENTS.md` | WebGPU reader pipeline: threads, page state machine, stuck-page ladder, device recovery, symptom→cause table — **update it whenever a new observation is made** |
 | `app/.../tachiyomi/data/track/AGENTS.md` | Tracker services + framework (add/remove: `track/core/README.md`) |
 | `app/.../exh/AGENTS.md` | E-Hentai/MangaDex/delegated sources, metadata, recommendations |
 | `app/.../settings/framework/AGENTS.md` | Modular settings framework (keys → hosts → screens) |
@@ -33,17 +34,29 @@ Houri (`applicationId app.houri`) — Android manga reader (min SDK 26, target 3
 
 **Read this section before every change.** These rules override shortcuts (e.g. copying nearby `MR` imports or only running `compileDebugKotlin`).
 
+### Agents and builds are opt-in
+
+**Do not delegate and do not build unless the user asks in the current request.**
+
+| Rule | Required behavior |
+|------|-------------------|
+| Parallel agents | **Never** fire `explore` / `librarian` / `task` / background agents. Search and read the files yourself with `grep` / `glob` / `read` — the codebase is well-indexed by `AGENTS.md` and the risk of an agent touching the wrong layer outweighs the saved context. |
+| Gradle | **Never** run `./gradlew` (`spotlessApply`, `spotlessCheck`, `assembleDebug`, `compileDebugKotlin`, `installDebug`, tests, …). Make the edits, state what you changed and why, and hand the build back to the user. |
+| Branch / commit | Work directly on `master`. Do not create a feature branch and do not commit unless the user asks. |
+
+The verification commands below are the **user's** to run. Report the expected result alongside the change so it can be checked in one pass. Only run a build when the user explicitly requests it in that request.
+
 ### Git
 
 | Rule | Required behavior |
 |------|-------------------|
-| Branch | Create a **feature branch** for the task (`git checkout -b <type>/<short-description>`). |
-| Commit | **OK** on a feature branch when work is ready. **Never** commit directly to `master` / `main` unless the user explicitly asks. |
-| Push | **OK** to push the **current feature branch** when work is ready. **Never** push to `master` / `main` unless the user explicitly asks. |
+| Branch | Work on `master`. Do **not** create a feature branch unless the user asks for one. |
+| Commit | Do **not** commit unless the user asks. When they do, committing to `master` is fine. |
+| Push | **OK** to push when work is ready and the user asks. Never push without being asked. |
 | Ported PRs | When porting code from an upstream PR (Mihon/Komikku/SY or any fork), **co-author the PR author** on the porting commit: add `Co-authored-by: <author-name> <<author-email>>` (fetch from the PR's commits API — `https://api.github.com/repos/<owner>/<repo>/pulls/<n>/commits`). |
 | **Release notes** | **Always add user-facing entries to `RELEASE_NOTES.md` for any change a user could notice — before finishing work and committing.** See [Release notes](#release-notes). |
 
-Before `git push`, confirm the current branch is not `master` or `main` (`git branch --show-current`).
+Before `git push`, confirm the working tree contains only the intended changes (`git status`).
 
 ### Internationalization (strings)
 
@@ -64,7 +77,7 @@ Before `git push`, confirm the current branch is not `master` or `main` (`git br
 
 ### Formatting & build verification
 
-**“Build passes” is not enough.** After Kotlin/XML edits, run **in this order** before marking work complete:
+**“Build passes” is not enough.** After Kotlin/XML edits, the user runs **in this order** before the change is considered complete:
 
 ```bash
 ./gradlew spotlessApply    # fix formatting
@@ -274,7 +287,7 @@ Commit messages are for developers; `RELEASE_NOTES.md` is for users. Write both.
 ./gradlew :data:generateSqlDelightInterface  # after .sq / .sqm changes
 ```
 
-**Agent verification checklist (minimum):** `spotlessApply` → `spotlessCheck` → `assembleDebug` (or `compileDebugKotlin` only if the user asked for a quick compile check—but still run Spotless).
+**Agent verification checklist:** the user runs `spotlessApply` → `spotlessCheck` → `assembleDebug` (or `compileDebugKotlin` for a quick compile check). Agents do not run these — see [Mandatory rules](#mandatory-rules-for-ai-agents). When you make a change, state the command *and* the expected result so it can be verified in one pass.
 
 ---
 
@@ -316,7 +329,7 @@ MockK (`mockk`/`coEvery`/`coVerifySequence`) + `runTest` for suspend, `.create()
 ## Conventions
 
 - **Logging** – Prefer `xLogE()` / `xLog()` helpers from `exh.log` for Komikku code, Mihon uses `logcat { }` from `tachiyomi.core.common.util.system`. Avoid raw `android.util.Log`.
-- **Formatting** – Spotless + ktlint (`buildSrc/.../mihon.code.lint.gradle.kts`). Agents **must** run `spotlessApply` and `spotlessCheck` (see [Mandatory rules](#mandatory-rules-for-ai-agents)).
+- **Formatting** – Spotless + ktlint (`buildSrc/.../mihon.code.lint.gradle.kts`). Spotless **must** pass before a change is considered done; run it only when the user asks ([Mandatory rules](#mandatory-rules-for-ai-agents)).
 - **Fork edits** – New Komikku features inside `// KMK` islands; keep `// SY` / `// EXH` blocks intact when merging upstream.
 
 ---
@@ -341,6 +354,8 @@ MockK (`mockk`/`coEvery`/`coVerifySequence`) + `runTest` for suspend, `.create()
 The VM update script installs the Android SDK (platform 36, build-tools 35.0.1, platform-tools, cmdline-tools) into `/opt/android-sdk` and writes `local.properties` with `sdk.dir`. JDK 21 is pre-installed and works fine for compiling to JVM target 17. `ANDROID_HOME`, `JAVA_HOME`, and `PATH` are set in `~/.bashrc`.
 
 ### Running key commands
+
+These are for the **user**, not for agents (see [Mandatory rules](#mandatory-rules-for-ai-agents)). Only run them when the user explicitly asks.
 
 All Gradle commands require the environment variables set above. Export them before invoking `./gradlew` if running in a fresh shell:
 

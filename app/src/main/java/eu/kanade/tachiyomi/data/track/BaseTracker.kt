@@ -110,6 +110,9 @@ abstract class BaseTracker(
         // KMK <--
         // KMK --> leaving a not-started list starts the clock when no start date is set
         val wasNotStarted = hasNotStartedReading(track.status)
+        // Captured before the assignment below so the status categories can be moved only
+        // when the status really changed, matching the guard in RefreshTracks.
+        val previousStatus = track.status
         // KMK <--
         track.status = status
         if (track.status == getCompletionStatus() && track.total_chapters != 0L) {
@@ -121,6 +124,15 @@ abstract class BaseTracker(
         }
         // KMK <--
         updateRemote(track)
+        // KMK --> After updateRemote, so a rejected change does not reorganise the library, and
+        // wrapped so a failure here can never fail the status change the user just made.
+        if (previousStatus != status) {
+            runCatching {
+                val parsed = TrackStatus.parseTrackerStatus(globalAppGraph.trackerManager, id, status)
+                globalAppGraph.syncCategoriesWithTrackStatus.await(track.manga_id, parsed?.int)
+            }
+        }
+        // KMK <--
     }
 
     override suspend fun setRemoteLastChapterRead(track: Track, chapterNumber: Int): /* KMK --> */ Track /* KMK <-- */ {

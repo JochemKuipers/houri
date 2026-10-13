@@ -38,6 +38,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.category.components.CategoryFloatingActionButton
 import eu.kanade.presentation.category.components.CategoryListItem
+import eu.kanade.presentation.category.components.TrackStatusPickerDialog
+import eu.kanade.presentation.category.components.UpdateIntervalPickerDialog
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.tachiyomi.ui.category.CategoryManagerSort
 import eu.kanade.tachiyomi.ui.category.CategoryScreenState
@@ -87,6 +89,8 @@ fun CategoryScreen(
     onShowMoveDialog: () -> Unit,
     onShowMergeDialog: () -> Unit,
     onShowDeleteMany: () -> Unit,
+    onSelectTrackStatus: (Category, Int?) -> Unit,
+    onSelectUpdateInterval: (Category, Int?) -> Unit,
     // KMK <--
     navigateUp: () -> Unit,
 ) {
@@ -151,6 +155,8 @@ fun CategoryScreen(
             onShowMoveDialog = onShowMoveDialog,
             onShowMergeDialog = onShowMergeDialog,
             onShowDeleteMany = onShowDeleteMany,
+            onSelectTrackStatus = onSelectTrackStatus,
+            onSelectUpdateInterval = onSelectUpdateInterval,
             // KMK <--
         )
     }
@@ -186,8 +192,14 @@ private fun CategoryContent(
     onShowMoveDialog: () -> Unit,
     onShowMergeDialog: () -> Unit,
     onShowDeleteMany: () -> Unit,
+    onSelectTrackStatus: (Category, Int?) -> Unit,
+    onSelectUpdateInterval: (Category, Int?) -> Unit,
     // KMK <--
 ) {
+    // KMK -->
+    var trackStatusTarget by remember { mutableStateOf<Category?>(null) }
+    var updateIntervalTarget by remember { mutableStateOf<Category?>(null) }
+    // KMK <--
     val query = searchQuery.trim()
     val topLevel = remember(categories) { categories.filter { it.parentId == 0L } }
     // KMK -->
@@ -404,11 +416,36 @@ private fun CategoryContent(
                     onToggleExpand = ({ onToggleCollapsed(row.category.id) }).takeIf { row.isTopLevel },
                     selected = (row.category.id in selectedIds).takeIf { selectMode },
                     onToggleSelection = ({ onToggleSelection(row.category.id) }).takeIf { selectMode },
+                    onClickTrackStatus = { trackStatusTarget = row.category },
+                    onClickUpdateInterval = { updateIntervalTarget = row.category },
                 )
                 // KMK <--
             }
         }
     }
+
+    // KMK -->
+    trackStatusTarget?.let { target ->
+        TrackStatusPickerDialog(
+            currentStatus = target.trackStatus,
+            onSelect = { status ->
+                onSelectTrackStatus(target, status)
+                trackStatusTarget = null
+            },
+            onDismiss = { trackStatusTarget = null },
+        )
+    }
+    updateIntervalTarget?.let { target ->
+        UpdateIntervalPickerDialog(
+            currentIntervalDays = target.updateInterval,
+            onSelect = { days ->
+                onSelectUpdateInterval(target, days)
+                updateIntervalTarget = null
+            },
+            onDismiss = { updateIntervalTarget = null },
+        )
+    }
+    // KMK <--
 }
 
 // KMK -->

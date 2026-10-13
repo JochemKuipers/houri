@@ -26,4 +26,12 @@ class NetworkPreferences(
             "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Mobile Safari/537.36",
         )
     }
+
+    // KMK --> FlareSolverr support, ported from jobobby04/TachiyomiSY#1124. Declared as plain
+    // accessors rather than SettingKeys because this predates the modular settings framework in
+    // this file; the keys are still the single definition both the screen and NetworkHelper read.
+    val enableFlareSolverr: Preference<Boolean> = preferenceStore.getBoolean("enable_flare_solverr", false)
+
+    val flareSolverrUrl: Preference<String> = preferenceStore.getString("flare_solverr_url", "http://localhost:8191/v1")
+    // KMK <--
 }

@@ -606,6 +606,8 @@ internal fun WebGpuViewer.evictFarthestPage(reference: ViewerPage? = null) {
 
     pageCache.remove(pageKey(toRemove))
     decodeQueue.remove(toRemove)
+    // Alongside pageCache so a load stamp cannot outlive the shell it belongs to.
+    loadingSince.remove(pageKey(toRemove))
     if (toRemove is ViewerReaderPage) {
         logcat(LogPriority.DEBUG) {
             "Evicted ch=${toRemove.page.chapter.chapter.id}/i=${toRemove.page.index} " +

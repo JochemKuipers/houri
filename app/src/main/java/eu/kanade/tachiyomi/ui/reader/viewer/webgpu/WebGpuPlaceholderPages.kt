@@ -213,8 +213,14 @@ class ProgressPage(
         val device = try {
             WebGpuRenderer.device
         } catch (_: Exception) {
-            return pineappleTexture
+            // Never initialized, so nothing cached can belong to a live device.
+            return null
         }
+        // `device` keeps naming the lost device until recovery replaces it, so the
+        // identity check below cannot see the loss - it would happily hand back the texture
+        // bound to the dead device, which is the exact "draws nothing" case above. `isAvailable`
+        // is what goes false at the loss, so it is the gate that sees it.
+        if (!WebGpuRenderer.isAvailable) return null
         synchronized(ProgressPage) {
             if (pineappleDevice !== device) {
                 try {

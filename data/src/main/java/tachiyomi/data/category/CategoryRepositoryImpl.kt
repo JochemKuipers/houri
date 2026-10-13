@@ -122,5 +122,23 @@ class CategoryRepositoryImpl(
             categoriesQueries.deleteOrphanedSubcategories()
         }
     }
+
+    override suspend fun updateTrackStatus(categoryId: Long, trackStatus: Int?) {
+        handler.await {
+            categoriesQueries.updateTrackStatus(
+                trackStatus = trackStatus?.toLong(),
+                categoryId = categoryId,
+            )
+        }
+    }
+
+    override suspend fun updateUpdateInterval(categoryId: Long, updateInterval: Int?) {
+        handler.await {
+            categoriesQueries.updateUpdateInterval(
+                updateInterval = updateInterval?.toLong(),
+                categoryId = categoryId,
+            )
+        }
+    }
     // KMK <--
 }

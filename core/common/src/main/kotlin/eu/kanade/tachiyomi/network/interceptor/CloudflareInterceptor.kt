@@ -8,8 +8,11 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.core.content.ContextCompat
 import eu.kanade.tachiyomi.network.AndroidCookieJar
+import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.util.system.isOutdated
 import eu.kanade.tachiyomi.util.system.toast
+import kotlinx.coroutines.runBlocking
+import logcat.LogPriority
 import okhttp3.Cookie
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.Interceptor
@@ -17,14 +20,23 @@ import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.Jsoup
 import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.kmk.KMR
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
 
 class CloudflareInterceptor(
     private val context: Context,
     private val cookieManager: AndroidCookieJar,
+    // KMK --> FlareSolverr support, ported from jobobby04/TachiyomiSY#1124.
+    private val preferences: NetworkPreferences,
     defaultUserAgentProvider: () -> String,
+    // A provider rather than a value: NetworkHelper builds this interceptor and FlareSolverr needs
+    // NetworkHelper, so handing over a factory keeps that from being a construction-time cycle, and it
+    // reads the enabled preference per challenge instead of freezing it at build time.
+    private val flareSolverrProvider: () -> FlareSolverr,
+    // KMK <--
 ) : WebViewInterceptor(context, defaultUserAgentProvider) {
 
     private val executor = ContextCompat.getMainExecutor(context)
@@ -55,7 +67,18 @@ class CloudflareInterceptor(
             cookieManager.remove(request.url, COOKIE_NAMES, 0)
             val oldCookie = cookieManager.get(request.url)
                 .firstOrNull { it.name == "cf_clearance" }
-            resolveWithWebView(request, oldCookie)
+
+            // KMK --> FlareSolverr first, then the WebView. Solved retries carry the solver's own
+            // user agent because Cloudflare ties cf_clearance to it.
+            if (preferences.enableFlareSolverr.get()) {
+                val solved = resolveWithFlareSolverr(request)
+                if (solved != null) return chain.proceed(solved)
+                return chain.proceed(resolveWithStockUserAgent(request))
+            }
+            // KMK <--
+            CloudflareBypassStatus.track(request.url.host, CloudflareBypassStatus.Method.WEBVIEW) {
+                resolveWithWebView(request, oldCookie)
+            }
 
             return chain.proceed(request)
         }
@@ -67,6 +90,45 @@ class CloudflareInterceptor(
             throw IOException(e)
         }
     }
+
+    // KMK -->
+    /** Returns the request to retry with, or null to fall back to the WebView. */
+    private fun resolveWithFlareSolverr(request: Request): Request? {
+        val oldClearance = flareSolverrProvider().clearanceCookie(request.url)
+        val previousUserAgent = preferences.defaultUserAgent().get()
+        return try {
+            CloudflareBypassStatus.track(request.url.host, CloudflareBypassStatus.Method.FLARESOLVERR) {
+                runBlocking { flareSolverrProvider().resolve(request, oldClearance) }
+            }
+        } catch (e: Exception) {
+            logcat(LogPriority.WARN, e) { "FlareSolverr failed, falling back to WebView" }
+            null
+        }.also { solved ->
+            if (solved != null && preferences.defaultUserAgent().get() != previousUserAgent) {
+                executor.execute { context.toast(KMR.strings.flare_solver_user_agent_updated, Toast.LENGTH_LONG) }
+            }
+        }
+    }
+
+    /**
+     * WebView fallback under the stock user agent: the solver's desktop one makes the challenge fail,
+     * so it has to be reset before retrying.
+     */
+    private fun resolveWithStockUserAgent(request: Request): Request {
+        val userAgent = preferences.defaultUserAgent().defaultValue()
+        if (preferences.defaultUserAgent().get() != userAgent) {
+            preferences.defaultUserAgent().delete()
+            executor.execute { context.toast(KMR.strings.flare_solver_user_agent_reset, Toast.LENGTH_LONG) }
+        }
+        val fallbackRequest = request.newBuilder().header("User-Agent", userAgent).build()
+        cookieManager.remove(fallbackRequest.url, COOKIE_NAMES, 0)
+        val oldCookie = cookieManager.get(fallbackRequest.url).firstOrNull { it.name in COOKIE_NAMES }
+        CloudflareBypassStatus.track(fallbackRequest.url.host, CloudflareBypassStatus.Method.WEBVIEW) {
+            resolveWithWebView(fallbackRequest, oldCookie)
+        }
+        return fallbackRequest
+    }
+    // KMK <--
 
     private fun resolveWithWebView(originalRequest: Request, oldCookie: Cookie?) {
         // We need to lock this thread until the WebView finds the challenge solution url, because
@@ -151,6 +213,11 @@ class CloudflareInterceptor(
 
 private val ERROR_CODES = listOf(403, 503)
 private val SERVER_CHECK = arrayOf("cloudflare-nginx", "cloudflare")
-private val COOKIE_NAMES = listOf("cf_clearance")
+// KMK --> Widened from private so FlareSolverr.kt reads the same constant; a second copy in that
+// file's package would be a conflicting declaration and make this file's uses ambiguous.
+// KMK <--
+internal val COOKIE_NAMES = listOf("cf_clearance")
 
-private class CloudflareBypassException : Exception()
+// KMK --> Shared with FlareSolverr.kt, which reports a failed solve through the same signal.
+internal class CloudflareBypassException(message: String? = null) : Exception(message)
+// KMK <--

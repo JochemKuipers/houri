@@ -100,6 +100,7 @@ import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.category.interactor.SetMangaCategories
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.category.model.Category.Companion.UNCATEGORIZED_ID
+import tachiyomi.domain.category.model.CategorySortOrder
 import tachiyomi.domain.category.model.sortedForDisplay
 import tachiyomi.domain.chapter.interactor.GetBookmarkedChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
@@ -273,7 +274,8 @@ class LibraryScreenModel(
                     libraryPreferences.sortingMode().changes(),
                     libraryPreferences.showHiddenCategories().changes(),
                     libraryPreferences.showEmptyCategoriesSearch().changes(),
-                    ::Triple,
+                    libraryPreferences.categoryManagerSortMode().changes(),
+                    ::LibraryDisplayPreferences,
                 ),
                 combine(
                     state.map { it.filterCategory }.distinctUntilChanged(),
@@ -288,7 +290,7 @@ class LibraryScreenModel(
                     // KMK <--
                 ),
                 // KMK <--
-            ) { (data, groupType, noActiveFilterOrSearch), (sort, showHiddenCategories, showEmptyCategoriesSearch), (filterCategory, includedCategories, activeSelection) ->
+            ) { (data, groupType, noActiveFilterOrSearch), (sort, showHiddenCategories, showEmptyCategoriesSearch, categorySortMode), (filterCategory, includedCategories, activeSelection) ->
                 // KMK -->
                 val (activeCategoryId, activeSubCategoryId) = activeSelection
                 val subcategoryMangaMap = if (groupType == LibraryGroup.BY_DEFAULT) {
@@ -348,6 +350,25 @@ class LibraryScreenModel(
                         }
                     }
                     .let { map -> map }
+                    // KMK --> The count-based orders. The name and date orders already came in with
+                    // `data.categories`, which this combine receives pre-sorted; the counts only exist
+                    // here, on the groups just built, so they cannot be applied any earlier.
+                    // sortedBy* is stable, so a tie keeps that incoming order rather than whatever the
+                    // grouping happened to produce.
+                    .let { map ->
+                        when (categorySortOrderOf(categorySortMode)) {
+                            CategorySortOrder.MOST_ITEMS ->
+                                map.entries.sortedByDescending { it.value.size }
+                                    .associateTo(LinkedHashMap()) { it.key to it.value }
+
+                            CategorySortOrder.LEAST_ITEMS ->
+                                map.entries.sortedBy { it.value.size }
+                                    .associateTo(LinkedHashMap()) { it.key to it.value }
+
+                            else -> map
+                        }
+                    }
+                    // KMK <--
                     // KMK -->
                     .let { it to subcategoryMangaMap }
                 // KMK <--
@@ -2227,3 +2248,16 @@ class LibraryScreenModel(
     }
     // KMK <--
 }
+
+// KMK -->
+/**
+ * The four preference flows that drive grouping. Grouping needs the category sort mode alongside
+ * the other three, but kotlinx.coroutines has no 4-tuple to destructure into, so it gets a named one.
+ */
+private data class LibraryDisplayPreferences(
+    val sort: LibrarySort,
+    val showHiddenCategories: Boolean,
+    val showEmptyCategoriesSearch: Boolean,
+    val categorySortMode: Int,
+)
+// KMK <--

@@ -5,6 +5,7 @@ import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import eu.kanade.tachiyomi.network.interceptor.CloudflareInterceptor
+import eu.kanade.tachiyomi.network.interceptor.FlareSolverr
 import eu.kanade.tachiyomi.network.interceptor.UncaughtExceptionInterceptor
 import eu.kanade.tachiyomi.network.interceptor.UserAgentInterceptor
 import exh.log.EHLogLevel
@@ -98,10 +99,27 @@ open /* SY <-- */ class NetworkHelper(
         }
     }
 
+    // KMK --> FlareSolverr needs this NetworkHelper, and the CloudflareInterceptor below is built
+    // from it, so it is constructed here rather than injected - injecting it would hand Metro a
+    // dependency cycle (FlareSolverr -> NetworkHelper -> FlareSolverr). Lazy, because constructing
+    // one must not force `client`. Cached, because FlareSolverr's mutex only serialises anything
+    // while concurrent challenges share one instance, and its clearance-reuse path compares against
+    // the shared cookie jar regardless; a fresh instance per call serialises nothing and fires one
+    // solve per challenge.
+    private val flareSolverr: FlareSolverr by lazy { FlareSolverr(this, preferences) }
+    private val flareSolverrProvider: () -> FlareSolverr = ::flareSolverr
+    // KMK <--
+
     /* SY --> */ open /* SY <-- */ val client /* KMK --> */ by lazy /* KMK <-- */ {
         clientBuilder()
             .addInterceptor(
-                CloudflareInterceptor(context, cookieJar, ::defaultUserAgentProvider),
+                CloudflareInterceptor(
+                    context,
+                    cookieJar,
+                    preferences,
+                    ::defaultUserAgentProvider,
+                    flareSolverrProvider,
+                ),
             )
             // KMK -->
             // FIXME (KMK): Dirty hack to fetch MangaDex covers
@@ -140,7 +158,7 @@ open /* SY <-- */ class NetworkHelper(
         callTimeout: Long = 120,
     ) = clientBuilder(connectTimeout, readTimeout, callTimeout)
         .addInterceptor(
-            CloudflareInterceptor(context, cookieJar, ::defaultUserAgentProvider),
+            CloudflareInterceptor(context, cookieJar, preferences, ::defaultUserAgentProvider, flareSolverrProvider),
         )
         .build()
 

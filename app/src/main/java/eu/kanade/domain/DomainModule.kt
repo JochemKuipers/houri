@@ -59,6 +59,7 @@ import tachiyomi.domain.category.interactor.ResetCategoryFlags
 import tachiyomi.domain.category.interactor.SetDisplayMode
 import tachiyomi.domain.category.interactor.SetMangaCategories
 import tachiyomi.domain.category.interactor.SetSortModeForCategory
+import tachiyomi.domain.category.interactor.SyncCategoriesWithTrackStatus
 import tachiyomi.domain.category.interactor.UpdateCategory
 import tachiyomi.domain.category.repository.CategoryRepository
 import tachiyomi.domain.chapter.interactor.GetBookmarkedChaptersByMangaId
@@ -148,6 +149,9 @@ class DomainModule : InjektModule {
         addFactory { UpdateMangaNotes(get()) }
         addFactory { SetMangaCategories(get(), get()) }
         // KMK -->
+        addFactory { SyncCategoriesWithTrackStatus(get(), get()) }
+        // KMK <--
+        // KMK -->
         addFactory { StartRereading(get(), get(), get(), get(), get(), get(), get(), get()) }
         addFactory { StopRereading(get(), get(), get(), get(), get(), get(), get(), get()) }
         addFactory { CompleteRereadIfNeeded(get(), get(), get(), get(), get(), get(), get(), get()) }
@@ -164,9 +168,9 @@ class DomainModule : InjektModule {
         addFactory { GetApplicationRelease(get()) }
 
         addSingletonFactory<TrackRepository> { TrackRepositoryImpl(get()) }
-        addFactory { TrackChapter(get(), get(), get(), get()) }
+        addFactory { TrackChapter(get(), get(), get(), get(), get()) }
         addFactory { AddTracks(get(), get(), get(), get()) }
-        addFactory { RefreshTracks(get(), get(), get(), get()) }
+        addFactory { RefreshTracks(get(), get(), get(), get(), get()) }
         addFactory { DeleteTrack(get()) }
         addFactory { GetTracksPerManga(get()) }
         addFactory { GetTracks(get()) }

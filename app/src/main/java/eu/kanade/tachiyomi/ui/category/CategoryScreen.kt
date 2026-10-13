@@ -75,6 +75,12 @@ class CategoryScreen : Screen() {
             onShowDeleteMany = {
                 screenModel.showDialog(CategoryDialog.DeleteMany(successState.selectedIds.toList()))
             },
+            onSelectTrackStatus = { category, status ->
+                screenModel.setCategoryTrackStatus(category.id, status)
+            },
+            onSelectUpdateInterval = { category, days ->
+                screenModel.setCategoryUpdateInterval(category.id, days)
+            },
             // KMK <--
             navigateUp = navigator::pop,
         )

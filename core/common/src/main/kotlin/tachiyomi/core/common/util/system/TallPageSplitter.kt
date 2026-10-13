@@ -79,11 +79,26 @@ object TallPageSplitter {
             val width = decoder.width
             for ((index, range) in bounds.withIndex()) {
                 val rect = Rect(0, range.first, width, range.last + 1)
-                val bitmap = decoder.decodeRegion(rect, options) ?: continue
+                // A segment that will not decode fails the whole split rather than being skipped.
+                // The caller builds the chapter's page list from whatever arrives and maps it by
+                // list position, so a partial result is a strip with a chunk missing that still
+                // reports success - and every later segment then carries a page index that no
+                // longer matches the index baked into its cache key. OOM is the realistic cause
+                // here, which is exactly when a long strip is already under memory pressure.
+                val bitmap = decoder.decodeRegion(rect, options)
+                if (bitmap == null) {
+                    logcat(LogPriority.ERROR) {
+                        "Tall page split: segment $index of ${imageFile.name} failed to decode - aborting"
+                    }
+                    return false
+                }
                 val out = ByteArrayOutputStream()
-                bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-                bitmap.recycle()
-                onSegment(index, out.toByteArray())
+                try {
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                    onSegment(index, out.toByteArray())
+                } finally {
+                    bitmap.recycle()
+                }
             }
             true
         } catch (e: Exception) {

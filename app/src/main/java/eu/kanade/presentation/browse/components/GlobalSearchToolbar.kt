@@ -15,6 +15,7 @@ import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material.icons.outlined.PushPin
+import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -65,6 +66,8 @@ fun GlobalSearchToolbar(
     sourceCategory: String = "",
     sourceCategories: List<String> = emptyList(),
     onChangeSourceCategory: (String) -> Unit = {},
+    exactAuthorMatch: Boolean = false,
+    onToggleExactAuthorMatch: () -> Unit = {},
     // KMK <--
 ) {
     Column(modifier = Modifier.background(MaterialTheme.colorScheme.surface)) {
@@ -201,6 +204,22 @@ fun GlobalSearchToolbar(
                 },
                 label = {
                     Text(text = stringResource(MR.strings.has_results))
+                },
+            )
+
+            FilterChip(
+                selected = exactAuthorMatch,
+                onClick = { onToggleExactAuthorMatch() },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Outlined.VerifiedUser,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(FilterChipDefaults.IconSize),
+                    )
+                },
+                label = {
+                    Text(text = stringResource(KMR.strings.exact_author_match))
                 },
             )
         }

@@ -62,6 +62,7 @@ import tachiyomi.core.common.preference.getAndSet
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.category.interactor.GetCategories
+import tachiyomi.domain.category.interactor.GetCategoryUpdateInterval
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.NoChaptersException
@@ -94,6 +95,7 @@ import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.domain.track.interactor.InsertTrack
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.kmk.KMR
 import java.time.Instant
 import java.time.ZonedDateTime
 import java.util.concurrent.CopyOnWriteArrayList
@@ -315,11 +317,28 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         val skippedUpdates = mutableListOf<Pair<Manga, String?>>()
         val (_, fetchWindowUpperBound) = fetchInterval.getWindow(ZonedDateTime.now())
 
+        // KMK --> Per-category update intervals (#25). Loaded once and looked up per entry below:
+        // asking the repository per manga would be a database round trip for every entry in the
+        // library, on every scheduled run. Entries whose categories carry no interval are absent
+        // from the map and so are untouched, which is what keeps existing behaviour identical.
+        val categoryIntervals = getCategories.await()
+            .mapNotNull { category -> category.updateInterval?.let { category.id to it } }
+            .toMap()
+        val categoryIntervalNow = System.currentTimeMillis()
+        val dayMillis = java.util.concurrent.TimeUnit.DAYS.toMillis(1)
+        // KMK <--
+
         mangaToUpdate = listToUpdate
             // SY -->
             .distinctBy { it.manga.id }
             // SY <--
             .filter {
+                // KMK --> Per-category interval (#25). Only ever narrows the schedule: a null
+                // interval means nothing is bound, and lastUpdate == 0 means never fetched, which
+                // must still be picked up rather than treated as "updated at the epoch".
+                val categoryIntervalDays =
+                    GetCategoryUpdateInterval.intervalDaysFor(categoryIntervals, it.categories.toSet())
+                // KMK <--
                 when {
                     it.manga.updateStrategy == UpdateStrategy.ONLY_FETCH_ONCE && it.totalChapters > 0L -> {
                         skippedUpdates.add(
@@ -351,6 +370,16 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                         )
                         false
                     }
+
+                    // KMK -->
+                    categoryIntervalDays != null && it.manga.lastUpdate > 0L &&
+                        (categoryIntervalNow - it.manga.lastUpdate) < categoryIntervalDays * dayMillis -> {
+                        skippedUpdates.add(
+                            it.manga to context.stringResource(KMR.strings.skipped_reason_category_interval),
+                        )
+                        false
+                    }
+                    // KMK <--
 
                     else -> true
                 }

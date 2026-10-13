@@ -65,15 +65,25 @@ internal fun WebGpuViewer.requerySuspectPage(page: ViewerReaderPage, reason: Str
         record.attempts
     }
 
-    // A split segment is cut from the parent image, so the parent is what has to be evicted - the
-    // segment files are derived from it and will be re-cut on the way back through.
-    val cacheKey = page.page.imageUrl?.substringBefore(SEGMENT_KEY_SUFFIX)
+    // A split segment is cut from the parent image, so the parent has to be evicted for the re-cut
+    // to have a source to read. But evicting *only* the parent is not enough: the segment's own
+    // file is cached under its own derived key and is not touched by that, so `ensureSegment`
+    // finds it still present and hands the same bytes straight back. Evict both - the segment's own
+    // key so the stale slice cannot be served, and the parent so it can be re-cut from fresh bytes.
+    val imageUrl = page.page.imageUrl
+    val parentKey = imageUrl?.substringBefore(SEGMENT_KEY_SUFFIX)
+    val cacheKeys = listOfNotNull(
+        imageUrl,
+        parentKey?.takeIf { it != imageUrl },
+    )
     var evicted = false
-    if (cacheKey != null) {
-        evicted = runCatching { globalAppGraph.chapterCache.removeImageFromCache(cacheKey) }
-            .onFailure { logcat(LogPriority.WARN, it) { "ReQuery cache eviction failed for $cacheKey" } }
+    cacheKeys.forEach { key ->
+        val removed = runCatching { globalAppGraph.chapterCache.removeImageFromCache(key) }
+            .onFailure { logcat(LogPriority.WARN, it) { "ReQuery cache eviction failed for $key" } }
             .getOrDefault(false)
+        evicted = evicted || removed
     }
+    val cacheKey = parentKey ?: imageUrl
 
     // Re-arm the page rather than trusting the caller's error state: the ladder's cooldown would
     // otherwise hold it in cooldown, and wantedByRender would keep ensureDecoding from queueing the

@@ -22,6 +22,8 @@ import tachiyomi.domain.category.interactor.HideCategory
 import tachiyomi.domain.category.interactor.MergeCategories
 import tachiyomi.domain.category.interactor.RenameCategory
 import tachiyomi.domain.category.interactor.ReorderCategory
+import tachiyomi.domain.category.interactor.SetCategoryTrackStatus
+import tachiyomi.domain.category.interactor.SetCategoryUpdateInterval
 import tachiyomi.domain.category.interactor.UpdateCategory
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.category.model.CategorySortOrder
@@ -42,6 +44,8 @@ class CategoryScreenModel(
     private val mergeCategories: MergeCategories = globalAppGraph.mergeCategories,
     private val getLibraryManga: GetLibraryManga = globalAppGraph.getLibraryManga,
     private val libraryPreferences: LibraryPreferences = globalAppGraph.libraryPreferences,
+    private val setCategoryTrackStatus: SetCategoryTrackStatus = globalAppGraph.setCategoryTrackStatus,
+    private val setCategoryUpdateInterval: SetCategoryUpdateInterval = globalAppGraph.setCategoryUpdateInterval,
     // KMK <--
 ) : StateScreenModel<CategoryScreenState>(CategoryScreenState.Loading) {
 
@@ -195,6 +199,18 @@ class CategoryScreenModel(
     fun setSearchQuery(query: String) {
         mutableState.update {
             if (it is CategoryScreenState.Success) it.copy(searchQuery = query) else it
+        }
+    }
+
+    fun setCategoryTrackStatus(categoryId: Long, trackStatus: Int?) {
+        screenModelScope.launch {
+            setCategoryTrackStatus.await(categoryId, trackStatus)
+        }
+    }
+
+    fun setCategoryUpdateInterval(categoryId: Long, updateIntervalDays: Int?) {
+        screenModelScope.launch {
+            setCategoryUpdateInterval.await(categoryId, updateIntervalDays)
         }
     }
 
@@ -409,11 +425,14 @@ object CategoryManagerSort {
 }
 
 // Persisted as a raw Int, so new modes must be appended and never renumbered.
-// The count-based modes have no meaning for tab ordering, where the tab list is
-// the library's own display order, so they fall back to manual.
+// The count-based modes order the library's tabs by how many entries each group holds, which
+// the grouped tabs can do and a bare category list cannot - so they map through and are applied
+// by the caller holding the counts, not dropped to manual here.
 fun categorySortOrderOf(mode: Int): CategorySortOrder = when (mode) {
     CategoryManagerSort.AZ -> CategorySortOrder.NAME_ASC
     CategoryManagerSort.ZA -> CategorySortOrder.NAME_DESC
+    CategoryManagerSort.MOST_ITEMS -> CategorySortOrder.MOST_ITEMS
+    CategoryManagerSort.LEAST_ITEMS -> CategorySortOrder.LEAST_ITEMS
     CategoryManagerSort.DATE_ADDED_NEWEST -> CategorySortOrder.DATE_ADDED_NEWEST
     CategoryManagerSort.DATE_ADDED_OLDEST -> CategorySortOrder.DATE_ADDED_OLDEST
     CategoryManagerSort.DATE_MODIFIED_NEWEST -> CategorySortOrder.DATE_MODIFIED_NEWEST

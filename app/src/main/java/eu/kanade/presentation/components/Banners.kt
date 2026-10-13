@@ -31,7 +31,9 @@ import androidx.compose.ui.util.fastForEach
 import androidx.compose.ui.util.fastMap
 import androidx.compose.ui.util.fastMaxBy
 import dev.icerock.moko.resources.StringResource
+import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassStatus
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
 import java.math.RoundingMode
 import java.text.NumberFormat
@@ -69,6 +71,51 @@ fun WarningBanner(
     )
 }
 
+// KMK --> Ported from jobobby04/TachiyomiSY#1124.
+val CloudflareBypassBannerBackgroundColor
+    @Composable
+    get() = MaterialTheme.colorScheme.secondary
+
+@Composable
+private fun CloudflareBypassBanner(bypass: CloudflareBypassStatus.Bypass, modifier: Modifier = Modifier) {
+    val method = stringResource(
+        when (bypass.method) {
+            CloudflareBypassStatus.Method.FLARESOLVERR -> KMR.strings.cloudflare_bypass_method_flaresolverr
+            CloudflareBypassStatus.Method.WEBVIEW -> KMR.strings.cloudflare_bypass_method_webview
+        },
+    )
+    val density = LocalDensity.current
+    Row(
+        modifier = Modifier
+            .background(color = CloudflareBypassBannerBackgroundColor)
+            .fillMaxWidth()
+            .padding(8.dp)
+            .then(modifier),
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        // Sized off the measured text so the two never disagree in height, however long the host.
+        var textHeight by remember { mutableStateOf(0.dp) }
+        CircularProgressIndicator(
+            modifier = Modifier.requiredSize(textHeight),
+            color = MaterialTheme.colorScheme.onSecondary,
+            strokeWidth = textHeight / 8,
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = stringResource(KMR.strings.cloudflare_bypass_in_progress, method, bypass.host),
+            color = MaterialTheme.colorScheme.onSecondary,
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.labelMedium,
+            onTextLayout = {
+                with(density) {
+                    textHeight = it.size.height.toDp()
+                }
+            },
+        )
+    }
+}
+// KMK <--
+
 // KMK -->
 private val percentFormatter = NumberFormat.getPercentInstance().apply {
     roundingMode = RoundingMode.DOWN
@@ -89,6 +136,7 @@ fun AppStateBanners(
     modifier: Modifier = Modifier,
     // KMK -->
     progress: Float? = null,
+    cloudflareBypass: CloudflareBypassStatus.Bypass? = null,
     // KMK <--
 ) {
     val density = LocalDensity.current
@@ -155,7 +203,33 @@ fun AppStateBanners(
         }.fastMap { it.measure(constraints) }
         val incognitoHeight = incognitoPlaceable.fastMaxBy { it.height }?.height ?: 0
 
-        layout(constraints.maxWidth, indexingHeight + downloadedOnlyHeight + incognitoHeight) {
+        // KMK --> Shows which Cloudflare solver a stuck request is waiting on. Ported from
+        // jobobby04/TachiyomiSY#1124. The previous value is kept alive across recomposition so the
+        // banner does not blink out mid-solve while `debounce` holds the flow still.
+        val cloudflareBypassPlaceable = subcompose(3) {
+            val lastBypass = remember { arrayOfNulls<CloudflareBypassStatus.Bypass>(1) }
+            if (cloudflareBypass != null) lastBypass[0] = cloudflareBypass
+            AnimatedVisibility(
+                visible = cloudflareBypass != null,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+            ) {
+                val top = (mainInsetsTop - indexingHeight - downloadedOnlyHeight - incognitoHeight).coerceAtLeast(0)
+                lastBypass[0]?.let {
+                    CloudflareBypassBanner(
+                        bypass = it,
+                        modifier = Modifier.windowInsetsPadding(WindowInsets(top = top)),
+                    )
+                }
+            }
+        }.fastMap { it.measure(constraints) }
+        val cloudflareBypassHeight = cloudflareBypassPlaceable.fastMaxBy { it.height }?.height ?: 0
+        // KMK <--
+
+        layout(
+            constraints.maxWidth,
+            indexingHeight + downloadedOnlyHeight + incognitoHeight + cloudflareBypassHeight,
+        ) {
             indexingPlaceable.fastForEach {
                 it.place(0, 0)
             }
@@ -165,6 +239,11 @@ fun AppStateBanners(
             incognitoPlaceable.fastForEach {
                 it.place(0, indexingHeight + downloadedOnlyHeight)
             }
+            // KMK -->
+            cloudflareBypassPlaceable.fastForEach {
+                it.place(0, indexingHeight + downloadedOnlyHeight + incognitoHeight)
+            }
+            // KMK <--
         }
     }
 }

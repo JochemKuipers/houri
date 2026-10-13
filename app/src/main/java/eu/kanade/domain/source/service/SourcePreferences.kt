@@ -141,6 +141,11 @@ class SourcePreferences(
         "",
     )
 
+    fun globalSearchExactAuthorMatch() = preferenceStore.getBoolean(
+        Preference.appStateKey("global_search_exact_author_match"),
+        false,
+    )
+
     fun disabledRepos() = preferenceStore.getStringSet("disabled_repos", emptySet())
     // KMK <--
 
