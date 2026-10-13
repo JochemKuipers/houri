@@ -5,6 +5,7 @@ import android.content.Intent
 import androidx.compose.runtime.Immutable
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
+import eu.kanade.tachiyomi.data.updater.UpdateApkStore
 import eu.kanade.tachiyomi.extension.util.ExtensionInstaller
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.NetworkHelper
@@ -24,6 +25,7 @@ import mihon.app.di.globalAppGraph
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
 import java.io.File
+import java.io.IOException
 
 class NewUpdateScreenModel(
     private val changelogInfo: String,
@@ -36,8 +38,8 @@ class NewUpdateScreenModel(
     private val _state = MutableStateFlow(State(changelogInfo = changelogInfo))
     val state: StateFlow<State> = _state
 
-    private val apkFile: File
-        get() = File(context.externalCacheDir, "update.apk")
+    private val apkFile: File?
+        get() = UpdateApkStore.apkFile(context)
 
     private var downloadJob: Job? = null
 
@@ -53,13 +55,14 @@ class NewUpdateScreenModel(
                 throw e
             } catch (e: Exception) {
                 logcat(LogPriority.ERROR, e)
-                apkFile.delete()
+                apkFile?.delete()
                 _state.update { it.copy(stage = Stage.Failed) }
             }
         }
     }
 
     private suspend fun downloadApk() {
+        val target = apkFile ?: throw IOException("No external cache directory to download the update into")
         val progressListener = object : ProgressListener {
             // Progress of the download
             var savedProgress = 0
@@ -79,7 +82,7 @@ class NewUpdateScreenModel(
         }
 
         val response = network.client.newCachelessCallWithProgress(GET(downloadLink), progressListener).awaitSuccess()
-        response.body.source().saveTo(apkFile)
+        response.body.source().saveTo(target)
     }
 
     /**
@@ -96,14 +99,15 @@ class NewUpdateScreenModel(
                 .onFailure { logcat(LogPriority.WARN, it) { "Could not checkpoint the database before updating" } }
 
             try {
-                if (!apkFile.exists()) {
+                val file = apkFile
+                if (file == null || !file.exists()) {
                     logcat(LogPriority.WARN) { "APK file not found, re-downloading" }
                     _state.update { it.copy(stage = Stage.Available) }
                     startDownload()
                     return@launch
                 }
                 val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(apkFile.getUriCompat(context), ExtensionInstaller.APK_MIME)
+                    setDataAndType(file.getUriCompat(context), ExtensionInstaller.APK_MIME)
                     flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
                 }
                 context.startActivity(intent)

@@ -185,6 +185,15 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                 .onFailure { xLogE("Failed to delete orphaned subcategories", it) }
         }
 
+        // KMK --> The update APK used to survive every install, because nothing ever removed it and
+        // a release APK is tens of megabytes. Start is the only point where "is this still needed?"
+        // is answerable: the archive's version against the running one.
+        ProcessLifecycleOwner.get().lifecycleScope.launchIO {
+            runCatching { eu.kanade.tachiyomi.data.updater.UpdateApkStore.cleanUpIfUnneeded(this@App) }
+                .onFailure { xLogE("Failed to clean up the downloaded update APK", it) }
+        }
+        // KMK <--
+
         val yakuyomiPrefs = globalAppGraph.translationPreferences
         val localLlm = globalAppGraph.localLlmManager
         if (!BuildConfig.IS_NOMTL && yakuyomiPrefs.localLlmAutoStart().get() && localLlm.isLocalProvider()) {
