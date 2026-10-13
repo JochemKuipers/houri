@@ -9,6 +9,7 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.segmentIndex
+import eu.kanade.tachiyomi.ui.reader.model.segmentNumberOfIndex
 import eu.kanade.tachiyomi.ui.reader.model.segmentParentIndex
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import exh.source.isEhBasedSource
@@ -40,6 +41,25 @@ import kotlin.math.min
 
 /** Cache-key suffix distinguishing a split segment from the image it was cut from. */
 private const val SEGMENT_KEY_SUFFIX = "#segment-"
+
+/**
+ * How many times one source image may be re-cut before it is left to fail visibly.
+ *
+ * Re-cutting is not free: each pass decodes the parent image, and if the cache evicted the parent
+ * as well, each pass re-downloads the whole strip. An image too large for the cache would
+ * otherwise be re-cut for every request the reader makes against it. Small enough that a strip
+ * being browsed normally never reaches it, large enough that a transient eviction still recovers.
+ */
+private const val MAX_SEGMENT_RECUTS = 3
+
+/** What [HttpPageLoader.ensureSegment] has learned about re-cutting one source image. */
+private class OversizedImage {
+    /** Re-cut passes run so far, against [MAX_SEGMENT_RECUTS]. */
+    var cuts: Int = 0
+
+    /** Set once a full cut failed to leave the requested segment cached. */
+    var oversized: Boolean = false
+}
 
 /**
  * Loader used to load chapters from an online source.
@@ -75,6 +95,13 @@ internal class HttpPageLoader(
      * check and the insert have to happen together.
      */
     private val splitLock = Any()
+
+    /**
+     * Source images whose segments have outgrown the image cache, and how often each has been
+     * re-cut. Guarded by [splitLock]; bounded by the chapter's page count and dropped with the
+     * loader, which serves one chapter and is recreated per chapter.
+     */
+    private val oversizedImages = HashMap<String, OversizedImage>()
 
     /**
      * Serialises the download half of [internalLoadPage] per source image URL.
@@ -184,16 +211,37 @@ internal class HttpPageLoader(
     }
 
     /**
+     * Drops a cached source image URL so the next load resolves it from the source again.
+     *
+     * E-H based sources mint a fresh URL per request, so a retry that kept the old one can re-fetch
+     * a link that has since expired. Deliberately loader-side and shared by every retry entry point:
+     * doing it at the call site means each one has to remember, and one that does not silently loses
+     * the refresh. A segment keeps working either way - its slice number is recovered from the page's
+     * index when the `#segment-N` suffix goes with the URL.
+     */
+    private fun refreshImageUrl(page: ReaderPage) {
+        if (source.isEhBasedSource()) {
+            page.imageUrl = null
+        }
+    }
+
+    /**
      * Retries a page. This method is only called from user interaction on the viewer.
      */
     override fun retryPage(page: ReaderPage) {
-        if (page.status is Page.State.Error) {
+        refreshImageUrl(page)
+
+        // KMK --> Reset anything not already queued, not only Error.
+        //
+        // Both branches below only act on a queued page (boostPage checks `status == Queue`, and
+        // the loader's collector filters on it), so offering a page that is still Ready queued work
+        // that was then discarded. Harmless for an ordinary page, fatal for a split segment: a
+        // segment is built Ready and streams from a cache file the LRU evicts independently of the
+        // page list, so an evicted segment is Ready-but-unreadable and reports `no-stream` forever.
+        // Queueing is what lets loadSegment re-cut it.
+        // KMK <--
+        if (page.status != Page.State.Queue) {
             page.status = Page.State.Queue
-        }
-        // EXH -->
-        // Grab a new image URL on EXH sources
-        if (source.isEhBasedSource()) {
-            page.imageUrl = null
         }
 
         if (readerPreferences.readerInstantRetry().get()) { // EXH <--
@@ -348,7 +396,12 @@ internal class HttpPageLoader(
      * so the same cut always lands on the same key.
      */
     private fun loadSegment(page: ReaderPage, imageUrl: String) {
-        val index = page.imageUrl!!.substringAfter(SEGMENT_KEY_SUFFIX, "").toIntOrNull() ?: 0
+        // The suffix is the usual record of which slice this is, but a retry can re-resolve the URL
+        // from the source and drop it. Defaulting to 0 then sent every segment of a strip to the
+        // first slice, so the whole strip drew as its own top. The page's index encodes the same
+        // number and always survives.
+        val index = page.imageUrl?.substringAfter(SEGMENT_KEY_SUFFIX, "")?.toIntOrNull()
+            ?: segmentNumberOfIndex(page.index)
         val key = ensureSegment(imageUrl, index) ?: imageUrl
         page.stream = { chapterCache.getImageFile(key).inputStream() }
         page.status = Page.State.Ready
@@ -373,34 +426,76 @@ internal class HttpPageLoader(
         synchronized(splitLock) {
             if (chapterCache.isImageInCache(key)) return key
 
+            // KMK --> A strip's working set is its parent image plus every segment cut from it - roughly
+            // twice the strip - and a long webtoon chapter does not fit the default 75MB image cache.
+            // The failure is not "no space": the cache is an LRU, so writing every segment evicts the
+            // parent, and the next request re-cuts from a parent that is gone and re-downloads the whole
+            // strip. That loop is the churn.
+            //
+            // So the write strategy is adaptive. The first cut writes every segment, which is strictly
+            // better when the strip does fit. If the segment asked for is then absent, the strip has
+            // shown it is larger than the cache, so it is remembered and later cuts restore only the
+            // band asked for - one decode and encode instead of a dozen.
+            // KMK <--
+            val state = oversizedImages.getOrPut(imageUrl) { OversizedImage() }
+            if (state.cuts >= MAX_SEGMENT_RECUTS) {
+                logcat(LogPriority.ERROR) {
+                    "Giving up re-cutting ${imageUrl.takeLast(64)}: it does not fit the image cache " +
+                        "after $MAX_SEGMENT_RECUTS attempts - raise the reader image cache size"
+                }
+                return null
+            }
+            state.cuts++
+
             // The cut produces every segment, and all of them are written rather than just the one
             // asked for: the cache is an LRU, so segments are evicted one at a time, and restoring only
             // the requested one would cost a full re-split for each of them in turn.
             var produced = 0
+            val writeAll = !state.oversized
             val split = TallPageSplitter.split(
                 imageFile = chapterCache.getImageFile(imageUrl),
                 maxSegmentHeight = maxSegmentHeight,
+                only = if (writeAll) null else index,
             ) { i, bytes ->
                 produced = i + 1
                 chapterCache.putImageToCache(segmentKey(imageUrl, i), bytes)
             }
             // The image fits as it stands, which means a shorter one replaced the strip this segment
             // was cut from. The whole file is then the right thing for the page to read.
-            if (!split) return null
+            if (!split) {
+                oversizedImages.remove(imageUrl)
+                return null
+            }
 
             // Anything past what this cut produced belongs to an earlier, longer split of the same
             // image. Left in the cache it still answers isImageInCache, so a segment page from that
-            // older split would decode an image that no longer matches its position.
-            var stale = produced
-            while (chapterCache.removeImageFromCache(segmentKey(imageUrl, stale))) {
-                stale++
+            // older split would decode an image that no longer matches its position. Only meaningful
+            // for a full cut - a single-band pass never learns how many bands there are, and the
+            // bands it skipped are still valid.
+            if (writeAll) {
+                var stale = produced
+                while (chapterCache.removeImageFromCache(segmentKey(imageUrl, stale))) {
+                    stale++
+                }
             }
 
             // A region the decoder could not read is skipped rather than reported, so `produced` counts
             // the last index attempted, not the segments on disk. Verified here instead: returning the
             // key anyway would send the reader to a file that was never written.
-            check(chapterCache.isImageInCache(key)) {
-                "Segment $index missing after re-cutting ${imageUrl.takeLast(48)}"
+            if (!chapterCache.isImageInCache(key)) {
+                // The write did not survive. On a first full cut that is the cache being smaller than
+                // the strip, which is worth remembering; on a single-band cut there is nothing left
+                // to try, and the caller falls back to the whole image so the page fails visibly.
+                if (writeAll) {
+                    state.oversized = true
+                    logcat(LogPriority.WARN) {
+                        "${imageUrl.takeLast(64)} does not fit the reader image cache even split - " +
+                            "restoring one segment at a time. Raise the reader image cache size to " +
+                            "stop re-cutting the whole strip."
+                    }
+                    return ensureSegment(imageUrl, index)
+                }
+                return null
             }
             return key
         }
@@ -511,6 +606,9 @@ internal class HttpPageLoader(
 
     // EXH -->
     fun boostPage(page: ReaderPage) {
+        // Same refresh retryPage does: callers reach this one directly for the page on screen, and
+        // without it an E-H retry through this path kept a URL that may have expired.
+        refreshImageUrl(page)
         if (page.status == Page.State.Queue) {
             scope.launchIO {
                 loadPage(page)

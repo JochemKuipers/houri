@@ -95,7 +95,11 @@ internal fun WebGpuViewer.requerySuspectPage(page: ViewerReaderPage, reason: Str
     synchronized(lock) {
         if (!pageInCache(page)) return false
         page.wantedByRender = false
-        stuckRecords.remove(pageKey(page))
+        // Clear the cooldown, not the record. Dropping the entry entirely restarted the escalation
+        // ladder at attempt 0 on every requery, so a page whose re-query did not fix it never
+        // reached the terminal GONE state and was re-driven indefinitely - a spin, not a retry.
+        // The bytes really are new now, so the next attempt is a fair one; it just has to be counted.
+        stuckRecords[pageKey(page)]?.let { it.lastAttemptAt = 0L }
         page.state = PageState.IDLE
     }
 

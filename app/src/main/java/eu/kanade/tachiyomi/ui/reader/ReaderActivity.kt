@@ -115,7 +115,6 @@ import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.system.toShareIntent
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.util.view.setComposeContent
-import exh.source.isEhBasedSource
 import exh.util.defaultReaderType
 import exh.util.mangaType
 import kotlinx.collections.immutable.persistentSetOf
@@ -911,13 +910,10 @@ class ReaderActivity : BaseActivity() {
                     return@forEachIndexed
                 }
 
-                // If we are using EHentai/ExHentai, get a new image URL
-                viewModel.manga?.let { m ->
-                    val src = sourceManager.get(m.source)
-                    if (src?.isEhBasedSource() == true) {
-                        page.imageUrl = null
-                    }
-                }
+                // KMK --> The loader refreshes an E-H image URL itself, on both retryPage and
+                // boostPage, so it is not repeated here. Duplicated at the call site it was a
+                // segment's only record of which slice it was.
+                // KMK <--
 
                 val loader = page.chapter.pageLoader
                 if (page.index == exhCurrentpage()?.index && loader is HttpPageLoader) {

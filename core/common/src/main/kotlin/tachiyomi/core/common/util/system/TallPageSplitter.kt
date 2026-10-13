@@ -58,14 +58,22 @@ object TallPageSplitter {
      *
      * Returns false without invoking [onSegment] when the image already fits, so the caller can
      * treat a true result as "the original page is now a list of segments".
+     *
+     * [only] restricts the work to a single band, which is the difference between one decode and
+     * encode and a dozen of them. Bands are decoded one at a time regardless, so a selective pass
+     * costs a fraction of a full one rather than merely filtering its output. Callers restoring a
+     * single segment use it when the cache cannot hold the whole strip - see
+     * `HttpPageLoader.ensureSegment`.
      */
     fun split(
         imageFile: File,
         maxSegmentHeight: Int,
+        only: Int? = null,
         onSegment: (index: Int, bytes: ByteArray) -> Unit,
     ): Boolean {
         val bounds = segmentBounds(readHeight(imageFile), maxSegmentHeight)
         if (bounds.size <= 1) return false
+        if (only != null && only !in bounds.indices) return false
 
         val options = BitmapFactory.Options().apply {
             inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -78,6 +86,7 @@ object TallPageSplitter {
         return try {
             val width = decoder.width
             for ((index, range) in bounds.withIndex()) {
+                if (only != null && index != only) continue
                 val rect = Rect(0, range.first, width, range.last + 1)
                 // A segment that will not decode fails the whole split rather than being skipped.
                 // The caller builds the chapter's page list from whatever arrives and maps it by

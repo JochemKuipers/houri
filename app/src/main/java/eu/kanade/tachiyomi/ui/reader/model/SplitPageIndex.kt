@@ -83,3 +83,21 @@ internal fun parentIndexOfSegment(index: Int): Int? =
 /** Whether [this] page is a segment, and if so the index of the page its split replaced. */
 internal val ReaderPage.segmentParentIndex: Int?
     get() = if (splitSegment) parentIndexOfSegment(index) else null
+
+/**
+ * Which slice of its source image the segment carrying [index] is, read back from the index alone.
+ *
+ * The `#segment-N` suffix on a segment's `imageUrl` normally records this, but the URL is
+ * re-resolved from the source on some retry paths and the suffix is not always preserved. Falling
+ * back to the index keeps the slice identity recoverable when it is not, rather than silently
+ * defaulting every segment to slice 0 and drawing one slice of a strip as the whole strip.
+ *
+ * The other half of the inverse of [segmentIndex]: the stride is what makes the remainder the
+ * number, so this only agrees with [segmentIndex] for numbers within the stride.
+ */
+internal fun segmentNumberOfIndex(index: Int): Int =
+    if (index < SEGMENT_INDEX_BASE) {
+        0
+    } else {
+        (index - SEGMENT_INDEX_BASE) % SEGMENT_INDEX_STRIDE.toInt()
+    }

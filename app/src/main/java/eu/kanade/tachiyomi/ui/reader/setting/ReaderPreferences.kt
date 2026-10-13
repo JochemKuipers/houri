@@ -260,7 +260,18 @@ class ReaderPreferences(
 
     fun aggressivePageLoading() = preferenceStore.getBoolean("eh_aggressive_page_loading", false)
 
-    fun cacheSize() = preferenceStore.getString("eh_cache_size", "75")
+    // KMK --> 250MB, not the old 75MB.
+    //
+    // A long strip's working set is its parent image plus every segment cut from it - roughly twice
+    // the strip - and an 800x61000px webtoon chapter is ~49Mpx, so parent plus segments is 90-230MB
+    // depending on JPEG quality. At 75MB the cache was smaller than a single chapter's working set:
+    // writing the segments evicted the parent, and re-cutting then re-downloaded the whole strip.
+    // 250MB covers strips up to ~100k px tall, which is the bulk of long webtoon chapters.
+    //
+    // This is only the *default*, so it takes effect for anyone who has never touched the setting -
+    // a deliberate choice stays put. Stored values are not migrated, on purpose.
+    // KMK <--
+    fun cacheSize() = preferenceStore.getString("eh_cache_size", "250")
 
     fun autoscrollInterval() = preferenceStore.getFloat("eh_util_autoscroll_interval", 3f)
 
