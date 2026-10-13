@@ -162,6 +162,11 @@ internal fun WebGpuViewer.releasePageResources(page: ViewerReaderPage) {
     // counting as renderer-demanded or it can never be queued again if it is ever handed back.
     page.wantedByRender = false
     page.state = PageState.IDLE
+    // KMK --> The page stops costing memory the moment its textures do, and the byte budget sums
+    // this field across the cache. Zeroed here, in the single owner, or a released shell keeps
+    // charging for textures that no longer exist.
+    page.decodedBytes = 0L
+    // KMK <--
     runCatching { page.imagePage.cleanup() }
 }
 
@@ -348,20 +353,42 @@ fun WebGpuViewer.getPage(
 }
 
 /**
- * Trims the cache back to [WebGpuViewer.cacheSize], evicting furthest-first.
+ * Trims the cache back to [WebGpuViewer.cacheSize] **and** under the decoded-byte budget,
+ * evicting furthest-first.
  *
  * The iteration guard matters: [evictFarthestPage] declines to take the anchor, the live current
  * page, or anything drawn last frame, so a cache made entirely of those cannot shrink and the loop
- * would otherwise spin forever.
+ * would otherwise spin forever. The guard is raised because satisfying the byte budget can need
+ * more steps than satisfying the count did, not fewer.
+ *
+ * **Why both.** [cacheSize] answers "how many pages", which is what the preload preference means
+ * and the only thing a user can reason about. It is a poor proxy for memory: eight shells of an
+ * ordinary chapter is ~20MB, and eight shells of a split webtoon strip is ~380MB. The byte
+ * budget is what the device can actually hold, and it is measured per page rather than guessed,
+ * so the two constraints have to be satisfied together - the count keeps the user's preload
+ * preference honest, the bytes keep the device alive.
  */
 private fun WebGpuViewer.evictDownToBudget(referencePage: ViewerPage?) {
     val budget = cacheSize.coerceAtLeast(1)
+    // KMK -->
+    val byteBudget = memoryBudget.decodedPagesBytes()
     var guard = 0
-    while (pageCache.size > budget && guard++ < 16) {
+    while (guard++ < 24) {
+        if (pageCache.size <= budget && decodedCacheBytes() <= byteBudget) break
         val before = pageCache.size
         evictFarthestPage(referencePage)
         if (pageCache.size == before) break
     }
+    // KMK <--
+}
+
+/** What the decoded shells in the cache currently hold. Caller must hold [WebGpuViewer.lock]. */
+private fun WebGpuViewer.decodedCacheBytes(): Long {
+    var total = 0L
+    for (page in pageCache.values) {
+        if (page is ViewerReaderPage) total += page.decodedBytes
+    }
+    return total
 }
 
 /**
@@ -426,8 +453,12 @@ internal fun WebGpuViewer.shrinkCacheOnTrim() {
     try {
         synchronized(lock) {
             val anchor = currentPage
+            // minOf, not a bare 3: cacheSize now scales with live pressure and can sit below 3
+            // under CRITICAL. Shrinking to 3 when the budget says 2 leaves the cache *over* the
+            // budget, and the next getPage refill undoes the shed this just performed.
+            val target = minOf(3, cacheSize)
             var guard = 0
-            while (pageCache.size > 3 && guard++ < 16) {
+            while (pageCache.size > target && guard++ < 16) {
                 val before = pageCache.size
                 evictFarthestPage(anchor)
                 if (pageCache.size == before) break

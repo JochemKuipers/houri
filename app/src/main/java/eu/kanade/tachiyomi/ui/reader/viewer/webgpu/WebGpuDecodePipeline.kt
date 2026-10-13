@@ -265,11 +265,19 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
             }
         }
 
-        val isLowRam = isLowRamDevice
-        val maxPageBytes = if (isLowRam) 40 * 1024 * 1024 else 80 * 1024 * 1024
+// KMK --> Both caps read from the live budget, not from a device-size boolean. A device
+        // that was comfortable an hour ago and is now one strip away from an OOM refuses the
+        // oversize page *before* readBytes allocates it - and readBytes is the allocation that
+        // actually fails, since a single page is read whole into one array.
+        val maxPageBytes = memoryBudget.maxPageBytes()
+        // JXL decode costs markedly more per byte than the formats above it, so the same page
+        // that is comfortable as JPEG is an OOM as JXL. That is why this is a second ceiling
+        // and not a tighter branch of the first.
+        val jxlLimitBytes = memoryBudget.jxlPageBytes()
+        // KMK <--
         // The read is the first unbounded blocking call on the worker's single thread, so it gets a
         // stage of its own rather than being folded into the surrounding work.
-        traceStage(trace, "readBytes", "cap=${maxPageBytes / (1024 * 1024)}MB lowRam=$isLowRam")
+        traceStage(trace, "readBytes", "cap=${maxPageBytes / (1024 * 1024)}MB")
         val decodeBytes: ByteArray? = try {
             val bytes = input.readBytes()
             if (bytes.size > maxPageBytes) throw Exception("Page too large: ${bytes.size} bytes >${maxPageBytes / (1024 * 1024)}MB")
@@ -331,8 +339,8 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
         } catch (_: Exception) {
             false
         }
-        if (isLowRam && isJxlBytes && decodeBytes.size > 16 * 1024 * 1024) {
-            throw Exception("JXL too large for low-RAM: ${decodeBytes.size} bytes >16MB (downsample via Tachiyomi decoder instead)")
+        if (isJxlBytes && decodeBytes.size > jxlLimitBytes) {
+            throw Exception("JXL too large for this device right now: ${decodeBytes.size} bytes >${jxlLimitBytes / (1024 * 1024)}MB (downsample via Tachiyomi decoder instead)")
         }
         // Translation gate: only small-enough pages are sent to LLM/cache
         val translationBytes: ByteArray? = if (decodeBytes.size in 1..32 * 1024 * 1024) decodeBytes else null
@@ -378,9 +386,14 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
         // Store bytes for height-matching regardless of SINGLE tag — pages decoded before
         // viewport layout (width <8) may be tagged SINGLE initially but become LEFT/RIGHT
         // after rotation/layout, and webp pages decoded via fallback need bytes for retry.
-        // Low-RAM devices retain nothing: up to 32MB per cached page is unaffordable there,
-        // and the spread then simply skips height-matching instead of OOMing.
-        if (!isLowRam && config.matchDoublePageHeights && decodeBytes.size in 1..32 * 1024 * 1024) {
+        // The spread skips height-matching rather than OOMing when the budget cannot hold the
+        // page plus an equal working set - asked per page, not per device, because a 30MB page
+        // on a 6GB phone at full headroom is affordable and the same page at CRITICAL is not.
+        if (
+            memoryBudget.canAffordWorkingSet(decodeBytes.size.toLong()) &&
+            config.matchDoublePageHeights &&
+            decodeBytes.size in 1..32 * 1024 * 1024
+        ) {
             page.spreadBytes = decodeBytes
         } else {
             page.spreadBytes = null
@@ -589,6 +602,12 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
                     // KMK -->
                     if (!decodedSingle.isAnimated) decodedSingle.highQuality = !config.fastRender
                     applyZoomPolicy(decodedSingle)
+                    // KMK <--
+                    // KMK --> What this page now costs, so the byte budget is a measurement
+                    // rather than an estimate. Set inside the same lock that installed the image,
+                    // because a reader that saw the new imagePage and the old zero would let the
+                    // budget admit one more oversized page than it can hold.
+                    page.decodedBytes = uploadedImageBytes(decodedSingle.width, decodedSingle.height)
                     // KMK <--
                 }
                 adopted = true

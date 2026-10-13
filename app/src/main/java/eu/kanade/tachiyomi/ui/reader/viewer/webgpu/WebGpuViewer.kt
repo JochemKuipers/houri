@@ -351,14 +351,25 @@ open class WebGpuViewer(
     /** Check if a page is in the cache by identity. O(1) via key lookup. */
     internal fun pageInCache(page: ViewerPage): Boolean = pageCache[pageKey(page)] === page
 
-    // KMK --> Resolved once: decodeReaderPage runs per page on the decode thread.
-    internal val isLowRamDevice: Boolean by lazy {
-        try {
-            eu.kanade.tachiyomi.util.system.DeviceUtil.isLowRamDevice(activity)
-        } catch (_: Exception) {
-            false
-        }
-    }
+    // KMK --> Resolved once: decodeReaderPage runs per page on the decode thread and cacheSize is
+    // read by the render walk, and neither can afford an ActivityManager binder call.
+    internal val memoryBudget: WebGpuMemoryBudget by lazy { WebGpuMemoryBudget(activity) }
+
+    /**
+     * Pressure as of the last [applyMemoryBudget], so a change is loggable without logging on
+     * every tick. Written and read only by the monitor coroutine, but volatile because
+     * `applyMemoryBudget` is also called from `onTrimMemory`, which is main-thread.
+     */
+    @Volatile
+    internal var memoryPressureLast: WebGpuMemoryBudget.Pressure? = null
+
+    /**
+     * When the reader last shed pages, which gates how soon anything may grow back.
+     *
+     * Zero at open so the first recovery check cannot pass on a clock that never ran.
+     */
+    @Volatile
+    internal var memoryLastShrinkAt: Long = 0L
     // KMK <--
 
     /**
@@ -403,8 +414,23 @@ open class WebGpuViewer(
     /**
      * Everything [preloadPages] reaches, plus slack. Sized exactly, a chapter transition page - or
      * in dual mode a spread partner - evicts a page the next fetch asks for, and it decodes again.
+     *
+     * Pressure-scaled, but never below what is on screen. The speculative reach is what a memory
+     * squeeze should cost; the visible window is not negotiable, because a cache that cannot hold
+     * its own drawn window evicts pages that are being read (see
+     * [WebGpuViewerContinuous.cacheSize]). The byte budget in `evictDownToBudget` does the precise
+     * sizing - this only stops the reader from *queueing* work it has no room for.
      */
-    open val cacheSize get() = 1 + preloadAhead + preloadBehind + if (isDualPageMode()) 3 else 1
+    open val cacheSize: Int
+        get() {
+            val base = 1 + preloadAhead + preloadBehind + if (isDualPageMode()) 3 else 1
+            val visible = if (isDualPageMode()) 4 else 2
+            return when (memoryBudget.budget().pressure) {
+                WebGpuMemoryBudget.Pressure.CRITICAL -> maxOf(visible, base / 3)
+                WebGpuMemoryBudget.Pressure.TIGHT -> maxOf(visible, base * 2 / 3)
+                WebGpuMemoryBudget.Pressure.ROOMY -> base
+            }
+        }
 
     // KMK -->
     private val trimCallbacks = object : ComponentCallbacks2 {
@@ -436,6 +462,12 @@ open class WebGpuViewer(
                 level == ComponentCallbacks2.TRIM_MEMORY_MODERATE ||
                 level == ComponentCallbacks2.TRIM_MEMORY_COMPLETE
             ) {
+                // Resample first, shed second. applyMemoryBudget republishes the tile
+                // budget from the current pressure, and TileRenderer.onLowMemory then scales
+                // whatever it finds downward - so the reverse order would have the resample undo
+                // the shed on every trim callback, which is the ratchet this replaced.
+                // (Already inside the trimCallbacks KMK block - no nested marker here.)
+                applyMemoryBudget("trim")
                 shedDeviceCaches()
             }
             // KMK <--
@@ -546,6 +578,12 @@ open class WebGpuViewer(
         // KMK --> Reports a decode stage that never finishes. Separate from the worker on purpose:
         // the worker is what gets stuck, so it cannot be the thing that notices.
         startDecodeStallWatchdog()
+        // KMK <--
+        // KMK --> The fourth long-lived coroutine: watches live memory and resizes the page and
+        // tile caches to match. `onTrimMemory` alone reacts too late - the system only sends one
+        // when it is already deciding about some process, so the reader has usually paid for the
+        // spike by the time it arrives.
+        startMemoryMonitor()
         // KMK <--
     }
 

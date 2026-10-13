@@ -37,17 +37,27 @@ class WebGpuViewerContinuous(activity: ReaderActivity, val useGap: Boolean = fal
     // edge windows plus the transition page plus swap residue at once (up to ~13 live shells), so
     // the cache keeps that whole working set: evicting a half-visible decoded page reverts it to a
     // placeholder and its re-decode shifts every slot below it, which read as constant flicker at
-    // chapter edges. Low-RAM devices keep the old tighter budget instead of risking OOM.
+    // chapter edges. Small devices keep a tighter budget above that floor instead of risking OOM.
     //
     // KMK --> The reach therefore follows what the last frame drew rather than sitting at the
     // baseline count: a cache that cannot hold its own drawn window evicts pages that are on screen.
     // Capped because a decoded webtoon segment is ~47MB of texture, so the working set has to stay
     // bounded no matter how far out the reader has zoomed.
+    //
+    // Only the *slack* above the visible floor is pressure-sensitive. The floor itself is not
+    // negotiable here for the reason in the class comment - evicting a half-visible decoded page
+    // reverts it to a placeholder, and its re-decode shifts every slot below it, which read as
+    // constant flicker at chapter edges.
     override val cacheSize: Int
         get() {
             val drawn = max(state.pagesBelow, state.pagesAbove).coerceAtMost(MAX_CACHED_REACH)
-            return (if (isLowRamDevice) 3 else 7) +
-                2 * max(ImageViewerContinuousState.MAX_VISIBLE_PAGES, drawn)
+            val slack = when {
+                memoryBudget.deviceTier <= WebGpuMemoryBudget.DeviceTier.SMALL -> 3
+                memoryBudget.budget().pressure == WebGpuMemoryBudget.Pressure.CRITICAL -> 2
+                memoryBudget.budget().pressure == WebGpuMemoryBudget.Pressure.TIGHT -> 4
+                else -> 7
+            }
+            return slack + 2 * max(ImageViewerContinuousState.MAX_VISIBLE_PAGES, drawn)
         }
 
     private val state get() = (pager as ImageViewContinuous).state

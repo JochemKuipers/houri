@@ -142,6 +142,26 @@ class ViewerReaderPage(
     @Volatile
     var spreadPage: ImagePage.ImageSpread? = null
 
+    /**
+     * What this page's uploaded textures actually occupy, 0 while it is still a placeholder.
+     *
+     * Volatile for the same reason as every other field here: written by the decode thread on
+     * adoption, read by the render walk summing the cache against the byte budget.
+     *
+     * **A page count is not a memory measurement.** An ordinary page is a few MB of texture and a
+     * split webtoon segment is ~47MB, so a cache of 8 shells is either 20MB or 380MB depending
+     * entirely on what the chapter happens to contain. The budget needs the real number, and it
+     * cannot be guessed from the page's identity.
+     *
+     * Carries the full mip chain, not just the base image: `1/4 + 1/16 + ...` sums to `1/3` more,
+     * so the multiplier is 4/3. Undercounting by that third is what let a cache "fit" and then not.
+     */
+    @Volatile
+    var decodedBytes: Long = 0L
+        set(value) {
+            field = if (value > 0L) value else 0L
+        }
+
     private val prevLink = NeighborLink()
     private val nextLink = NeighborLink()
 
