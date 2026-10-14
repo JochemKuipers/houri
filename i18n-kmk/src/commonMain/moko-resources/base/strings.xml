@@ -669,4 +669,6 @@
     <string name="pref_flare_solverr_url_summary">URL of the FlareSolverr instance, for example http://192.168.1.202:8191/v1. It must share this device\'s public IP address, because Cloudflare ties the clearance cookie to it</string>
     <string name="pref_test_flare_solverr_and_update_user_agent">Test FlareSolverr and update user agent</string>
     <string name="pref_test_flare_solverr_and_update_user_agent_summary">Test FlareSolverr to update the user agent. Only required once; then toggle as needed.</string>
+    <string name="pref_cloudflare_bypass_banner">Cloudflare bypass banner</string>
+    <string name="pref_cloudflare_bypass_banner_summary">Show a banner naming the host and method while a Cloudflare challenge is being bypassed</string>
 </resources>

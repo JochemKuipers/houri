@@ -90,6 +90,7 @@ import eu.kanade.tachiyomi.data.updater.RELEASE_URL
 import eu.kanade.tachiyomi.extension.ExtensionErrorReport
 import eu.kanade.tachiyomi.extension.api.ExtensionApi
 import eu.kanade.tachiyomi.extension.copyExtensionErrorToClipboard
+import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassStatus
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
@@ -158,6 +159,7 @@ class MainActivity : BaseActivity() {
     private val backupRestoreStatus: BackupRestoreStatus by lazy { globalAppGraph.backupRestoreStatus }
     private val syncStatus: SyncStatus by lazy { globalAppGraph.syncStatus }
     private val libraryUpdateStatus: LibraryUpdateStatus by lazy { globalAppGraph.libraryUpdateStatus }
+    private val networkPreferences: NetworkPreferences by lazy { globalAppGraph.networkPreferences }
     // KMK <--
 
     private val downloadCache: DownloadCache by lazy { globalAppGraph.downloadCache }
@@ -254,6 +256,12 @@ class MainActivity : BaseActivity() {
             }.collectAsState(initial = emptyList())
             // KMK <--
 
+            // KMK --> The toggle gates the solve itself, not just the strip: the status bar below
+            // takes its Cloudflare colour from the same value, so a "hidden" banner that still
+            // repainted the bar would leave the one trace of it the user asked to drop.
+            val showCloudflareBypassBanner by networkPreferences.showCloudflareBypassBanner.collectAsState()
+            // KMK <--
+
             val isSystemInDarkTheme = isSystemInDarkTheme()
             val statusBarBackgroundColor = when {
                 // KMK -->
@@ -266,7 +274,9 @@ class MainActivity : BaseActivity() {
                 // and reads as detached from what it is reporting. Placed after the updating/syncing
                 // states so those, which block the UI, keep priority over a solve in progress.
                 // KMK <--
-                cloudflareBypass.isNotEmpty() -> CloudflareBypassBannerBackgroundColor
+                // KMK -->
+                showCloudflareBypassBanner && cloudflareBypass.isNotEmpty() -> CloudflareBypassBannerBackgroundColor
+                // KMK <--
                 downloadOnly -> DownloadedOnlyBannerBackgroundColor
                 incognito -> IncognitoModeBannerBackgroundColor
                 else -> MaterialTheme.colorScheme.surface
@@ -337,7 +347,8 @@ class MainActivity : BaseActivity() {
                                 ?: restoringProgress.takeIf { restoring },
                             // KMK <--
                             // KMK -->
-                            cloudflareBypass = cloudflareBypass.firstOrNull(),
+                            cloudflareBypass = cloudflareBypass.firstOrNull()
+                                ?.takeIf { showCloudflareBypassBanner },
                             // KMK <--
                             modifier = Modifier.windowInsetsPadding(scaffoldInsets),
                         )

@@ -435,6 +435,11 @@ object SettingsAdvancedScreen : SearchableSettings {
                         }
                     },
                 ),
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = networkPreferences.showCloudflareBypassBanner,
+                    title = stringResource(KMR.strings.pref_cloudflare_bypass_banner),
+                    subtitle = stringResource(KMR.strings.pref_cloudflare_bypass_banner_summary),
+                ),
                 // KMK <--
             ),
         )

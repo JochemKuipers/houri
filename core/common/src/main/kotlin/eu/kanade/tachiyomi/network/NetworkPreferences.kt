@@ -33,5 +33,8 @@ class NetworkPreferences(
     val enableFlareSolverr: Preference<Boolean> = preferenceStore.getBoolean("enable_flare_solverr", false)
 
     val flareSolverrUrl: Preference<String> = preferenceStore.getString("flare_solverr_url", "http://localhost:8191/v1")
+
+    val showCloudflareBypassBanner: Preference<Boolean> =
+        preferenceStore.getBoolean("show_cloudflare_bypass_banner", true)
     // KMK <--
 }
