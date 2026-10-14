@@ -467,6 +467,10 @@ class MangaScreenModel(
                         it.copy(
                             manga = manga,
                             chapters = chapterItems,
+                            // KMK --> Pre-blacklist and pre-merge, so blacklistChapters can tell a
+                            // lone upload from one of several sharing a number and a scanlator.
+                            allChapters = chapters,
+                            // KMK <--
                             // SY -->
                             meta = raiseMetadata(flatMetadata, it.source),
                             mergedData = mergedData,
@@ -1938,7 +1942,24 @@ class MangaScreenModel(
     fun blacklistChapters(chapters: List<Chapter>) {
         if (chapters.isEmpty()) return
         screenModelScope.launchIO {
-            val newEntries = chapters.map { scanlatorBlacklistKey(it.chapterNumber, it.scanlator) }
+            // KMK --> A scanlator that published one number twice produces the same broad key for
+            // both, and blacklisting one would take the other with it (issue #39). Narrow to the
+            // upload only in that case; a lone upload keeps the broad key, which survives the url
+            // changing on a later fetch.
+            val siblings = successState?.allChapters.orEmpty()
+            val newEntries = chapters.map { chapter ->
+                val hasSiblings = siblings.any { other ->
+                    other.id != chapter.id &&
+                        other.chapterNumber == chapter.chapterNumber &&
+                        other.scanlator?.trim().orEmpty() == chapter.scanlator?.trim().orEmpty()
+                }
+                if (hasSiblings && chapter.url.isNotBlank()) {
+                    scanlatorBlacklistKey(chapter.chapterNumber, chapter.scanlator, chapter.url)
+                } else {
+                    scanlatorBlacklistKey(chapter.chapterNumber, chapter.scanlator)
+                }
+            }
+            // KMK <--
             val current = successState?.manga?.blacklistedChapters ?: emptyList()
             updateManga.await(
                 MangaUpdate(
@@ -2034,6 +2055,10 @@ class MangaScreenModel(
             val source: Source,
             val isFromSource: Boolean,
             val chapters: List<ChapterList.Item>,
+            // KMK --> Every chapter the source returned, before the blacklist and smart merge cut
+            // it down to `chapters`.
+            val allChapters: List<Chapter> = emptyList(),
+            // KMK <--
             val availableScanlators: ImmutableSet<String>,
             val excludedScanlators: ImmutableSet<String>,
             val trackingCount: Int = 0,

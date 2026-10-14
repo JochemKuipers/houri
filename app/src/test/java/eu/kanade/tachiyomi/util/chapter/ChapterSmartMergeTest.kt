@@ -161,4 +161,39 @@ class ChapterSmartMergeTest {
         val ch = Chapter.create().copy(id = 1, mangaId = 1, chapterNumber = 3.0, scanlator = " Scans ")
         isChapterBlacklisted(ch, listOf(scanlatorBlacklistKey(3.0, "Scans"))) shouldBe true
     }
+
+    @Test
+    fun `a narrowed key takes only the upload it names`() {
+        val first = Chapter.create().copy(id = 1, mangaId = 1, chapterNumber = 3.0, scanlator = "Scans", url = "a")
+        val second = Chapter.create().copy(id = 2, mangaId = 1, chapterNumber = 3.0, scanlator = "Scans", url = "b")
+        val blacklist = listOf(scanlatorBlacklistKey(3.0, "Scans", "a"))
+
+        isChapterBlacklisted(first, blacklist) shouldBe true
+        isChapterBlacklisted(second, blacklist) shouldBe false
+    }
+
+    @Test
+    fun `the broad key still covers every upload of that number`() {
+        val ch = Chapter.create().copy(id = 1, mangaId = 1, chapterNumber = 3.0, scanlator = "Scans", url = "a")
+        val blacklist = listOf(scanlatorBlacklistKey(3.0, "Scans"))
+
+        isChapterBlacklisted(ch, blacklist) shouldBe true
+    }
+
+    @Test
+    fun `a narrowed key does not match a chapter with no upload url`() {
+        val ch = Chapter.create().copy(id = 1, mangaId = 1, chapterNumber = 3.0, scanlator = "Scans", url = "")
+        isChapterBlacklisted(ch, listOf(scanlatorBlacklistKey(3.0, "Scans", ""))) shouldBe false
+    }
+
+    @Test
+    fun `smart merge keeps the other upload when one of two same-scanlator ones is blacklisted`() {
+        val first = chapter(1, 5.0, "GroupA").copy(url = "a")
+        val second = chapter(2, 5.0, "GroupA").copy(url = "b")
+        val blacklist = setOf(scanlatorBlacklistKey(5.0, "GroupA", "a"))
+
+        val result = listOf(first, second).applyScanlatorPriority(listOf("GroupA"), blacklist)
+
+        result.map { it.id } shouldBe listOf(2L)
+    }
 }
