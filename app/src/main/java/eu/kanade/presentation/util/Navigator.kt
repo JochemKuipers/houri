@@ -115,9 +115,13 @@ fun ScreenTransition(
         if (isPreviewBuildType) {
             logcat(LogPriority.ERROR) { "ScreenTransition: ${screen.key}" }
         }
-        val saveableKey = remember(screen.key) {
-            "screen-transition-${screen.key}"
-        }
+        // NEVER key this off the target: AnimatedContent keeps the outgoing screen composed while
+        // the incoming one is composed, so one Screen can be in the composition twice (pushed twice,
+        // or popped then re-pushed before the exit finishes). Voyager registers under
+        // "${screen.key}:$key" and SaveableStateHolder rejects a duplicate registration, and the
+        // settings categories are singletons, so every visit reuses one key. Per-slot token instead.
+        val slotKey = remember { Any() }
+        val saveableKey = "screen-transition-${screen.key}@${System.identityHashCode(slotKey)}"
         navigator.saveableState(saveableKey, screen) {
             androidx.compose.foundation.layout.Box(
                 modifier = Modifier

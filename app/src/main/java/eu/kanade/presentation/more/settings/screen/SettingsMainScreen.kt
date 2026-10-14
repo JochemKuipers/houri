@@ -178,7 +178,9 @@ object SettingsMainScreen : Screen() {
     private var lastSettingsNavigate: Long = 0L
 
     private fun Navigator.navigate(screen: VoyagerScreen, twoPane: Boolean) {
-        if (lastItemOrNull?.key == screen.key) return
+        // The whole stack, not just the top: Voyager keys ScreenModelStore by `screen.key`, so a
+        // second entry sharing one would read and dispose the first entry's model.
+        if (items.any { it.key == screen.key }) return
         val now = System.currentTimeMillis()
         val last = lastSettingsNavigate
         if (now - last < 300) return
