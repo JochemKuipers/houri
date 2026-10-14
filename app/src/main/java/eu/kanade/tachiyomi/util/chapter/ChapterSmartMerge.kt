@@ -36,6 +36,14 @@ fun parseScanlatorRangeRule(raw: String): ScanlatorRangeRule? {
  * When [rangeRules] contain a rule covering a number, its scanlator wins for that
  * number regardless of global order; if it has no candidate for the number, the
  * global priority order applies. The last matching rule wins when several overlap.
+ *
+ * Within what the range rules leave open, an upload the reader has already read or
+ * bookmarked wins for its number before [priority] is consulted at all. Without
+ * this the merge can swap in a different group's upload for a chapter that was
+ * already read, which shows it as unread again in the chapter list while
+ * libraryView still counts the number as read - the two then disagree about how
+ * much is left, because the view counts read state across every upload of a
+ * number rather than only the one the merge picked. See LibraryManga.unreadCount.
  */
 fun List<Chapter>.applyScanlatorPriority(
     priority: List<String>,
@@ -57,6 +65,10 @@ fun List<Chapter>.applyScanlatorPriority(
                 .minWithOrNull(
                     compareBy<Chapter> { chapter ->
                         if (chapter.scanlator == preferredScanlator) 0 else 1
+                    }.thenBy { chapter ->
+                        if (chapter.read) 0 else 1
+                    }.thenBy { chapter ->
+                        if (chapter.bookmark) 0 else 1
                     }.thenBy { candidate ->
                         priority.indexOf(candidate.scanlator)
                             .takeIf { it != -1 }

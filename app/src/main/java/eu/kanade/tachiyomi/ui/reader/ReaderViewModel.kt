@@ -389,7 +389,7 @@ class ReaderViewModel(
         chapterListImpl = chaptersForReader
             .sortedWith(getChapterSort(manga, sortDescending = false))
             .run {
-                if (readerPreferences.skipDupe().get()) {
+                if (readerPreferences.skipDupe().get() && libraryPreferences.smartScanlatorMerge().get()) {
                     removeDuplicates(selectedChapter)
                 } else {
                     this
@@ -850,7 +850,7 @@ class ReaderViewModel(
             if (!isNextChapterDownloaded) return@launchIO
 
             val chaptersToDownload = getNextChapters.await(manga.id, nextChapter.id!!).run {
-                if (readerPreferences.skipDupe().get()) {
+                if (readerPreferences.skipDupe().get() && libraryPreferences.smartScanlatorMerge().get()) {
                     removeDuplicates(nextChapter.toDomainChapter()!!)
                 } else {
                     this

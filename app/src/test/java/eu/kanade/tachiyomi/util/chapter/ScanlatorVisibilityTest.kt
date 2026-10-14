@@ -10,10 +10,18 @@ import tachiyomi.domain.chapter.service.scanlatorBlacklistKey
 @Execution(ExecutionMode.CONCURRENT)
 class ScanlatorVisibilityTest {
 
-    private fun chapter(id: Long, number: Double, scanlator: String?) = Chapter.create().copy(
+    private fun chapter(
+        id: Long,
+        number: Double,
+        scanlator: String?,
+        read: Boolean = false,
+        bookmark: Boolean = false,
+    ) = Chapter.create().copy(
         id = id,
         chapterNumber = number,
         scanlator = scanlator,
+        read = read,
+        bookmark = bookmark,
     )
 
     private fun series(scanlator: String, vararg numbers: Double, startId: Long = 1) =
@@ -200,6 +208,82 @@ class ScanlatorVisibilityTest {
             mergeEnabled = true,
             alwaysVisibleChapterId = 2L,
         )
+
+        result.map { it.id } shouldBe listOf(1L, 2L)
+    }
+
+    @Test
+    fun `a read upload wins its number over a better ranked scanlator`() {
+        // libraryView counts a chapter number as read when any of its uploads is read, so the
+        // merge has to show that same upload. Picking the coverage winner instead showed the
+        // chapter as unread in the list while the badge had already subtracted it.
+        val chapters = listOf(
+            chapter(1, 5.0, "Complete", read = true),
+            chapter(2, 5.0, "Frag"),
+        )
+
+        val result = chapters.applyScanlatorVisibility(emptyList(), emptySet(), mergeEnabled = true)
+
+        result.map { it.id } shouldBe listOf(1L)
+    }
+
+    @Test
+    fun `a read upload wins an explicitly ranked scanlator`() {
+        val chapters = listOf(
+            chapter(1, 5.0, "GroupA", read = true),
+            chapter(2, 5.0, "GroupB"),
+        )
+
+        val result = chapters.applyScanlatorVisibility(
+            listOf("GroupB"),
+            emptySet(),
+            mergeEnabled = true,
+        )
+
+        result.map { it.id } shouldBe listOf(1L)
+    }
+
+    @Test
+    fun `a bookmarked upload wins over an unread one of the same number`() {
+        val chapters = listOf(
+            chapter(1, 5.0, "GroupA"),
+            chapter(2, 5.0, "GroupB", bookmark = true),
+        )
+
+        val result = chapters.applyScanlatorVisibility(
+            listOf("GroupA"),
+            emptySet(),
+            mergeEnabled = true,
+        )
+
+        result.map { it.id } shouldBe listOf(2L)
+    }
+
+    @Test
+    fun `a range rule still outranks read state`() {
+        val chapters = listOf(
+            chapter(1, 5.0, "GroupA", read = true),
+            chapter(2, 5.0, "GroupB"),
+        )
+
+        val result = chapters.applyScanlatorVisibility(
+            priority = emptyList(),
+            blacklistedChapters = emptySet(),
+            rangeRules = listOf(encodeScanlatorRangeRule(ScanlatorRangeRule(1.0, 10.0, "GroupB"))),
+            mergeEnabled = true,
+        )
+
+        result.map { it.id } shouldBe listOf(2L)
+    }
+
+    @Test
+    fun `read state does not collapse a number when the merge is disabled`() {
+        val chapters = listOf(
+            chapter(1, 5.0, "GroupA", read = true),
+            chapter(2, 5.0, "GroupB"),
+        )
+
+        val result = chapters.applyScanlatorVisibility(emptyList(), emptySet(), mergeEnabled = false)
 
         result.map { it.id } shouldBe listOf(1L, 2L)
     }

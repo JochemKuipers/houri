@@ -340,6 +340,7 @@
     <string name="scanlator_priority">Scanlator priority</string>
     <string name="scanlator_priority_description">Prefer chapters from your prioritized scanlators</string>
     <string name="scanlator_priority_auto">Ordered automatically by coverage. Drag to pin your own order.</string>
+    <string name="scanlator_priority_merge_off">Turn on Smart scanlator merge to reorder these.</string>
     <string name="blacklisted_chapters">Blacklisted chapters</string>
     <string name="scanlator_chapter_count">%1$d chapters</string>
     <string name="action_exclude_scanlator">Exclude scanlator</string>

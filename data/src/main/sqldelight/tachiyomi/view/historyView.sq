@@ -60,14 +60,33 @@ LEFT JOIN(
         CAST(
             count(DISTINCT CASE WHEN chapters.chapter_number > 0
                 AND chapters.bookmark = 1 AND chapters.read = 1
-            THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END) AS INTEGER
+            THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapters.chapter_number <= 0
+                AND chapters.bookmark = 1 AND chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER
         ) AS bookmarkReadCount,
         excluded_scanlators.scanlator AS ex_scanlator
     FROM chapters
     LEFT JOIN excluded_scanlators
     ON chapters.manga_id = excluded_scanlators.manga_id
     AND chapters.scanlator = excluded_scanlators.scanlator
+    -- KMK --> Same blacklist filter libraryView applies. Without it a blacklisted chapter stays
+    -- in this aggregate while the library badge and the details list have already dropped it, so
+    -- the History tab's "read of total" and its unfinished filter disagree with both. Key format
+    -- matches scanlatorBlacklistKey(): rounded number@scanlator.
+    LEFT JOIN mangas BM
+    ON BM._id = chapters.manga_id
+    -- KMK <--
     WHERE ex_scanlator IS NULL
+    -- KMK -->
+    AND (
+        BM.blacklisted_chapters = ''
+        OR instr(
+            ', ' || BM.blacklisted_chapters || ', ',
+            ', ' || CAST(round(chapters.chapter_number * 100) / 100.0 AS TEXT)
+                || '@' || coalesce(chapters.scanlator, '') || ', '
+        ) = 0
+    )
+    -- KMK <--
     GROUP BY chapters.manga_id
 ) AS C
 ON mangas._id = C.manga_id;

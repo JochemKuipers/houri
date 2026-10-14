@@ -820,7 +820,12 @@ class LibraryScreenModel(
             // and the badge read "not installed" until the next restart. A StateFlow never
             // re-emits true, so this holds the first emission once and nothing after it.
             sourceManager.isInitialized.filter { it },
-        ) { libraryManga, preferences, _, _ ->
+            // getNextUnreadChapter reads the merge flag with .get(), so without this nothing
+            // re-emitted the library when it was toggled and the continue-reading button kept
+            // picking from the old merge. unreadCount itself needs no nudge; the chapter list
+            // behind the button does.
+            libraryPreferences.smartScanlatorMerge().changes(),
+        ) { libraryManga, preferences, _, _, _ ->
             // Pre-fetch merged manga data to avoid N+1 queries
             val mergedMangaCache = mutableMapOf<Long, List<Manga>>()
             libraryManga.filter { isMergedSourceId(it.manga.source) }.forEach { manga ->

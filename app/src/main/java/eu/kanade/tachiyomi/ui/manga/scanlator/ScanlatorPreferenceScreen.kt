@@ -44,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import cafe.adriel.voyager.core.model.StateScreenModel
 import cafe.adriel.voyager.core.model.rememberScreenModel
@@ -62,6 +63,7 @@ import eu.kanade.tachiyomi.util.chapter.encodeScanlatorRangeRule
 import eu.kanade.tachiyomi.util.chapter.parseScanlatorRangeRule
 import eu.kanade.tachiyomi.util.chapter.scanlatorCoverage
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import mihon.app.di.globalAppGraph
@@ -139,10 +141,14 @@ class ScanlatorPreferenceScreen(
         model: ScanlatorPreferenceModel,
     ) {
         val listState = rememberLazyListState()
+        // The order only decides anything while the merge is on, so with it off the list must not
+        // accept drags or persist a new priority that nothing will read.
+        val mergeEnabled = state.mergeEnabled
         // KMK --> drag against a local mirror: persisting every move to the DB rebuilds
         // state.orderedScanlators mid-drag and fights the finger. Resync when settled.
         val dragList = remember { state.orderedScanlators.toMutableStateList() }
         val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
+            if (!mergeEnabled) return@rememberReorderableLazyListState
             dragList.apply { add(to.index, removeAt(from.index)) }
             model.setPriority(dragList.map { it.name })
         }
@@ -170,6 +176,18 @@ class ScanlatorPreferenceScreen(
                         ),
                     )
                 }
+            } else if (!mergeEnabled) {
+                item(key = "merge_off") {
+                    Text(
+                        text = stringResource(KMR.strings.scanlator_priority_merge_off),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(
+                            horizontal = MaterialTheme.padding.small,
+                            vertical = MaterialTheme.padding.extraSmall,
+                        ),
+                    )
+                }
             }
             items(dragList, key = { it.name }) { entry ->
                 ReorderableItem(reorderableState, key = entry.name) {
@@ -187,9 +205,14 @@ class ScanlatorPreferenceScreen(
                             Icon(
                                 imageVector = Icons.Outlined.DragHandle,
                                 contentDescription = null,
+                                tint = if (mergeEnabled) {
+                                    Color.Unspecified
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                                 modifier = Modifier
                                     .padding(MaterialTheme.padding.small)
-                                    .draggableHandle(),
+                                    .then(if (mergeEnabled) Modifier.draggableHandle() else Modifier),
                             )
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
@@ -462,6 +485,7 @@ class ScanlatorPreferenceModel(
         val blacklist: List<String> = emptyList(),
         val rangeRules: List<String> = emptyList(),
         val autoPriority: Boolean = false,
+        val mergeEnabled: Boolean = true,
     )
 
     data class ScanlatorEntry(
@@ -479,16 +503,20 @@ class ScanlatorPreferenceModel(
 
     init {
         screenModelScope.launch {
-            getManga.subscribe(mangaId).collectLatest { manga ->
-                val chapters = getChaptersByMangaId.await(mangaId)
-                updateState(
-                    manga.scanlatorPriority,
-                    chapters,
-                    manga.blacklistedChapters,
-                    manga.scanlatorRangeRules,
-                    mergeEnabled = libraryPreferences.smartScanlatorMerge().get(),
-                )
-            }
+            getManga.subscribe(mangaId)
+                .combine(libraryPreferences.smartScanlatorMerge().changes()) { manga, mergeEnabled ->
+                    manga to mergeEnabled
+                }
+                .collectLatest { (manga, mergeEnabled) ->
+                    val chapters = getChaptersByMangaId.await(mangaId)
+                    updateState(
+                        manga.scanlatorPriority,
+                        chapters,
+                        manga.blacklistedChapters,
+                        manga.scanlatorRangeRules,
+                        mergeEnabled = mergeEnabled,
+                    )
+                }
         }
         screenModelScope.launch {
             getExcludedScanlators.subscribe(mangaId).collectLatest { excluded ->
@@ -528,6 +556,7 @@ class ScanlatorPreferenceModel(
                 blacklist = blacklist.sorted(),
                 rangeRules = rangeRules,
                 autoPriority = auto,
+                mergeEnabled = mergeEnabled,
             )
         }
     }
