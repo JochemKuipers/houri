@@ -816,7 +816,12 @@ class LibraryScreenModel(
             getLibraryManga.subscribe(),
             getLibraryItemPreferencesFlow(),
             downloadCache.changes,
-        ) { libraryManga, preferences, _ ->
+            // The library emits straight from the database, well before ExtensionManager has
+            // finished scanning the installed APKs, so every source below resolved to a StubSource
+            // and the badge read "not installed" until the next restart. A StateFlow never
+            // re-emits true, so this holds the first emission once and nothing after it.
+            sourceManager.isInitialized.filter { it },
+        ) { libraryManga, preferences, _, _ ->
             // Pre-fetch merged manga data to avoid N+1 queries
             val mergedMangaCache = mutableMapOf<Long, List<Manga>>()
             libraryManga.filter { isMergedSourceId(it.manga.source) }.forEach { manga ->

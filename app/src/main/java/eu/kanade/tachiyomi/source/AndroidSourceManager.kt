@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
@@ -82,6 +83,10 @@ class AndroidSourceManager(
 
     init {
         scope.launch {
+            // installedExtensionsFlow is a StateFlow seeded empty, so it emits immediately and
+            // mapping it cold would publish a source map holding only the built-ins. Wait for the
+            // extension scan, so isInitialized actually means "the map is complete" to its callers.
+            extensionManager.isInitialized.first { it }
             extensionManager.installedExtensionsFlow
                 // SY -->
                 .combine(exhPreferences.enableExhentai().changes()) { extensions, enableExhentai ->
@@ -145,12 +150,14 @@ class AndroidSourceManager(
                         }
                         // KMK <--
                         sourcesMapFlow.value = mutableMap
-                        _isInitialized.value = true
-                        // KMK -->
                     } catch (e: Throwable) {
                         xLogD("Failed to initialize source map: %s", e.message)
+                    } finally {
+                        // ALWAYS release, even when the build above threw: the library, the feeds
+                        // and the reader all gate on this, and a sourceManager that never flips it
+                        // leaves every one of them waiting forever.
+                        _isInitialized.value = true
                     }
-                    // KMK <--
                 }
         }
 
