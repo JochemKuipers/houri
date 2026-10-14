@@ -531,6 +531,7 @@ above — a type mismatch that a compiler will not catch.
 | `Re-driving ... last=unfinished` | The worker left the page mid-flight without completing a trace. Usually cancellation. |
 | `DecodeTrace STALL` | The watchdog saw a page past its stage deadline. The worker cannot report its own stall. |
 | `Device not available` / blank pages after backgrounding | Device loss; check the recovery path above, not the page. |
+| `device lost reason=1: CreateAndroidSurfaceKHR failed with VK_ERROR_NATIVE_WINDOW_IN_USE_KHR`, preceded by `BufferQueueProducer ... connect: already connected` and `vulkan: native_window_api_connect() failed` | A **second** swapchain was created on a window the old one still owned. Dawn can defer `vkDestroySurfaceKHR` past `close()`, so recovery must drop the old `GPUSurface` *and* release the retained `ANativeWindow` (`NativeWindow.release`) **before** it builds the replacement — see `recoverFromDeviceLoss`. The `SurfaceTexture-0-…` name means the TextureView path (API < 34), where the window is a `SurfaceTexture`'s BufferQueue. |
 | Blank/garbage page in dual-page mode only | Check `spreadPage` lifecycle — see landmines. |
 | Pages decode then vanish when scrolling back | Eviction. Check `isOnScreen` immunity and `pageDistance` anchoring. |
 | Same page stuck forever, no ErrorPage | `wantedByRender` is still set and `imagePage` is still a `ProgressPage` — the sweep only sees that one shape. |
@@ -556,6 +557,12 @@ line, for instance, does not appear anywhere in the current tree.
 - **`retryPage` is not eviction.** If the cache entry is the defect, `no-stream` → `retryPage`
   is a no-op by design and leaves the page wedged in LOADING with no timeout (see *Page
   loading*). `requerySuspectPage` is the one that evicts first.
+- **The surface teardown in `recoverFromDeviceLoss` must precede the device rebuild.** The
+  natural order — recreate the device, *then* drop the stale swapchain — builds the replacement
+  on a window the old swapchain still owns, and Dawn defers `vkDestroySurfaceKHR` past
+  `close()`, so it fails with `VK_ERROR_NATIVE_WINDOW_IN_USE_KHR` and loses the device it was
+  trying to recover. Closing the `GPUSurface` is not enough; the retained `ANativeWindow` has to
+  go too.
 - **Never assume a queued page reached the loader.** `HttpPageLoader`'s collector is
   `.filter { it.status == Page.State.Queue }`, so offering a page in any other state is a
   silent no-op — no log, no work. Anything that re-offers a page must set `Queue` itself.
