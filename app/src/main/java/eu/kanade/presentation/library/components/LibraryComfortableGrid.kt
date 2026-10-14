@@ -39,7 +39,10 @@ internal fun LibraryComfortableGrid(
             contentType = { "library_comfortable_grid_item" },
         ) { libraryItem ->
             val manga = libraryItem.libraryManga.manga
-            val coverData = remember(manga.id) {
+            // coverLastModified is the signal every cover change bumps, and it is part of the Coil
+            // cache key. Keyed on the id alone, an edited cover left the key unchanged and the
+            // memory cache kept serving the old one until the process restarted.
+            val coverData = remember(manga.id, manga.coverLastModified) {
                 MangaCover(
                     mangaId = manga.id,
                     sourceId = manga.source,

@@ -90,7 +90,9 @@ internal fun LibraryStaggeredGrid(
             contentType = { "library_staggered_item" },
         ) { libraryItem ->
             val manga = libraryItem.libraryManga.manga
-            val coverData = remember(manga.id) {
+            // Keyed on coverLastModified too: it is what every cover change bumps, and it is part
+            // of the Coil cache key, so keying on the id alone pins the previously cached cover.
+            val coverData = remember(manga.id, manga.coverLastModified) {
                 MangaCoverModel(
                     mangaId = manga.id,
                     sourceId = manga.source,

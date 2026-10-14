@@ -89,7 +89,8 @@ internal fun LibraryFolderGrid(
             contentType = { "library_folder_loose_item" },
         ) { libraryItem ->
             val manga = libraryItem.libraryManga.manga
-            val coverData = remember(manga.id) {
+            // Same reason as the outer item: the stamp is part of the Coil cache key.
+            val coverData = remember(manga.id, manga.coverLastModified) {
                 MangaCoverModel(
                     mangaId = manga.id,
                     sourceId = manga.source,
@@ -233,7 +234,9 @@ private fun GridFolderTile(
                 Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                     rowItems.forEach { item ->
                         val manga = item.libraryManga.manga
-                        val coverData = remember(manga.id) {
+                        // Keyed on coverLastModified too: it is what every cover change bumps, and it
+                        // is part of the Coil cache key, so the id alone pins the cached cover.
+                        val coverData = remember(manga.id, manga.coverLastModified) {
                             MangaCoverModel(
                                 mangaId = manga.id,
                                 sourceId = manga.source,

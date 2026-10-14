@@ -46,7 +46,9 @@ internal fun LibraryList(
             contentType = { "library_list_item" },
         ) { libraryItem ->
             val manga = libraryItem.libraryManga.manga
-            val coverData = remember(manga.id) {
+            // Keyed on coverLastModified too: it is what every cover change bumps, and it is part
+            // of the Coil cache key, so keying on the id alone pins the previously cached cover.
+            val coverData = remember(manga.id, manga.coverLastModified) {
                 MangaCover(
                     mangaId = manga.id,
                     sourceId = manga.source,
