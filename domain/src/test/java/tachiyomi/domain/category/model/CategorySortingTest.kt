@@ -124,4 +124,36 @@ class CategorySortingTest {
         names(categories.sortedForDisplay(CategorySortOrder.MOST_ITEMS)) shouldBe listOf("Alpha", "Beta")
         names(categories.sortedForDisplay(CategorySortOrder.LEAST_ITEMS)) shouldBe listOf("Alpha", "Beta")
     }
+
+    @Test
+    fun `count based modes order by the supplied counts`() {
+        val categories = listOf(category(1, "small"), category(2, "big"), category(3, "mid"))
+        val counts = mapOf(1L to 2, 2L to 40, 3L to 9)
+
+        names(categories.sortedForDisplay(CategorySortOrder.MOST_ITEMS, counts)) shouldBe
+            listOf("big", "mid", "small")
+        names(categories.sortedForDisplay(CategorySortOrder.LEAST_ITEMS, counts)) shouldBe
+            listOf("small", "mid", "big")
+    }
+
+    @Test
+    fun `a category missing from the counts is treated as empty`() {
+        val categories = listOf(category(1, "untracked"), category(2, "tracked"))
+        val counts = mapOf(2L to 3)
+
+        names(categories.sortedForDisplay(CategorySortOrder.LEAST_ITEMS, counts)) shouldBe
+            listOf("untracked", "tracked")
+        names(categories.sortedForDisplay(CategorySortOrder.MOST_ITEMS, counts)) shouldBe
+            listOf("tracked", "untracked")
+    }
+
+    @Test
+    fun `passing counts leaves the non count modes alone`() {
+        val categories = listOf(category(1, "banana"), category(2, "Apple"), category(3, "cherry"))
+        val counts = mapOf(1L to 9, 2L to 1, 3L to 5)
+
+        // The name order must win over the counts, or the two screens would disagree again.
+        names(categories.sortedForDisplay(CategorySortOrder.NAME_ASC, counts)) shouldBe
+            listOf("Apple", "banana", "cherry")
+    }
 }

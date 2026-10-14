@@ -70,3 +70,24 @@ fun List<Category>.sortedForDisplay(sortOrder: CategorySortOrder): List<Category
     }
     return dated.sortedWith(byDate) + undated.sortedBy { it.order }
 }
+
+/**
+ * [sortedForDisplay] plus the two count-based modes, for the callers that hold the counts.
+ *
+ * The count modes have to be applied by whoever knows how many entries sit in each category, which
+ * a bare [Category] list does not carry - so without [counts] this defers to [sortedForDisplay] and
+ * those two stay on stored order rather than silently sorting by a date nobody asked for.
+ *
+ * A category absent from [counts] counts as empty.
+ */
+fun List<Category>.sortedForDisplay(
+    sortOrder: CategorySortOrder,
+    counts: Map<Long, Int>?,
+): List<Category> {
+    val byCount = counts ?: return sortedForDisplay(sortOrder)
+    return when (sortOrder) {
+        CategorySortOrder.MOST_ITEMS -> sortedByDescending { byCount[it.id] ?: 0 }
+        CategorySortOrder.LEAST_ITEMS -> sortedBy { byCount[it.id] ?: 0 }
+        else -> sortedForDisplay(sortOrder)
+    }
+}

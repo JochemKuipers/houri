@@ -201,22 +201,14 @@ private fun CategoryContent(
     var updateIntervalTarget by remember { mutableStateOf<Category?>(null) }
     // KMK <--
     val query = searchQuery.trim()
-    val topLevel = remember(categories) { categories.filter { it.parentId == 0L } }
-    // KMK -->
-    val subMap = remember(categories, sortMode, mangaCounts) {
-        categories
-            .filter { it.parentId != 0L }
-            .groupBy { it.parentId }
-            .mapValues { (_, subs) ->
-                when (sortMode) {
-                    CategoryManagerSort.AZ -> subs.sortedBy { it.name.lowercase() }
-                    CategoryManagerSort.ZA -> subs.sortedByDescending { it.name.lowercase() }
-                    CategoryManagerSort.MOST_ITEMS -> subs.sortedByDescending { mangaCounts[it.id] ?: 0 }
-                    CategoryManagerSort.LEAST_ITEMS -> subs.sortedBy { mangaCounts[it.id] ?: 0 }
-                    else -> subs.sortedForDisplay(categorySortOrderOf(sortMode))
-                }
-            }
+    // KMK --> Sort the whole list once, then split by level. Only the subcategories used to be
+    // sorted here, so any non-manual mode put the top-level rows in database order while the
+    // library's tabs used the selected one - which is what the two screens disagreed about.
+    val sorted = remember(categories, sortMode, mangaCounts) {
+        categories.sortedForDisplay(categorySortOrderOf(sortMode), mangaCounts)
     }
+    val topLevel = remember(sorted) { sorted.filter { it.parentId == 0L } }
+    val subMap = remember(sorted) { sorted.filter { it.parentId != 0L }.groupBy { it.parentId } }
 
     // Single flat list so every row is an individually reorderable item.
     // Searching ignores collapsed state and shows matching parents (with all
