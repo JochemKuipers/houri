@@ -16,6 +16,18 @@ files moved. See .github/scripts/release_notes.py.
 
 ### Improve
 
+- **Duplicate chapters from every scanlator are hidden by default.** If several groups publish the
+  same series, you saw each chapter once per group and had to hide the extra groups by hand, one
+  manga at a time. Now one upload per chapter number is shown, preferring the group with the most
+  complete coverage — the one that actually holds the story without holes, not simply the one with
+  the most files. Series where the groups split the work (one has 1–50, another 51–100) keep every
+  chapter: the preferred group wins the numbers it has and another covers the rest, so nothing goes
+  missing. Drag the order on **Scanlator priority** to pick a different favourite, or turn the whole
+  thing off with **Smart scanlator merge** in Advanced settings (it is now on by default, and the
+  toggle in the details menu does what it says).
+- **Scanlator priority now explains itself.** When no order is set, the list shows the order the
+  merge is actually using, labelled as automatic, instead of listing group names alphabetically.
+
 ### Fix
 
 - **Chapter counts were inflated by duplicate uploads.** A series carried by several scanlator
@@ -23,7 +35,6 @@ files moved. See .github/scripts/release_notes.py.
   the History tab's progress. The count now counts chapters rather than uploads. Chapters with no
   number (extras, one-shots) are still counted individually, and the achievements that read the
   chapter total now reflect the real chapter count rather than the upload count.
-
 - **Crash when re-entering a settings screen.** Opening a settings category, going back, and
   re-opening it before the previous animation finished could crash the app with
   `IllegalArgumentException: Key ... was used multiple times`. The settings categories are

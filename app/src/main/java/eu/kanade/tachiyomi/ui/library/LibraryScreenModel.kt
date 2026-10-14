@@ -35,7 +35,7 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.ui.category.categorySortOrderOf
 import eu.kanade.tachiyomi.ui.library.handler.LibraryFilterHandler
-import eu.kanade.tachiyomi.util.chapter.applyScanlatorPriority
+import eu.kanade.tachiyomi.util.chapter.applyScanlatorVisibility
 import eu.kanade.tachiyomi.util.chapter.getNextUnread
 import eu.kanade.tachiyomi.util.retainCovers
 import exh.favorites.FavoritesSyncHelper
@@ -106,7 +106,6 @@ import tachiyomi.domain.chapter.interactor.GetBookmarkedChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
-import tachiyomi.domain.chapter.service.isChapterBlacklisted
 import tachiyomi.domain.history.interactor.GetNextChapters
 import tachiyomi.domain.library.model.LibraryDisplayMode
 import tachiyomi.domain.library.model.LibraryGroup
@@ -919,29 +918,12 @@ class LibraryScreenModel(
             getChaptersByMangaId.await(manga.id, applyFilter = true)
         }
             // KMK -->
-            .let { chapters ->
-                // KMK --> Blacklisting is a reading preference, not part of smart merge. It used to
-                // be applied only inside applyScanlatorPriority, so turning that setting off
-                // silently un-hid every blacklisted chapter here.
-                // KMK <--
-                val visible = chapters.filterNot { isChapterBlacklisted(it, manga.blacklistedChapters) }
-                if (
-                    libraryPreferences.smartScanlatorMerge().get() &&
-                    (
-                        manga.scanlatorPriority.isNotEmpty() ||
-                            manga.blacklistedChapters.isNotEmpty() ||
-                            manga.scanlatorRangeRules.isNotEmpty()
-                        )
-                ) {
-                    visible.applyScanlatorPriority(
-                        manga.scanlatorPriority,
-                        manga.blacklistedChapters.toSet(),
-                        manga.scanlatorRangeRules,
-                    )
-                } else {
-                    visible
-                }
-            }
+            .applyScanlatorVisibility(
+                priority = manga.scanlatorPriority,
+                blacklistedChapters = manga.blacklistedChapters,
+                rangeRules = manga.scanlatorRangeRules,
+                mergeEnabled = libraryPreferences.smartScanlatorMerge().get(),
+            )
             // KMK <--
             .getNextUnread(manga, downloadManager, mergedManga)
         // SY <--

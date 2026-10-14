@@ -324,7 +324,9 @@ class LibraryPreferences(
     fun updateMangaTitles() = preferenceStore.getBoolean("pref_update_library_manga_titles", false)
 
     // KMK -->
-    fun smartScanlatorMerge() = preferenceStore.getBoolean("pref_smart_scanlator_merge", false)
+    // On by default: with no priority set, the merge ranks scanlators by coverage, so it collapses
+    // duplicates on a manga nobody has configured. Only users who already chose a value keep it.
+    fun smartScanlatorMerge() = preferenceStore.getBoolean("pref_smart_scanlator_merge", true)
     fun showSmartScanlatorInDetails() = preferenceStore.getBoolean("pref_show_smart_scanlator_details", true)
     // KMK <--
 

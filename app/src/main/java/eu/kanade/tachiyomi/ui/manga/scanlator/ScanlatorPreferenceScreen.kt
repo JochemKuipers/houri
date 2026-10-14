@@ -57,6 +57,7 @@ import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.util.chapter.ScanlatorCoverage
 import eu.kanade.tachiyomi.util.chapter.ScanlatorRangeRule
+import eu.kanade.tachiyomi.util.chapter.deriveScanlatorPriority
 import eu.kanade.tachiyomi.util.chapter.encodeScanlatorRangeRule
 import eu.kanade.tachiyomi.util.chapter.parseScanlatorRangeRule
 import eu.kanade.tachiyomi.util.chapter.scanlatorCoverage
@@ -68,6 +69,7 @@ import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.manga.model.MangaUpdate
 import tachiyomi.i18n.MR
@@ -156,6 +158,19 @@ class ScanlatorPreferenceScreen(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(MaterialTheme.padding.small),
         ) {
+            if (state.autoPriority) {
+                item(key = "auto_priority") {
+                    Text(
+                        text = stringResource(KMR.strings.scanlator_priority_auto),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(
+                            horizontal = MaterialTheme.padding.small,
+                            vertical = MaterialTheme.padding.extraSmall,
+                        ),
+                    )
+                }
+            }
             items(dragList, key = { it.name }) { entry ->
                 ReorderableItem(reorderableState, key = entry.name) {
                     val excluded = entry.name in state.excludedScanlators
@@ -446,6 +461,7 @@ class ScanlatorPreferenceModel(
         val excludedScanlators: Set<String> = emptySet(),
         val blacklist: List<String> = emptyList(),
         val rangeRules: List<String> = emptyList(),
+        val autoPriority: Boolean = false,
     )
 
     data class ScanlatorEntry(
@@ -459,12 +475,19 @@ class ScanlatorPreferenceModel(
     private val getManga: GetManga = globalAppGraph.getManga
     private val getExcludedScanlators: GetExcludedScanlators = globalAppGraph.getExcludedScanlators
     private val setExcludedScanlators: SetExcludedScanlators = globalAppGraph.setExcludedScanlators
+    private val libraryPreferences: LibraryPreferences = globalAppGraph.libraryPreferences
 
     init {
         screenModelScope.launch {
             getManga.subscribe(mangaId).collectLatest { manga ->
                 val chapters = getChaptersByMangaId.await(mangaId)
-                updateState(manga.scanlatorPriority, chapters, manga.blacklistedChapters, manga.scanlatorRangeRules)
+                updateState(
+                    manga.scanlatorPriority,
+                    chapters,
+                    manga.blacklistedChapters,
+                    manga.scanlatorRangeRules,
+                    mergeEnabled = libraryPreferences.smartScanlatorMerge().get(),
+                )
             }
         }
         screenModelScope.launch {
@@ -479,12 +502,20 @@ class ScanlatorPreferenceModel(
         chapters: List<Chapter>,
         blacklist: List<String>,
         rangeRules: List<String>,
+        mergeEnabled: Boolean,
     ) {
         val byScanlator = chapters
             .filter { !it.scanlator.isNullOrBlank() }
             .groupBy { it.scanlator!! }
-        val known = priority.filter { it in byScanlator.keys }
-        val unconfigured = byScanlator.keys.filter { it !in priority }.sorted()
+        // With no order of the user's own, show the order the merge is actually applying, so the
+        // list explains the chapter list rather than listing names alphabetically.
+        val auto = priority.isEmpty() && mergeEnabled
+        val effective = when {
+            auto -> chapters.deriveScanlatorPriority()
+            else -> priority
+        }
+        val known = effective.filter { it in byScanlator.keys }
+        val unconfigured = byScanlator.keys.filter { it !in effective }.sorted()
         mutableState.update {
             it.copy(
                 orderedScanlators = (known + unconfigured).map { name ->
@@ -496,6 +527,7 @@ class ScanlatorPreferenceModel(
                 },
                 blacklist = blacklist.sorted(),
                 rangeRules = rangeRules,
+                autoPriority = auto,
             )
         }
     }

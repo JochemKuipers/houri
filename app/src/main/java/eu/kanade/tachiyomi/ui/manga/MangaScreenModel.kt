@@ -67,7 +67,7 @@ import eu.kanade.tachiyomi.ui.manga.RelatedManga.Companion.isLoading
 import eu.kanade.tachiyomi.ui.manga.RelatedManga.Companion.removeDuplicates
 import eu.kanade.tachiyomi.ui.manga.RelatedManga.Companion.sorted
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import eu.kanade.tachiyomi.util.chapter.applyScanlatorPriority
+import eu.kanade.tachiyomi.util.chapter.applyScanlatorVisibility
 import eu.kanade.tachiyomi.util.chapter.getNextUnread
 import eu.kanade.tachiyomi.util.retainCovers
 import eu.kanade.tachiyomi.util.system.toast
@@ -133,7 +133,6 @@ import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.model.NoChaptersException
 import tachiyomi.domain.chapter.model.toChapterUpdate
 import tachiyomi.domain.chapter.service.calculateChapterGap
-import tachiyomi.domain.chapter.service.isChapterBlacklisted
 import tachiyomi.domain.chapter.service.scanlatorBlacklistKey
 import tachiyomi.domain.history.interactor.GetReadDurationForManga
 import tachiyomi.domain.library.service.LibraryPreferences
@@ -435,32 +434,12 @@ class MangaScreenModel(
                     // KMK <--
                     // KMK -->
                     val chapterItems = chapters
-                        .let { list ->
-                            // Blacklisted chapters never appear, regardless of the smart-merge toggle.
-                            if (manga.blacklistedChapters.isNotEmpty()) {
-                                val blacklist = manga.blacklistedChapters.toSet()
-                                list.filterNot { isChapterBlacklisted(it, blacklist) }
-                            } else {
-                                list
-                            }
-                        }
-                        .let { list ->
-                            if (
-                                libraryPreferences.smartScanlatorMerge().get() &&
-                                (
-                                    manga.scanlatorPriority.isNotEmpty() ||
-                                        manga.scanlatorRangeRules.isNotEmpty()
-                                    )
-                            ) {
-                                list.applyScanlatorPriority(
-                                    manga.scanlatorPriority,
-                                    manga.blacklistedChapters.toSet(),
-                                    manga.scanlatorRangeRules,
-                                )
-                            } else {
-                                list
-                            }
-                        }
+                        .applyScanlatorVisibility(
+                            priority = manga.scanlatorPriority,
+                            blacklistedChapters = manga.blacklistedChapters,
+                            rangeRules = manga.scanlatorRangeRules,
+                            mergeEnabled = libraryPreferences.smartScanlatorMerge().get(),
+                        )
                         // KMK <--
                         .toChapterListItems(manga /* SY --> */, mergedData /* SY <-- */)
                     updateSuccessState {

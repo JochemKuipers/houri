@@ -60,7 +60,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
-import eu.kanade.tachiyomi.util.chapter.applyScanlatorPriority
+import eu.kanade.tachiyomi.util.chapter.applyScanlatorVisibility
 import eu.kanade.tachiyomi.util.chapter.filterDownloaded
 import eu.kanade.tachiyomi.util.chapter.removeDuplicates
 import eu.kanade.tachiyomi.util.editCover
@@ -105,7 +105,6 @@ import tachiyomi.domain.chapter.interactor.UpdateChapter
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
 import tachiyomi.domain.chapter.service.getChapterSort
-import tachiyomi.domain.chapter.service.isChapterBlacklisted
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.domain.history.interactor.GetNextChapters
 import tachiyomi.domain.history.interactor.UpsertHistory
@@ -343,36 +342,14 @@ class ReaderViewModel(
         val selectedChapter = chapters.find { it.id == chapterId }
             ?: error("Requested chapter of id $chapterId not found in chapter list")
 
-        // KMK --> Blacklisted chapters never appear in-reader, regardless of skip toggles.
-        // Keep the currently opened chapter so an in-progress read never crashes.
-        val blacklist = manga.blacklistedChapters.toSet()
-        var visibleChapters = if (blacklist.isNotEmpty()) {
-            chapters.filter { !isChapterBlacklisted(it, blacklist) || it.id == chapterId }
-        } else {
-            chapters
-        }
-        // Smart scanlator merge, gated exactly as MangaScreenModel gates it. It used to be
-        // applied only to the manga screen and the library's chapter count, so the merged-away
-        // chapters stayed in this list: they appeared in the reader's chapter sheet and were
-        // reachable through prev/next. Worse, resuming one from history reached the
-        // `chapterList.first { chapterId == it.chapter.id }` below and threw - the chapter the merge
-        // had hidden was the one being opened.
-        //
-        // The escape hatch mirrors the blacklist above: the chapter actually being opened is never
-        // merged away, so a reader who opened a hidden chapter deliberately still lands on it and an
-        // in-progress read never loses the page it is on. Falling back to the unmerged list rather
-        // than dropping to an empty one keeps prev/next navigation working in that case.
-        if (
-            libraryPreferences.smartScanlatorMerge().get() &&
-            (manga.scanlatorPriority.isNotEmpty() || manga.scanlatorRangeRules.isNotEmpty())
-        ) {
-            val merged = visibleChapters.applyScanlatorPriority(
-                manga.scanlatorPriority,
-                blacklist,
-                manga.scanlatorRangeRules,
-            )
-            if (merged.any { it.id == chapterId }) visibleChapters = merged
-        }
+// KMK -->
+        val visibleChapters = chapters.applyScanlatorVisibility(
+            priority = manga.scanlatorPriority,
+            blacklistedChapters = manga.blacklistedChapters,
+            rangeRules = manga.scanlatorRangeRules,
+            mergeEnabled = libraryPreferences.smartScanlatorMerge().get(),
+            alwaysVisibleChapterId = chapterId,
+        )
         // KMK <--
 
         val chaptersForReader = when {
