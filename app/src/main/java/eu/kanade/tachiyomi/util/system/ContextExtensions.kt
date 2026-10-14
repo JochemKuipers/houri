@@ -89,8 +89,10 @@ private fun Context.defaultBrowserPackageName(): String? {
         ?.takeUnless { it in DeviceUtil.invalidDefaultBrowsers }
 }
 
+fun Context.logFileDir(): File = externalCacheDir ?: cacheDir
+
 fun Context.createFileInCacheDir(name: String): File {
-    val file = File(externalCacheDir, name)
+    val file = File(logFileDir(), name)
     if (file.exists()) {
         file.delete()
     }

@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.crash
 
 import android.content.Context
 import eu.kanade.tachiyomi.util.system.createFileInCacheDir
+import eu.kanade.tachiyomi.util.system.logFileDir
 import java.io.File
 
 /**
@@ -18,9 +19,11 @@ object CrashLogWriter {
 
     private const val MAX_FILES = 5
     private const val MAX_BYTES_PER_FILE = 2L * 1024 * 1024
+    private const val FILE_PREFIX = "houri_crash_"
+    private const val FILE_SUFFIX = ".log"
 
     fun write(context: Context, report: CrashReport): File {
-        val file = context.createFileInCacheDir("houri_crash_${report.timestampMs}.log")
+        val file = context.createFileInCacheDir("$FILE_PREFIX${report.timestampMs}$FILE_SUFFIX")
         file.writeText(render(report))
         if (file.length() > MAX_BYTES_PER_FILE) {
             val truncated = file.readText().take((MAX_BYTES_PER_FILE).toInt())
@@ -48,13 +51,24 @@ object CrashLogWriter {
         if (r.suppressedCount > 0) appendLine("Suppressed: ${r.suppressedCount}")
     }
 
+    private fun crashFiles(context: Context): List<File> {
+        val files = context.logFileDir().listFiles { f ->
+            f.name.startsWith(FILE_PREFIX) && f.name.endsWith(FILE_SUFFIX)
+        }
+        return files?.sortedByDescending { it.lastModified() } ?: emptyList()
+    }
+
     private fun pruneOld(context: Context) {
         try {
-            val files = context.cacheDir.listFiles { f -> f.name.startsWith("houri_crash_") }
-                ?.sortedByDescending { it.lastModified() } ?: return
-            files.drop(MAX_FILES).forEach { it.delete() }
+            crashFiles(context).drop(MAX_FILES).forEach { it.delete() }
         } catch (_: Exception) {
         }
+    }
+
+    fun deleteAll(context: Context): Int = try {
+        crashFiles(context).count { it.delete() }
+    } catch (_: Exception) {
+        0
     }
 
     private fun appendLogcatSnapshot(context: Context, file: File) {
