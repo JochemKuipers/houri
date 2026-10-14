@@ -127,11 +127,11 @@ object MangaMapper {
         isLightNovel: Boolean,
         // KMK <--
         totalCount: Long,
-        readCount: Double,
+        readCount: Long,
         latestUpload: Long,
         chapterFetchedAt: Long,
         lastRead: Long,
-        bookmarkCount: Double,
+        bookmarkCount: Long,
         // KMK -->
         bookmarkedReadCount: Long,
         // KMK <--
@@ -179,8 +179,8 @@ object MangaMapper {
         ),
         categories = categories.split(",").map { it.toLong() },
         totalChapters = totalCount,
-        readCount = readCount.toLong(),
-        bookmarkCount = bookmarkCount.toLong(),
+        readCount = readCount,
+        bookmarkCount = bookmarkCount,
         // KMK -->
         bookmarkReadCount = bookmarkedReadCount,
         chapterFlags = chapterFlags,

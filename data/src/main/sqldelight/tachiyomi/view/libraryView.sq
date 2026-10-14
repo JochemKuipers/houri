@@ -16,14 +16,41 @@ FROM mangas M
 LEFT JOIN (
     SELECT
         chapters.manga_id,
-        count(*) AS total,
-        sum(read) AS readCount,
+        -- KMK --> Count chapter NUMBERS, not rows. Two scanlators uploading the same chapter are
+        -- one chapter to the reader, so a plain row count reported a series with three groups as
+        -- three times as long and inflated the unread badge (LibraryManga.unreadCount is derived
+        -- from these). Recognised numbers are counted once each; chapters with no usable number
+        -- (extras, oneshots) have nothing to deduplicate against and are still counted per row.
+        -- The same four aggregates are all distinct-based so the set arithmetic in unreadCount
+        -- (total - bookmark - (read - bookmarkRead)) stays non-negative: a number is counted as
+        -- read or bookmarked if any of its uploads is, which keeps each set a subset of total.
+        CAST(
+            count(DISTINCT CASE WHEN chapters.chapter_number > 0
+                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapters.chapter_number <= 0 THEN 1 ELSE 0 END) AS INTEGER
+        ) AS total,
+        -- KMK <--
+        -- KMK -->
+        CAST(
+            count(DISTINCT CASE WHEN chapters.chapter_number > 0 AND chapters.read = 1
+                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapters.chapter_number <= 0 AND chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER
+        ) AS readCount,
         coalesce(max(chapters.date_upload), 0) AS latestUpload,
         coalesce(max(history.last_read), 0) AS lastRead,
         coalesce(max(chapters.date_fetch), 0) AS fetchedAt,
-        sum(chapters.bookmark) AS bookmarkCount,
-        -- KMK -->
-        sum(CASE WHEN chapters.bookmark = 1 AND chapters.read = 1 THEN 1 ELSE 0 END) AS bookmarkReadCount,
+        CAST(
+            count(DISTINCT CASE WHEN chapters.chapter_number > 0 AND chapters.bookmark = 1
+                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapters.chapter_number <= 0 AND chapters.bookmark = 1 THEN 1 ELSE 0 END) AS INTEGER
+        ) AS bookmarkCount,
+        CAST(
+            count(DISTINCT CASE WHEN chapters.chapter_number > 0
+                    AND chapters.bookmark = 1 AND chapters.read = 1
+                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapters.chapter_number <= 0
+                AND chapters.bookmark = 1 AND chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER
+        ) AS bookmarkReadCount,
         -- KMK <--
         excluded_scanlators.scanlator AS ex_scanlator
     FROM chapters
@@ -81,14 +108,34 @@ ON ME.merge_id = M._id
 LEFT JOIN(
     SELECT
         ME.merge_id,
-        count(*) AS total,
-        sum(read) AS readCount,
+        -- KMK --> Same distinct-chapter-number counting as the non-merged branch above, and it
+        -- matters more here: chapters arrive from every manga in the merge, so the same number is
+        -- routinely present several times over.
+        CAST(
+            count(DISTINCT CASE WHEN chapters.chapter_number > 0
+                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapters.chapter_number <= 0 THEN 1 ELSE 0 END) AS INTEGER
+        ) AS total,
+        CAST(
+            count(DISTINCT CASE WHEN chapters.chapter_number > 0 AND chapters.read = 1
+                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapters.chapter_number <= 0 AND chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER
+        ) AS readCount,
         coalesce(max(chapters.date_upload), 0) AS latestUpload,
         coalesce(max(history.last_read), 0) AS lastRead,
         coalesce(max(chapters.date_fetch), 0) AS fetchedAt,
-        sum(chapters.bookmark) AS bookmarkCount,
-        -- KMK -->
-        sum(CASE WHEN chapters.bookmark = 1 AND chapters.read = 1 THEN 1 ELSE 0 END) AS bookmarkReadCount,
+        CAST(
+            count(DISTINCT CASE WHEN chapters.chapter_number > 0 AND chapters.bookmark = 1
+                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapters.chapter_number <= 0 AND chapters.bookmark = 1 THEN 1 ELSE 0 END) AS INTEGER
+        ) AS bookmarkCount,
+        CAST(
+            count(DISTINCT CASE WHEN chapters.chapter_number > 0
+                    AND chapters.bookmark = 1 AND chapters.read = 1
+                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapters.chapter_number <= 0
+                AND chapters.bookmark = 1 AND chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER
+        ) AS bookmarkReadCount,
         -- KMK <--
         excluded_scanlators.scanlator AS ex_scanlator
     FROM chapters

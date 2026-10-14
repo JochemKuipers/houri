@@ -38,10 +38,30 @@ ON chapters.manga_id = max_last_read.manga_id
 LEFT JOIN(
     SELECT
         chapters.manga_id,
-        count(*) AS total,
-        sum(read) AS readCount,
-        sum(bookmark) AS bookmarkCount,
-        sum(CASE WHEN bookmark = 1 AND read = 1 THEN 1 ELSE 0 END) AS bookmarkReadCount,
+        -- KMK --> Same chapter-number counting as libraryView, for the same reason: a series with
+        -- several scanlator groups stores one row per upload, so count(*) made the History tab's
+        -- "read of total" progress and its unfinished filter count a chapter once per group. All
+        -- four aggregates share one distinct basis so the arithmetic below cannot go negative.
+        CAST(
+            count(DISTINCT CASE WHEN chapters.chapter_number > 0
+                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapters.chapter_number <= 0 THEN 1 ELSE 0 END) AS INTEGER
+        ) AS total,
+        CAST(
+            count(DISTINCT CASE WHEN chapters.chapter_number > 0 AND chapters.read = 1
+                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapters.chapter_number <= 0 AND chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER
+        ) AS readCount,
+        CAST(
+            count(DISTINCT CASE WHEN chapters.chapter_number > 0 AND chapters.bookmark = 1
+                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapters.chapter_number <= 0 AND chapters.bookmark = 1 THEN 1 ELSE 0 END) AS INTEGER
+        ) AS bookmarkCount,
+        CAST(
+            count(DISTINCT CASE WHEN chapters.chapter_number > 0
+                AND chapters.bookmark = 1 AND chapters.read = 1
+            THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END) AS INTEGER
+        ) AS bookmarkReadCount,
         excluded_scanlators.scanlator AS ex_scanlator
     FROM chapters
     LEFT JOIN excluded_scanlators

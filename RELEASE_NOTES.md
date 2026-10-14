@@ -18,6 +18,12 @@ files moved. See .github/scripts/release_notes.py.
 
 ### Fix
 
+- **Chapter counts were inflated by duplicate uploads.** A series carried by several scanlator
+  groups reported several times its real length — in the library entry, in the unread badge, and in
+  the History tab's progress. The count now counts chapters rather than uploads. Chapters with no
+  number (extras, one-shots) are still counted individually, and the achievements that read the
+  chapter total now reflect the real chapter count rather than the upload count.
+
 - **Crash when re-entering a settings screen.** Opening a settings category, going back, and
   re-opening it before the previous animation finished could crash the app with
   `IllegalArgumentException: Key ... was used multiple times`. The settings categories are
