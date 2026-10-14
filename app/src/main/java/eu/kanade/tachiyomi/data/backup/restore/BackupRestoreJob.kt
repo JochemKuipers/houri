@@ -14,7 +14,6 @@ import androidx.work.workDataOf
 import eu.kanade.tachiyomi.data.BackupRestoreStatus
 import eu.kanade.tachiyomi.data.backup.BackupNotifier
 import eu.kanade.tachiyomi.data.event.AppEvent
-import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.util.system.cancelNotification
 import eu.kanade.tachiyomi.util.system.isRunning
@@ -59,7 +58,6 @@ class BackupRestoreJob(private val context: Context, workerParams: WorkerParamet
             // Kick off a chapter refresh and reconcile restored tracking entries with the
             // remote services right away instead of waiting for the next scheduled update.
             if (options.libraryEntries && !isSync) {
-                LibraryUpdateJob.startNow(context)
                 try {
                     globalAppGraph.refreshTracks.awaitAllTracks()
                 } catch (e: Exception) {

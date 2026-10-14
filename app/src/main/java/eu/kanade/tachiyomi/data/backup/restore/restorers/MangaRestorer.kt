@@ -18,6 +18,7 @@ import tachiyomi.data.UpdateStrategyColumnAdapter
 import tachiyomi.data.manga.MangaMapper
 import tachiyomi.data.manga.MergedMangaMapper
 import tachiyomi.domain.category.interactor.GetCategories
+import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.interactor.FetchInterval
@@ -32,6 +33,7 @@ import tachiyomi.domain.track.interactor.InsertTrack
 import tachiyomi.domain.track.model.Track
 import java.time.ZonedDateTime
 import java.util.Date
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.max
 import kotlin.math.min
 
@@ -55,23 +57,68 @@ class MangaRestorer(
     private var now = ZonedDateTime.now()
     private var currentFetchWindow = fetchInterval.getWindow(now)
 
+    /**
+     * Read once per restore instead of once per manga. Nothing in this class writes
+     * categories, so every entry of a restore sees the same list.
+     */
+    private var restoredCategories: List<Category> = emptyList()
+
+    /**
+     * `mergeUrl`/`mangaUrl` of every merged row already in the database, plus every
+     * row this restore inserted. Backs the "is this reference already restored?"
+     * check, which used to load the whole `merged` table per merged entry and then
+     * scan it linearly per reference.
+     */
+    private val knownMergedReferences = ConcurrentHashMap.newKeySet<Pair<String, String>>()
+
+    private val pendingEdits = ArrayList<CustomMangaInfo>()
+    private val pendingEditsLock = Any()
+
     init {
         now = ZonedDateTime.now()
         currentFetchWindow = fetchInterval.getWindow(now)
     }
 
+    /**
+     * Loads the state that is identical for every entry of a restore.
+     *
+     * Call once before fanning out to [restore]. The restore does not add or remove
+     * categories, and merged rows are added to [knownMergedReferences] as they are
+     * inserted, so both stay valid for the whole run.
+     */
+    suspend fun prepare() {
+        restoredCategories = getCategories.await()
+        knownMergedReferences.clear()
+        knownMergedReferences.addAll(
+            handler.awaitList { mergedQueries.selectAll(MergedMangaMapper::map) }
+                .map { it.mergeUrl to it.mangaUrl },
+        )
+    }
+
+    /**
+     * Publishes the manga info edits buffered by [restore] in a single batch.
+     *
+     * One [tachiyomi.domain.manga.interactor.SetCustomMangaInfo] call per entry
+     * copied the whole cache and queued its own transaction, which is quadratic
+     * once a backup carries an edit for most of the library.
+     */
+    fun flushPendingEdits() {
+        val batch = synchronized(pendingEditsLock) {
+            if (pendingEdits.isEmpty()) return
+            pendingEdits.toList().also { pendingEdits.clear() }
+        }
+        setCustomMangaInfo.setAll(batch)
+    }
+
     suspend fun sortByNew(backupMangas: List<BackupManga>): List<BackupManga> {
         val urlsBySource = handler.awaitList { mangasQueries.getAllMangaSourceAndUrl() }
+            // A set, because the comparator below asks "is this url known?" once per
+            // comparison. Against a list each answer is a scan, which turned sorting a
+            // library-sized backup into a quadratic amount of string comparisons.
             .groupBy({ it.source }, { it.url })
+            .mapValues { (_, urls) -> urls.toHashSet() }
 
-        return backupMangas
-            .sortedWith(
-                // KMK -->
-                compareBy<BackupManga> { isMergedSourceId(it.source) }
-                    // KMK <--
-                    .then(compareBy { it.url in urlsBySource[it.source].orEmpty() })
-                    .then(compareByDescending { it.lastModifiedAt }),
-            )
+        return backupMangas.sortedWith(restoreOrderComparator(urlsBySource))
     }
 
     /**
@@ -445,7 +492,7 @@ class MangaRestorer(
         // categories on the floor.
         val resolvedIds = categoryIds.mapNotNull { restoredCategoryIds[it] }.distinct()
         val useIds = resolvedIds.isNotEmpty()
-        val dbCategories = if (useIds) emptyList() else getCategories.await()
+        val dbCategories = if (useIds) emptyList() else restoredCategories
         // KMK <--
 
         // KMK --> Same name can exist at two levels now, so a plain associateBy would silently
@@ -487,36 +534,38 @@ class MangaRestorer(
     }
 
     private suspend fun restoreHistory(manga: Manga, backupHistory: List<BackupHistory>) {
+        if (backupHistory.isEmpty()) return
+
+        // Two queries for the whole manga rather than two per history row. Every row
+        // needs its chapter's id, and the chapter list is read after [restoreChapters]
+        // so it also covers the chapters this restore just inserted.
+        val chapterIdsByUrl = getChaptersByMangaId.await(manga.id).associate { it.url to it.id }
+        if (chapterIdsByUrl.isEmpty()) return
+        val dbHistoryByChapterId = handler.awaitList { historyQueries.getHistoryByMangaId(manga.id) }
+            .associateBy { it.chapter_id }
+
         val toUpdate = backupHistory.mapNotNull { history ->
             // KMK -->
-            val dbHistory = handler.awaitList { historyQueries.getHistoryByChapterUrl(manga.id, history.url) }
-                .firstOrNull()
+            val chapterId = chapterIdsByUrl[history.url]
+                ?: return@mapNotNull null // Chapter doesn't exist; skip
+            val dbHistory = dbHistoryByChapterId[chapterId]
             // KMK <--
             val item = history.getHistoryImpl()
 
             if (dbHistory == null) {
-                // KMK -->
-                val chapter = handler.awaitList { chaptersQueries.getChapterByUrlAndMangaId(history.url, manga.id) }
-                    .firstOrNull()
-                // KMK <--
-                return@mapNotNull if (chapter == null) {
-                    // Chapter doesn't exist; skip
-                    null
-                } else {
-                    // New history entry
-                    item.copy(chapterId = chapter._id)
-                }
+                // New history entry
+                item.copy(chapterId = chapterId)
+            } else {
+                // Update history entry
+                item.copy(
+                    id = dbHistory._id,
+                    chapterId = dbHistory.chapter_id,
+                    readAt = max(item.readAt?.time ?: 0L, dbHistory.last_read?.time ?: 0L)
+                        .takeIf { it > 0L }
+                        ?.let { Date(it) },
+                    readDuration = max(item.readDuration, dbHistory.time_read) - dbHistory.time_read,
+                )
             }
-
-            // Update history entry
-            item.copy(
-                id = dbHistory._id,
-                chapterId = dbHistory.chapter_id,
-                readAt = max(item.readAt?.time ?: 0L, dbHistory.last_read?.time ?: 0L)
-                    .takeIf { it > 0L }
-                    ?.let { Date(it) },
-                readDuration = max(item.readDuration, dbHistory.time_read) - dbHistory.time_read,
-            )
         }
 
         if (toUpdate.isNotEmpty()) {
@@ -603,12 +652,8 @@ class MangaRestorer(
         mergeMangaId: Long,
         backupMergedMangaReferences: List<BackupMergedMangaReference>,
     ) {
-        // Get merged manga references from file and from db
-        val dbMergedMangaReferences = handler.awaitList {
-            mergedQueries.selectAll(MergedMangaMapper::map)
-        }
+        if (backupMergedMangaReferences.isEmpty()) return
 
-        // Iterate over them
         backupMergedMangaReferences
             // KMK -->
             .map { EXHMigrations.migrateBackupMergedMangaReference(it) }
@@ -617,11 +662,7 @@ class MangaRestorer(
                 // If the backupMergedMangaReference isn't in the db,
                 // remove the id and insert a new backupMergedMangaReference
                 // Store the inserted id in the backupMergedMangaReference
-                if (dbMergedMangaReferences.none {
-                        backupMergedMangaReference.mergeUrl == it.mergeUrl &&
-                            backupMergedMangaReference.mangaUrl == it.mangaUrl
-                    }
-                ) {
+                if (!knownMergedReferences.contains(backupMergedMangaReference.mergeUrl to backupMergedMangaReference.mangaUrl)) {
                     // Let the db assign the id
                     // KMK -->
                     val mergedManga = handler.awaitList {
@@ -651,6 +692,7 @@ class MangaRestorer(
                             )
                         }
                     }
+                    knownMergedReferences.add(backupMergedMangaReference.mergeUrl to backupMergedMangaReference.mangaUrl)
                 }
             }
     }
@@ -663,7 +705,7 @@ class MangaRestorer(
 
     private fun restoreEditedInfo(mangaJson: CustomMangaInfo?) {
         mangaJson ?: return
-        setCustomMangaInfo.set(mangaJson)
+        synchronized(pendingEditsLock) { pendingEdits += mangaJson }
     }
 
     private fun BackupManga.getCustomMangaInfo(): CustomMangaInfo? {
@@ -715,3 +757,21 @@ class MangaRestorer(
         }
     }
 }
+
+/**
+ * Order a restore applies entries in.
+ *
+ * Merged entries go last because they are resolved against the real entries that
+ * precede them. Entries the database already has go before ones it does not, so an
+ * update lands on the existing row instead of the insert creating a duplicate of it.
+ * [knownUrlsBySource] must hold sets: a per-comparison lookup against a larger
+ * collection is what made sorting a library-sized backup expensive.
+ */
+internal fun restoreOrderComparator(
+    knownUrlsBySource: Map<Long, Set<String>>,
+): Comparator<BackupManga> =
+    // KMK -->
+    compareBy<BackupManga> { isMergedSourceId(it.source) }
+        // KMK <--
+        .then(compareBy { knownUrlsBySource[it.source]?.contains(it.url) ?: false })
+        .thenByDescending { it.lastModifiedAt }

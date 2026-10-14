@@ -10,4 +10,6 @@ class SetCustomMangaInfo(
 ) {
 
     fun set(mangaInfo: CustomMangaInfo) = customMangaRepository.set(mangaInfo)
+
+    fun setAll(mangaInfos: List<CustomMangaInfo>) = customMangaRepository.setAll(mangaInfos)
 }

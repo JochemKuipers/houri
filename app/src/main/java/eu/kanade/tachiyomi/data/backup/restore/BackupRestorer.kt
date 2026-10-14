@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.data.backup.restore
 
 import android.content.Context
 import android.net.Uri
+import android.os.SystemClock
 import eu.kanade.tachiyomi.data.backup.BackupDecoder
 import eu.kanade.tachiyomi.data.backup.BackupNotifier
 import eu.kanade.tachiyomi.data.backup.models.BackupCategory
@@ -28,8 +29,10 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import logcat.LogPriority
 import mihon.core.concurrency.AppDispatchersHolder
 import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import java.io.File
@@ -38,6 +41,11 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+
+private const val MANGA_CHUNK_SIZE = 250
+
+private const val PROGRESS_NOTIFICATION_INTERVAL_MS = 250L
 
 class BackupRestorer(
     private val context: Context,
@@ -59,6 +67,8 @@ class BackupRestorer(
     private val restoreAmount = AtomicInteger(0)
     private val restoreProgress = AtomicInteger(0)
     private val errors = CopyOnWriteArrayList<Pair<Date, String>>()
+
+    private val lastProgressPost = AtomicLong(0L)
 
     /**
      * Mapping of source ID to source name from backup data
@@ -122,7 +132,11 @@ class BackupRestorer(
     ) {
         try {
             achievementPrefs?.suppressOrganicForImport = true
+            val decodeStart = SystemClock.elapsedRealtime()
             val backup = BackupDecoder(context).decode(uri)
+            logcat(LogPriority.INFO) {
+                "Restore decoded ${backup.backupManga.size} entries in ${SystemClock.elapsedRealtime() - decodeStart}ms"
+            }
 
             // Store source mapping for error messages
             val backupMaps = backup.backupSources
@@ -187,15 +201,22 @@ class BackupRestorer(
                     restoreExtensionStores(backup.backupExtensionStores)
                 }
 
-                if (options.libraryEntries) {
-                    LibraryUpdateJob.startNow(context)
-                }
                 // KMK --> Inside the try, so a restore that threw does not count.
                 runCatching {
                     mihon.app.di.globalAppGraph.achievementManager.tryUnlockDirect("backup_restored")
                 }
                 // KMK <--
             }
+
+            // KMK --> After the scope, not inside it. The restore above is a `launch`, so
+            // anything enqueued from inside the scope started while the restore was still
+            // writing. A full library refresh reads and writes every entry on the same
+            // single-writer database the restore is using, so for a large backup the two
+            // spent their time contending rather than the restore finishing first.
+            if (options.libraryEntries) {
+                LibraryUpdateJob.startNow(context)
+            }
+            // KMK <--
         } finally {
             if (prevSuppress != null) achievementPrefs?.suppressOrganicForImport = prevSuppress
             // KMK --> credit imported library entries towards library/backlog achievements
@@ -276,30 +297,76 @@ class BackupRestorer(
         // KMK <--
     ) = launch {
         val semaphore = Semaphore(4)
-        mangaRestorer.sortByNew(backupMangas)
-            .map {
-                async(AppDispatchersHolder.get().backgroundOps) {
-                    semaphore.withPermit {
-                        ensureActive()
+        val mangaStart = SystemClock.elapsedRealtime()
+        val sorted = mangaRestorer.sortByNew(backupMangas)
+        mangaRestorer.prepare()
 
-                        try {
-                            mangaRestorer.restore(it, backupCategories, restoredCategoryIds)
-                        } catch (e: Exception) {
-                            val sourceName = sourceMapping[it.source] ?: it.source.toString()
-                            errors.add(Date() to "${it.title} [$sourceName]: ${e.message}")
-                        }
+        sorted
+            // Chunked so the edits [MangaRestorer] buffers are published per chunk
+            // instead of per entry, and so the deferred list stays bounded. Building
+            // one deferred per entry up front allocated the whole library's worth of
+            // coroutines at once.
+            .chunked(MANGA_CHUNK_SIZE)
+            .forEach { chunk ->
+                try {
+                    chunk
+                        .map {
+                            async(AppDispatchersHolder.get().backgroundOps) {
+                                semaphore.withPermit {
+                                    ensureActive()
 
-                        val progress = restoreProgress.incrementAndGet()
-                        with(notifier) {
-                            showRestoreProgress(it.title, progress, restoreAmount.get(), isSync)
-                                // KMK -->
-                                .show(Notifications.ID_RESTORE_PROGRESS)
-                            // KMK <--
+                                    try {
+                                        mangaRestorer.restore(it, backupCategories, restoredCategoryIds)
+                                    } catch (e: Exception) {
+                                        val sourceName = sourceMapping[it.source] ?: it.source.toString()
+                                        errors.add(Date() to "${it.title} [$sourceName]: ${e.message}")
+                                    }
+
+                                    val progress = restoreProgress.incrementAndGet()
+                                    reportProgress(it.title, progress)
+                                }
+                            }
                         }
-                    }
+                        .awaitAll()
+                } finally {
+                    // Also on cancellation: the edits written so far are already in the
+                    // database transaction, so dropping them would leave the restored
+                    // rows without the titles the backup carried.
+                    mangaRestorer.flushPendingEdits()
                 }
             }
-            .awaitAll()
+
+        logcat(LogPriority.INFO) {
+            "Restore wrote ${sorted.size} entries in ${SystemClock.elapsedRealtime() - mangaStart}ms"
+        }
+    }
+
+    /**
+     * Posts the progress notification, at most once per [PROGRESS_NOTIFICATION_INTERVAL_MS].
+     *
+     * A restore posts one notification per entry, so a library-sized backup used to
+     * rebuild and repost the notification tens of thousands of times. Each post is a
+     * binder call that SystemUI renders, which is more expensive than the entry's own
+     * database work once the entries are small. Rate limiting keeps the bar moving
+     * while bounding posts by elapsed time instead of by entry count.
+     */
+    private suspend fun reportProgress(title: String, progress: Int) {
+        val now = SystemClock.elapsedRealtime()
+        val previous = lastProgressPost.get()
+        val isLast = progress >= restoreAmount.get()
+        if (!isLast) {
+            if (now - previous < PROGRESS_NOTIFICATION_INTERVAL_MS) return
+            if (!lastProgressPost.compareAndSet(previous, now)) return
+        } else {
+            lastProgressPost.set(now)
+        }
+
+        with(notifier) {
+            showRestoreProgress(title, progress, restoreAmount.get(), isSync)
+                // KMK -->
+                .show(Notifications.ID_RESTORE_PROGRESS)
+            // KMK <--
+        }
     }
 
     private fun CoroutineScope.restoreAppPreferences(

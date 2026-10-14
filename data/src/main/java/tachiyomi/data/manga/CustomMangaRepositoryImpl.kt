@@ -85,15 +85,15 @@ class CustomMangaRepositoryImpl(
     override val changes: SharedFlow<Unit> = _changes.asSharedFlow()
 
     /** Unbounded, single consumer: preserves write order without ever dropping an edit. */
-    private val pendingWrites = Channel<CustomMangaInfo>(Channel.UNLIMITED)
+    private val pendingWrites = Channel<List<CustomMangaInfo>>(Channel.UNLIMITED)
 
     init {
         migrateLegacyFile(database)
         scope.launch {
-            for (info in pendingWrites) {
-                runCatching { persist(info) }.onFailure {
+            for (batch in pendingWrites) {
+                runCatching { persistAll(batch) }.onFailure {
                     this@CustomMangaRepositoryImpl.logcat(LogPriority.ERROR, it) {
-                        "Failed to save manga info edit for ${info.id}"
+                        "Failed to save ${batch.size} manga info edit(s)"
                     }
                 }
             }
@@ -103,30 +103,51 @@ class CustomMangaRepositoryImpl(
     override fun get(mangaId: Long): CustomMangaInfo? = cache.value[mangaId]
 
     override fun set(mangaInfo: CustomMangaInfo) {
-        if (mangaInfo.isEmpty()) {
-            cache.value = cache.value - mangaInfo.id
-        } else {
-            cache.value = cache.value + (mangaInfo.id to mangaInfo)
+        setAll(listOf(mangaInfo))
+    }
+
+    override fun setAll(mangaInfos: List<CustomMangaInfo>) {
+        if (mangaInfos.isEmpty()) return
+
+        // One rebuild for the whole batch. `cache.value + pair` per edit would copy
+        // the entire map once per row, which is what made a large restore - where
+        // almost every entry can carry an edit - cost more in map copying than in
+        // SQL. A later edit for the same id overwrites the earlier one, matching
+        // repeated `set` calls.
+        var updated = cache.value
+        mangaInfos.forEach { mangaInfo ->
+            updated = if (mangaInfo.isEmpty()) {
+                updated - mangaInfo.id
+            } else {
+                updated + (mangaInfo.id to mangaInfo)
+            }
         }
-        pendingWrites.trySend(mangaInfo)
+
+        cache.value = updated
+        // One queue item and one `changes` emission for the batch, so the library
+        // Flow re-emits once per batch rather than once per entry.
+        pendingWrites.trySend(mangaInfos)
         _changes.tryEmit(Unit)
     }
 
-    private suspend fun persist(mangaInfo: CustomMangaInfo) {
+    private suspend fun persistAll(mangaInfos: List<CustomMangaInfo>) {
         handler.await(inTransaction = true) {
-            if (mangaInfo.isEmpty()) {
-                custom_manga_infoQueries.deleteByMangaId(mangaInfo.id)
-            } else {
-                custom_manga_infoQueries.upsert(
-                    mangaId = mangaInfo.id,
-                    title = mangaInfo.title,
-                    author = mangaInfo.author,
-                    artist = mangaInfo.artist,
-                    thumbnailUrl = mangaInfo.thumbnailUrl,
-                    description = mangaInfo.description,
-                    genre = mangaInfo.genre,
-                    status = mangaInfo.status,
-                )
+            val queries = custom_manga_infoQueries
+            mangaInfos.forEach { mangaInfo ->
+                if (mangaInfo.isEmpty()) {
+                    queries.deleteByMangaId(mangaInfo.id)
+                } else {
+                    queries.upsert(
+                        mangaId = mangaInfo.id,
+                        title = mangaInfo.title,
+                        author = mangaInfo.author,
+                        artist = mangaInfo.artist,
+                        thumbnailUrl = mangaInfo.thumbnailUrl,
+                        description = mangaInfo.description,
+                        genre = mangaInfo.genre,
+                        status = mangaInfo.status,
+                    )
+                }
             }
         }
     }
