@@ -57,7 +57,16 @@ fun AchievementsContent(
             emptyList()
         }
     }
-    val all = Achievements.all
+    // KMK --> The pool used to be fetched and then thrown away: it gated a heading and nothing
+    // else, so all 49 rotating achievements sat in the same grid as everything else with no
+    // indication of which three and four were actually on show. Hoisting them to the top is the
+    // whole point of a rotation - an achievement you cannot see is not a daily challenge.
+    val activeIds = remember(rotatingPoolActive) { rotatingPoolActive.mapTo(mutableSetOf()) { it.id } }
+    val all = remember(Achievements.all, activeIds) {
+        val active = Achievements.all.filter { it.id in activeIds }
+        val rest = Achievements.all.filter { it.id !in activeIds }
+        active + rest
+    }
 
     Column(modifier = modifier.padding(contentPadding)) {
         if (onLeaveAchievements != null) {
@@ -103,7 +112,13 @@ fun AchievementsContent(
                 val isUnlocked = ach.id in unlockedSet
                 val display = ach.copy(unlockedAt = if (isUnlocked) 1L else null)
                 val progress = rememberTierProgress(animationsEnabled && isUnlocked, ach.tier)
-                AchievementCard(achievement = display, isUnlocked = isUnlocked, animationsEnabled = animationsEnabled, progress = progress)
+                AchievementCard(
+                    achievement = display,
+                    isUnlocked = isUnlocked,
+                    animationsEnabled = animationsEnabled,
+                    progress = progress,
+                    isActiveRotating = ach.id in activeIds,
+                )
             }
         }
     }
@@ -174,23 +189,31 @@ private fun StatChip(label: String, value: String) {
 }
 
 @Composable
-private fun AchievementCard(achievement: Achievement, isUnlocked: Boolean, animationsEnabled: Boolean, progress: Float) {
+private fun AchievementCard(
+    achievement: Achievement,
+    isUnlocked: Boolean,
+    animationsEnabled: Boolean,
+    progress: Float,
+    isActiveRotating: Boolean,
+) {
     val prefs = globalAppGraph.achievementPreferences
-    val hasProgress = !isUnlocked && AchievementProgress.hasProgress(achievement.id)
+    // KMK --> Rotating achievements have a threshold now - the pool exposes the same one the
+    // unlock is judged against - so they render as a real bar with a "3/5" label instead of the
+    // bare "Progress 3" the card used to show, which gave no indication of what it was 3 of.
+    val isRotatingLocked = !isUnlocked && achievement.isRotating
+    val rotatingTarget = if (achievement.isRotating) {
+        tachiyomi.domain.achievement.service.RotatingAchievementPool.thresholdFor(achievement.id)
+    } else {
+        0
+    }
+    val rotatingProgress = if (isRotatingLocked) {
+        runCatching { globalAppGraph.rotatingAchievementPool.getProgress(achievement.id) }.getOrDefault(0)
+    } else {
+        0
+    }
+    val hasProgress = !isUnlocked && !isRotatingLocked && AchievementProgress.hasProgress(achievement.id)
     val progressValue = if (hasProgress) AchievementProgress.progressFor(achievement.id, prefs) else 0f
     val progressLabel = if (hasProgress) AchievementProgress.labelFor(achievement.id, prefs) else null
-    val rotatingProgressPair = if (!isUnlocked && achievement.isRotating) {
-        try {
-            val pool = globalAppGraph.rotatingAchievementPool
-            val cur = pool.getProgress(achievement.id)
-            val label = "$cur"
-            cur to label
-        } catch (_: Exception) {
-            null
-        }
-    } else {
-        null
-    }
     val alpha = if (isUnlocked) 1f else 0.45f
     val tierColor = when (achievement.tier) {
         tachiyomi.domain.achievement.model.AchievementTier.BRONZE -> MaterialTheme.colorScheme.secondary
@@ -256,9 +279,13 @@ private fun AchievementCard(achievement: Achievement, isUnlocked: Boolean, anima
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                } else if (rotatingProgressPair != null) {
+                } else if (isRotatingLocked && rotatingTarget > 1) {
+                    LinearProgressIndicator(
+                        progress = { (rotatingProgress.toFloat() / rotatingTarget).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().height(6.dp),
+                    )
                     Text(
-                        text = "Progress ${rotatingProgressPair.second}",
+                        text = "$rotatingProgress/$rotatingTarget",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -279,9 +306,13 @@ private fun AchievementCard(achievement: Achievement, isUnlocked: Boolean, anima
                 }
                 if (achievement.isRotating) {
                     Text(
-                        text = "Rotating",
+                        text = if (isActiveRotating) "Rotating • active now" else "Rotating • not in rotation",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.tertiary,
+                        color = if (isActiveRotating) {
+                            MaterialTheme.colorScheme.tertiary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
                     )
                 }
             }

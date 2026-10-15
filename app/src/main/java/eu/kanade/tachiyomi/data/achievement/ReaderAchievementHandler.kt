@@ -22,6 +22,11 @@ import java.util.Calendar
  * error, a malformed counter name - silently discarded every step after it in the same event.
  * A chapter read could therefore count the chapter and lose the streak, the binge tier and
  * the reading-mode achievement together, with nothing logged.
+ *
+ * The split between [onChapterRead] and [onMangaCompleted] is load-bearing. The three
+ * reading-mode achievements all read "complete a manga in <mode>", and they used to be
+ * unlocked by a single chapter read in that mode; they now fire where the description's
+ * condition is actually observable.
  */
 @SingleIn(AppScope::class)
 @Inject
@@ -38,17 +43,34 @@ class ReaderAchievementHandler(
     // itself, so a page turn cannot run a library query.
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    fun onChapterRead(readingModeFlag: Int, incognito: Boolean = false) {
-        step("organic read") { achievementManager.onOrganicChapterRead(0) }
-        if (incognito) {
+    /**
+     * One chapter finished, read in [readingModeFlag].
+     *
+     * [incognito] is a real case, not a theoretical one. The reader writes neither progress nor
+     * history in incognito, but it still runs, so the achievements that measure the act of
+     * reading still apply. Only the counters that describe a library - organic chapters read,
+     * reading days, streaks - are skipped.
+     */
+    fun onChapterRead(readingModeFlag: Int, incognito: Boolean = false, mangaId: Long = 0L) {
+        if (!incognito) {
+            step("organic read") { achievementManager.onOrganicChapterRead(0) }
+            // Day state first, so the streak tiers see today, then the per-day binge count.
+            // Both are the only path to streak_*/binge_* - nothing else counts a read.
+            step("reading day") { achievementManager.onReadingDay() }
+            step("binge") { achievementManager.onBingeRead() }
+            step("rotating day marks") { markOncePerReadingDay() }
+            step("perfect day") { markPerfectDayIfEarned() }
+            // KMK --> Run clock for the speedrun secret. Stamped on the first chapter read of a
+            // series and read back at completion, so the elapsed time spans the whole run and
+            // not just the last chapter - which is the only way a 20-chapter series can finish
+            // inside an hour at all. Capped in the prefs layer, so a stale stamp reports no run.
+            if (mangaId > 0L) step("run clock") { achievementManager.touchMangaRun(mangaId) }
+        } else {
+            // Incognito reads are exactly the ones that must not touch the library record, and
+            // the organic and streak counters above are that record. The act still happened.
             step("incognito read") { achievementManager.incrementCounter("incognito_reads") }
             mark("rotating_daily_extra_4")
         }
-        // KMK --> Day state first, so the streak tiers see today, then the per-day binge count.
-        // Both are the only path to streak_*/binge_* - nothing else counts a read.
-        step("reading day") { achievementManager.onReadingDay() }
-        step("binge") { achievementManager.incrementDailyCounter("binge") }
-        step("rotating day marks") { onReadingDayMarked() }
 
         // Local hour and minute, so "read past 3 AM" and the 11:30-13:30 noon window mean the
         // user's clock rather than UTC. Resolved here rather than passed in: every caller is a
@@ -56,13 +78,16 @@ class ReaderAchievementHandler(
         val now = Calendar.getInstance()
         val hour = now.get(Calendar.HOUR_OF_DAY)
         val minute = now.get(Calendar.MINUTE)
+        // Time-of-day tiers measure the act of reading, so they apply in incognito too.
         step("time-of-day tiers") { achievementManager.onChapterReadAtHour(hour, minute) }
-        if ((hour == 11 && minute >= 30) || hour == 12 || (hour == 13 && minute <= 30)) {
-            mark("rotating_daily_extra_11")
+        if (isLunchBreak(hour, minute)) mark("rotating_daily_extra_11")
+        if (hour < 8) mark("rotating_daily_morning_read")
+        // "After 11 PM": the evening tail plus the small hours. The same span the weekly
+        // night-owl tier counts, so the two describe one habit at two cadences.
+        if (isNightReading(hour)) {
+            mark("rotating_daily_midnight_read")
+            mark("rotating_weekly_night_owl")
         }
-        if (hour < 6) mark("rotating_daily_morning_read")
-        if (hour in 0..3) mark("rotating_daily_midnight_read")
-        if (hour >= 23 || hour < 3) mark("rotating_weekly_night_owl")
 
         // Read tiers, all off the one read event, so no extra tracking is needed.
         mark("rotating_daily_read_5")
@@ -70,25 +95,11 @@ class ReaderAchievementHandler(
         mark("rotating_weekly_read_30")
         mark("rotating_weekly_read_75")
 
-        when (readingModeFlag) {
-            ReadingMode.LEFT_TO_RIGHT.flagValue -> {
-                step("ltr finished") { achievementManager.onLtrFinished() }
-                mark("rotating_weekly_ltr_3")
-            }
-            ReadingMode.RIGHT_TO_LEFT.flagValue -> step("rtl reader") {
-                achievementManager.tryUnlockDirect("rtl_reader")
-            }
-            ReadingMode.VERTICAL.flagValue,
-            ReadingMode.WEBTOON.flagValue,
-            ReadingMode.CONTINUOUS_VERTICAL.flagValue,
-            -> {
-                step("vertical reader") { achievementManager.tryUnlockDirect("vertical_reader") }
-                if (readingModeFlag != ReadingMode.VERTICAL.flagValue) mark("rotating_daily_webtoon_5")
-            }
-        }
+        // Whether a chapter was *read in webtoon* is a property of the read, not of finishing
+        // the series, so this one stays on the chapter read.
+        if (ReadingMode.isWebtoonType(readingModeFlag)) mark("rotating_daily_webtoon_5")
 
-        // Pager double-page spreads are handled separately via PagerConfig,
-        // WebGPU spreads via WebGpuViewer — keep out of this handler.
+        // Starting a chapter is what pulls an entry out of the stale-unstarted backlog.
         scope.launch { runCatching { achievementManager.refreshBacklog() } }
     }
 
@@ -97,7 +108,20 @@ class ReaderAchievementHandler(
         mark("rotating_daily_extra_5")
     }
 
-    fun onMangaCompleted(status: Long, totalChapters: Long = 0L) {
+    /**
+     * Every chapter of the series has now been read.
+     *
+     * [mangaId] is what keeps this countable once: the reader redraws the last page of an
+     * already-finished series on every visit, and without the id each visit counted another
+     * completion. [readingModeFlag] resolves the mode achievements here rather than on the
+     * chapter read, because "complete a manga in RTL mode" is only true at this point.
+     */
+    fun onMangaCompleted(
+        status: Long,
+        mangaId: Long = 0L,
+        totalChapters: Long = 0L,
+        readingModeFlag: Int = ReadingMode.DEFAULT.flagValue,
+    ) {
         // KMK --> Both branches count a cleared backlog entry themselves: onMangaFinished and
         // onMangaCaughtUp each end in onBacklogClearedQuiet(). Calling onBacklogCleared(1) here
         // as well used to be *how* the count happened; leaving it in after that refactor
@@ -105,9 +129,9 @@ class ReaderAchievementHandler(
         // toast batch the composition was meant to eliminate.
         step("manga completion") {
             if (achievementManager.isPermanentStatus(status)) {
-                achievementManager.onMangaFinished()
+                achievementManager.onMangaFinished(mangaId)
             } else {
-                achievementManager.onMangaCaughtUp()
+                achievementManager.onMangaCaughtUp(mangaId)
                 mark("rotating_daily_backlog_clear_1")
                 mark("rotating_weekly_extra_4")
             }
@@ -122,6 +146,17 @@ class ReaderAchievementHandler(
         mark("rotating_weekly_finish_3")
         if (totalChapters == 1L) mark("rotating_daily_extra_1")
         if (totalChapters >= 50L) mark("rotating_weekly_extra_10")
+
+        // KMK --> Speedrun, read before the run clock is cleared: the elapsed time is only
+        // available while the stamp still exists.
+        if (mangaId > 0L) {
+            step("speedrun") {
+                val elapsed = achievementManager.finishMangaRun(mangaId)
+                if (elapsed >= 0L) achievementManager.onMangaSpeedrun(totalChapters, elapsed)
+            }
+        }
+
+        step("reading mode") { onReadingModeCompleted(mangaId, readingModeFlag) }
     }
 
     fun onReadingTimeMinutes(minutes: Long) {
@@ -132,10 +167,49 @@ class ReaderAchievementHandler(
         mark("rotating_weekly_extra_7", minutes.toInt())
     }
 
+    /**
+     * The three mode achievements, plus the one that needs both. Moved here from the chapter
+     * read: they all say "complete a manga", and unlocking them on the first chapter read in
+     * that mode made them three free achievements for anyone who opened the reader.
+     */
+    private fun onReadingModeCompleted(mangaId: Long, readingModeFlag: Int) {
+        val id = when (ReadingMode.fromPreference(readingModeFlag)) {
+            ReadingMode.LEFT_TO_RIGHT -> "ltr_reader"
+            ReadingMode.RIGHT_TO_LEFT -> "rtl_reader"
+            ReadingMode.VERTICAL, ReadingMode.WEBTOON, ReadingMode.CONTINUOUS_VERTICAL -> "vertical_reader"
+            ReadingMode.DEFAULT -> null
+        } ?: return
+
+        step("reading mode achievement") { achievementManager.onReadingModeFinished(id) }
+        // "Complete 3 manga in LTR mode this week" is the same event at weekly cadence.
+        if (id == "ltr_reader") mark("rotating_weekly_ltr_3")
+        if (mangaId > 0L) {
+            step("pager and webtoon") {
+                achievementManager.onMangaCompletedInMode(
+                    mangaId = mangaId,
+                    modeFlag = readingModeFlag,
+                    pager = ReadingMode.isPagerType(readingModeFlag),
+                    webtoon = ReadingMode.isWebtoonType(readingModeFlag),
+                )
+            }
+        }
+    }
+
     /** Counts the day a chapter was read, for the tiers that measure days rather than reads. */
-    fun onReadingDayMarked() {
+    private fun markOncePerReadingDay() {
         markOnce("rotating_daily_streak_bonus")
         markOnce("rotating_weekly_extra_5")
+    }
+
+    /**
+     * "Read 10 chapters without skipping", judged over the day so far instead of marked blind.
+     * The binge counter already holds today's chapter total, so the only new fact needed is
+     * whether the user jumped chapters today - which [onChapterSkipped] records.
+     */
+    private fun markPerfectDayIfEarned() {
+        if (achievementManager.chaptersReadToday() != PERFECT_DAY_READS) return
+        if (achievementManager.skippedToday()) return
+        mark("rotating_daily_extra_10")
     }
 
     private inline fun step(name: String, block: () -> Unit) {
@@ -150,5 +224,16 @@ class ReaderAchievementHandler(
     private fun markOnce(id: String) {
         runCatching { rotatingPool.markOncePerDay(id) }
             .onFailure { xLogE("Rotating daily mark failed: $id", it) }
+    }
+
+    private companion object {
+        /** The perfect-day rotating tier is "read 10 chapters without skipping". */
+        const val PERFECT_DAY_READS = 10L
+
+        /** 11:30-13:30 inclusive, so the noon window covers both stated endpoints. */
+        fun isLunchBreak(hour: Int, minute: Int): Boolean =
+            (hour == 11 && minute >= 30) || hour == 12 || (hour == 13 && minute <= 30)
+
+        fun isNightReading(hour: Int): Boolean = hour >= 23 || hour < 3
     }
 }

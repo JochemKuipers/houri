@@ -53,10 +53,11 @@ class StartRereading(
         syncTrackers(manga)
 
         // KMK --> Only a real transition counts: the early return above already rejects
-        // non-library entries and rereads that are already running. onReread owns the
-        // rereader/reread_five/reread_twenty/reread_hundred tiers.
+        // non-library entries and rereads that are already running. onRereadStarted owns the
+        // rereader/reread_five/reread_twenty/reread_hundred tiers, and also releases this
+        // series' completion claim so finishing it again counts as the new work it is.
         runCatching {
-            globalAppGraph.achievementManager.onReread()
+            globalAppGraph.achievementManager.onRereadStarted(manga.id)
             globalAppGraph.rotatingAchievementPool.markProgress("rotating_weekly_reread_2")
         }
         // KMK <--

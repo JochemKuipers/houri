@@ -82,6 +82,7 @@ import eu.kanade.presentation.reader.settings.ReaderSettingsDialog
 import eu.kanade.presentation.theme.TachiyomiTheme
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.R
+import eu.kanade.tachiyomi.data.achievement.ReaderAchievementHandler
 import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
 import eu.kanade.tachiyomi.data.connections.discord.DiscordRPCService
 import eu.kanade.tachiyomi.data.connections.discord.ReaderData
@@ -188,6 +189,8 @@ class ReaderActivity : BaseActivity() {
 
     // KMK -->
     @Inject private lateinit var uiPreferences: UiPreferences
+
+    @Inject private lateinit var readerAchievementHandler: ReaderAchievementHandler
     // KMK <--
 
     val viewModel by viewModels<ReaderViewModel> { graph.viewModelFactory }
@@ -1295,6 +1298,13 @@ class ReaderActivity : BaseActivity() {
             "$pageNumber"
         }
         // SY <--
+        // KMK --> One hook for both spread-capable viewers: `hasExtraPage` is true only when a
+        // second page is actually on screen beside the first, which is the condition both the
+        // pager and WebGPU report and neither the webtoon nor the novel viewer can produce.
+        // `onDoublePageDisplayed` had no call site at all, so Panorama Lover was unwinnable.
+        if (hasExtraPage) {
+            runCatching { readerAchievementHandler.onDoublePageDisplayed() }
+        }
         viewModel.onPageSelected(page, /* SY --> */ currentPageText, hasExtraPage /* SY <-- */)
     }
 

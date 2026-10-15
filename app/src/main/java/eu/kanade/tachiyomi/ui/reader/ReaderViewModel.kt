@@ -947,6 +947,16 @@ class ReaderViewModel(
         readerChapter.requestedPage = pageIndex
         chapterPageIndex = pageIndex
 
+        // KMK --> Whether this page finishes the chapter, resolved before the incognito branch
+        // below. The achievement hook needs it in both modes: incognito deliberately writes no
+        // progress or history, so the old "fire from inside the !incognito block" arrangement
+        // meant an incognito completion was never observed at all - which left incognito_reader
+        // and the incognito rotating tier unearnable, since nothing else calls the handler.
+        val reachedLastPage = readerChapter.pages?.lastIndex == pageIndex ||
+            // SY -->
+            (hasExtraPage && readerChapter.pages?.lastIndex?.minus(1) == pageIndex)
+        // SY <--
+
         if (!incognitoMode && page.status !is Page.State.Error) {
             // Written in the coordinates the list will have on the next open, not the ones it has
             // now: a split shifted every position after it, and the list that survives the close is
@@ -954,11 +964,7 @@ class ReaderViewModel(
             // display, requestedPage, and the read check below - is about the list as it stands.
             readerChapter.chapter.last_page_read = readerChapter.savedIndexOf(page)
 
-            if (readerChapter.pages?.lastIndex == pageIndex ||
-                // SY -->
-                (hasExtraPage && readerChapter.pages?.lastIndex?.minus(1) == pageIndex)
-                // SY <--
-            ) {
+            if (reachedLastPage) {
                 updateChapterProgressOnComplete(readerChapter)
 
                 // SY -->
@@ -978,15 +984,9 @@ class ReaderViewModel(
             )
 
             // KMK -->
-            if (readerChapter.chapter.read && !incognitoMode) {
+            if (readerChapter.chapter.read) {
                 manga?.let { currentManga ->
                     viewModelScope.launchNonCancellable { completeRereadIfNeeded.await(currentManga.id) }
-                }
-                val chapterIdValue = readerChapter.chapter.id
-                if (chapterIdValue != null && achievementCountedChapterIds.add(chapterIdValue)) {
-                    viewModelScope.launchNonCancellable {
-                        readerAchievementHandler.onChapterRead(getMangaReadingMode(), incognitoMode)
-                    }
                 }
             }
             // KMK <--
@@ -996,6 +996,21 @@ class ReaderViewModel(
                 SyncDataJob.startNow(context)
             }
             // SY <--
+        }
+
+        // KMK --> The achievement hook, outside the incognito branch and driven by the same
+        // last-page test as the progress write above. Keyed on the chapter id so a chapter that
+        // is re-displayed - page turned back and forth, or revisited in a later session - counts
+        // once. `mangaId` starts the speedrun clock; 0 simply means no clock.
+        if (reachedLastPage && page.status !is Page.State.Error) {
+            val chapterIdValue = readerChapter.chapter.id
+            if (chapterIdValue != null && achievementCountedChapterIds.add(chapterIdValue)) {
+                val mangaIdValue = manga?.id ?: 0L
+                val readingMode = getMangaReadingMode()
+                viewModelScope.launchNonCancellable {
+                    readerAchievementHandler.onChapterRead(readingMode, incognitoMode, mangaIdValue)
+                }
+            }
         }
     }
 
@@ -1058,6 +1073,9 @@ class ReaderViewModel(
                 unfilteredChapterList.take(completedIndex).any { !it.read }
             ) {
                 runCatching { achievementManager.incrementCounter("spoiler_jumps") }
+                // The perfect-day rotating tier reads "10 chapters without skipping", so a skip
+                // has to be recorded as well as counted - otherwise the day still qualifies.
+                runCatching { achievementManager.onChapterSkipped() }
             }
             // KMK <--
             if (unfilteredChapterList.isNotEmpty() &&
@@ -1079,10 +1097,15 @@ class ReaderViewModel(
                     ),
                 )
                 // KMK --> The chapter list is in scope and is exactly what the length tiers
-                // ("single-chapter", "200+", "500+") are measured against.
+                // ("single-chapter", "200+", "500+") are measured against. The manga id makes
+                // the completion countable once - the reader redraws this last page every time
+                // the series is reopened - and the reading mode resolves the "complete a manga
+                // in <mode>" tiers, which cannot be judged at a chapter read.
                 readerAchievementHandler.onMangaCompleted(
-                    currentManga.status,
-                    unfilteredChapterList.size.toLong(),
+                    status = currentManga.status,
+                    mangaId = currentManga.id,
+                    totalChapters = unfilteredChapterList.size.toLong(),
+                    readingModeFlag = getMangaReadingMode(),
                 )
                 // KMK <--
             }

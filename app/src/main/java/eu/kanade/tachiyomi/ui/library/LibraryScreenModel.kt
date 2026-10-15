@@ -1278,13 +1278,21 @@ class LibraryScreenModel(
             }
             // AZ <--
             // KMK -->
-            if (query.trim().lowercase() == "mango") {
-                // Mango easter egg: show manga with "mango" in the title
+            val normalisedQuery = query.trim().lowercase()
+            if (normalisedQuery == "mango") {
+                // Mango easter egg: show manga with "mango" in the title. Counted, not just
+                // unlocked - "find the mango easter egg twice" is a tier off the same counter,
+                // so a second search is what earns it rather than a second hand-written hook.
                 runCatching {
-                    mihon.app.di.globalAppGraph.achievementManager.tryUnlockDirect("mango_easter")
+                    mihon.app.di.globalAppGraph.achievementManager.incrementCounter("mango_easter")
                 }
                 return unfiltered.fastFilter {
                     it.libraryManga.manga.title.lowercase().contains("mango")
+                }
+            }
+            if (normalisedQuery == "pineapple") {
+                runCatching {
+                    mihon.app.di.globalAppGraph.achievementManager.tryUnlockDirect("secret_pineapple")
                 }
             }
             // KMK <--
@@ -1293,6 +1301,15 @@ class LibraryScreenModel(
                 query,
                 enableAst = libraryPreferences.librarySearchAstEnabled().get(),
             )
+            // KMK --> "Search by tag": judged on the parsed query rather than the raw
+            // string, so it matches how the search actually narrowed the library - a free-text
+            // query that merely mentions a tag name does not count.
+            if (parsedQuery.any { it is Namespace && it.namespace in TAG_NAMESPACES }) {
+                runCatching {
+                    mihon.app.di.globalAppGraph.rotatingAchievementPool.markProgress("rotating_daily_extra_2")
+                }
+            }
+            // KMK <--
             val mangaWithMetaIds = getIdsOfFavoriteMangaWithMetadata.await()
             val metaIdSet = mangaWithMetaIds.toHashSet()
             val idsNeedingMeta = unfiltered
@@ -2242,6 +2259,9 @@ class LibraryScreenModel(
     // KMK -->
     companion object {
         const val ACHIEVEMENTS_CATEGORY_ID = -100L
+
+        /** Namespace prefixes that mean "match a tag", for the tag-search rotating tier. */
+        private val TAG_NAMESPACES = setOf("tag", "tags")
 
         /** List of MangaDex UUIDs subject to DMCA takedowns */
         @Volatile

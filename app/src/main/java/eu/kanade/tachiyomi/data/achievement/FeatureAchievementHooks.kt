@@ -58,6 +58,20 @@ class FeatureAchievementHooks(
         // A model path or glossary JSON is the only evidence either was ever configured.
         watch(scope, { translationPreferences.localModel() }, { it.isNotBlank() }, "mtl_local")
         watch(scope, { translationPreferences.glossaryJson() }, { it.isNotBlank() }, "mtl_glossary")
+        // Reading with the cutout left on, and turning the AST search parser on: both are
+        // settings, so both belong with the rest of them rather than in a screen's onClick.
+        watch(scope, { readerPreferences.drawUnderCutout() }, { it }, "cutout_enthusiast")
+        watch(scope, { libraryPreferences.librarySearchAstEnabled() }, { it }, "search_ast")
+        // Offline fallback only means anything while Gemini Nano is switched on too - the
+        // description names both halves, and the fallback alone is a preference nobody sets.
+        // Watched off the fallback itself, so the combination is also caught when it was
+        // already true before these hooks were installed.
+        watch(
+            scope,
+            { translationPreferences.offlineFallback() },
+            { it && translationPreferences.geminiNanoEnabled().get() },
+            "mtl_offline",
+        )
     }
 
     private fun <T> watch(

@@ -11,6 +11,17 @@ files moved. See .github/scripts/release_notes.py.
 ### New
 
 ### Improve
+- **The rotating daily and weekly challenges now actually rotate.** Only the three and four
+  achievements currently on show made progress - everything else in the rotating pool was still
+  being counted in the background and quietly unlocking itself the first time you happened to do
+  the thing, so the pool drained instead of turning over. The library's Achievements tab now puts
+  the active ones first, marks the rest as "not in rotation", and shows a real progress bar
+  ("3/5") instead of a bare number. The rotation also rolls over when you open the app rather than
+  only when you happen to visit the tab.
+- Rotating progress is no longer lost when an unlock is refused, and two achievements marking at
+  once no longer overwrite each other's count.
+
+### Improve
 - Restoring a backup is dramatically faster on large libraries. Restoring a backup with tens of
   thousands of series spent most of its time on work that had nothing to do with the data itself:
   it posted a progress notification once per entry (each one a round trip to the system UI), it
@@ -26,6 +37,39 @@ files moved. See .github/scripts/release_notes.py.
   every level and without breaking the parent-child nesting.
 
 ### Fix
+- **Finishing a series counted again every time you reopened it.** Re-reading the last page of a
+  series you had already finished counted another completion, so "Complete 5 manga" could be earned
+  from a single series opened five times. Starting a real reread of a series releases the claim, so
+  finishing it again counts as the new work it is.
+- **The three "complete a manga in <mode>" achievements unlocked from a single chapter read.**
+  Left to Right, Right to Left and Vertical Scroller all say "complete a manga", and unlocking any
+  of them needed only the first chapter read in that mode. They now unlock when a series is actually
+  finished, and the LTR weekly tier counts completions rather than chapters. "Versatile Reader"
+  (finish the same series both as a pager and as webtoon) was unreachable and now works.
+- **Incognito reads never counted.** The reader is the one achievement source that fires in
+  incognito, but its hook sat inside the block that deliberately skips incognito - so Shadow
+  Reader and the incognito daily challenge could not be earned at all. Library counts (organic
+  chapters, streaks, binge) are still left alone, as intended.
+- **Panorama Lover could not be earned.** The double-page hook existed but nothing ever called it.
+  It now fires from the one place both the pager and WebGPU viewers report a two-page spread.
+- **Reread Nostalgia, Eternal Return and Living Library were unreachable.** They are lifetime tiers
+  ("reread 5 / 20 / 100 manga") but were checked against the size of a single rereading action,
+  which is always one. They now read a lifetime counter.
+- **"Perfect Week" rewarded ordinary reading.** Its requirement was seven days on which you read
+  *anything*, ever, rather than seven series finished in seven days. It now measures the latter, and
+  "Binge Guilt" (a 100-chapter day followed by three days of nothing) works too.
+- **Speed Reader could not be earned.** Nothing ever started the clock it measures. Finishing a
+  20+ chapter series inside an hour now works, timed from your first chapter read of that series.
+- **A day with a skip still earned "Perfect Day".** That challenge reads "10 chapters without
+  skipping" and nothing recorded the skipping half of it.
+- Two challenges matched the wrong hours: Morning Pages fired before 6 AM rather than before 8, and
+  Midnight Pages fired in the small hours rather than after 11 PM. "Streak Keeper" also unlocked on
+  the first day read rather than the second.
+- Eight more achievements had no way to be earned and now do: Cutout Connoisseur, AST Searcher,
+  Offline Polyglot, Tag Explorer, Translation Sprint, Perfect Week Challenges, Double Mango and
+  Pineapple King.
+- A wipe now also clears the new completion bookkeeping, so re-earning after a wipe behaves like a
+  fresh install instead of being silently skipped.
 - **Marking a chapter unread not resetting the position in the new reader.** Read a chapter partway
   through, mark it unread, and the WebGPU reader reopened it at the page you had stopped on. The
   saved page was being reset correctly, but that reader also keeps the page, offset and zoom in

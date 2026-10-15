@@ -1,6 +1,7 @@
 package tachiyomi.domain.achievement.model
 
 import tachiyomi.domain.achievement.service.AchievementPreferences
+import tachiyomi.domain.achievement.service.RotatingAchievementPool
 
 /**
  * Pseudo-framework: per-achievement progress tracking.
@@ -77,9 +78,13 @@ object AchievementProgress {
         "subcategory_five" to 5,
         "subcategory_twenty" to 20,
         "track_status" to 10,
+        // KMK --> Daily counters, matching AchievementManager.DAILY_COUNTER_TIERS. Absent
+        // before, so these bars could never render even though the tiers were earning.
         "binge_10" to 10,
         "binge_50" to 50,
         "binge_100" to 100,
+        "night_owl" to 10,
+        "incognito_reader" to 10,
         "streak_3" to 3,
         "streak_7" to 7,
         "streak_30" to 30,
@@ -111,7 +116,16 @@ object AchievementProgress {
         "ultimate_secret_hunter_ultimate" to 20,
     )
 
-    fun thresholdFor(id: String): Long? = thresholds[id]
+    fun thresholdFor(id: String): Long? {
+        // KMK --> The rotating pool owns its own targets - they gate the unlock, so a second
+        // copy here would be a second thing to keep in step. Delegating is also what makes
+        // their bars appear at all: they were absent from the table above, so every rotating
+        // achievement reported no progress regardless of how far along it was.
+        Achievements.forId(id)?.takeIf { it.isRotating }?.let {
+            return RotatingAchievementPool.thresholdFor(id).toLong()
+        }
+        return thresholds[id]
+    }
 
     fun currentFor(id: String, prefs: AchievementPreferences): Long = when (id) {
         // Organic reading
@@ -151,17 +165,31 @@ object AchievementProgress {
         in setOf("streak_3", "streak_7", "streak_30", "streak_100") ->
             prefs.readDays().size.toLong().coerceAtLeast(0)
         // KMK <--
-        // Reread derived from mangaFinished? No dedicated counter; approximate via finished? For progress, use 0.
-        // Translation increments tracked elsewhere; for progress we use 0 fallback.
+        // KMK --> Read off the same counters the tiers are evaluated against, so a bar and a tier can
+        // never disagree: rereads from `rereads`, translations from `translated_chapters`,
+        // incognito from `incognito_reads`. These used to report 0 unconditionally, so their
+        // bars sat at 0% even once the tiers were earning.
         // Trackers: special, need injected count — handled via unlocked check only.
-        "rereader", "reread_five", "reread_twenty", "reread_hundred" -> 0
-        "translator", "translator_five", "translator_ten", "translator_fifty", "translator_hundred" -> 0
+        "rereader", "reread_five", "reread_twenty", "reread_hundred" ->
+            prefs.counter("rereads").get().coerceAtLeast(0)
+        in setOf("translator", "translator_five", "translator_ten", "translator_fifty", "translator_hundred") ->
+            prefs.counter("translated_chapters").get().coerceAtLeast(0)
+        "incognito_reader" -> prefs.counter("incognito_reads").get().coerceAtLeast(0)
+        "night_owl" -> prefs.dailyCounter("after_midnight_reads").get().coerceAtLeast(0)
         in setOf("upscale_first", "upscale_ten", "upscale_hundred") ->
             prefs.upscalesServed().get().coerceAtLeast(0)
         "tracker_connected", "tracker_two", "tracker_three", "tracker_five", "tracker_all" -> 0
         "ultimate_perfection" -> prefs.getUnlockedIds().count { Achievements.forId(it)?.countsTowardsProgress == true }.toLong()
         "ultimate_secret_hunter_ultimate" -> prefs.getUnlockedIds().count { Achievements.forId(it)?.isSecret == true }.toLong()
-        else -> 0
+        // KMK --> Rotating progress is neither a lifetime counter nor derived from one: it is
+        // the per-period bar the pool maintains, so it is read from there. Gated on the id
+        // actually being rotating, because the lookup parses the whole progress CSV and this
+        // runs once per card.
+        else -> if (Achievements.forId(id)?.isRotating == true) {
+            prefs.rotatingProgressMap()[id]?.toLong()?.coerceAtLeast(0L) ?: 0L
+        } else {
+            0L
+        }
     }
 
     fun progressFor(id: String, prefs: AchievementPreferences): Float {
@@ -179,5 +207,6 @@ object AchievementProgress {
         return "$cur/$target"
     }
 
-    fun hasProgress(id: String): Boolean = thresholds.containsKey(id)
+    fun hasProgress(id: String): Boolean =
+        thresholds.containsKey(id) || Achievements.forId(id)?.isRotating == true
 }

@@ -140,6 +140,16 @@ class AchievementManager(
         if (streak >= 7) tryUnlock("streak_7", unlocked)
         if (streak >= 30) tryUnlock("streak_30", unlocked)
         if (streak >= 100) tryUnlock("streak_100", unlocked)
+        // KMK --> Binge guilt is judged here because this is the only place that can observe a
+        // return after an absence: the stamp was written by onBingeRead on the 100-chapter day,
+        // and "not reading for three days" only becomes visible on the next day the user reads.
+        // The window closes on that read either way - someone back the next day was not away
+        // for three, and leaving the stamp would re-arm the check for every later absence.
+        val bingeDay = prefs.bingeHundredDay().get()
+        if (bingeDay >= 0L && today > bingeDay) {
+            prefs.bingeHundredDay().set(-1L)
+            if (today - bingeDay >= BINGE_GUILT_MIN_DAYS) tryUnlock("negative_binge_guilt", unlocked)
+        }
         if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
         return unlocked
     }
@@ -184,6 +194,32 @@ class AchievementManager(
         var count = 0L
         repeat(amount.coerceIn(1, 1000)) { count = prefs.bumpDailyCounter(name, currentEpochDay()) }
         return evaluateCounter(name, count)
+    }
+
+    /**
+     * Counts one chapter toward today's binge total and stamps the day on the 100th, which is
+     * what [onReadingDay] later judges "three days of nothing afterwards" against.
+     *
+     * Separate from [incrementDailyCounter] because the stamp is a side effect the generic
+     * path has no business knowing about; folding it in would give every daily counter a
+     * binge-guilt check the moment one of them crossed its own threshold.
+     */
+    @Synchronized
+    fun onBingeRead(): List<String> {
+        if (!prefs.achievementsEnabled().get()) return emptyList()
+        val today = currentEpochDay()
+        val count = prefs.bumpDailyCounter("binge", today)
+        if (count >= BINGE_HUNDRED && prefs.bingeHundredDay().get() != today) {
+            prefs.bingeHundredDay().set(today)
+        }
+        return evaluateCounter("binge", count)
+    }
+
+    /** Records that the user jumped chapters today, which disqualifies the perfect-day tier. */
+    @Synchronized
+    fun onChapterSkipped() {
+        if (!prefs.achievementsEnabled().get()) return
+        prefs.lastSkippedDay().set(currentEpochDay())
     }
 
     private fun evaluateCounter(name: String, count: Long): List<String> {
@@ -282,7 +318,54 @@ class AchievementManager(
         return unlocked
     }
 
-    /** "Finish a 20+ chapter manga in under an hour." */
+    /** "Complete a manga in <mode>". The id is resolved by the caller, which owns `ReadingMode`. */
+    @Synchronized
+    fun onReadingModeFinished(id: String): List<String> {
+        if (!prefs.achievementsEnabled().get()) return emptyList()
+        if (id == "ltr_reader") prefs.incrementLtrFinished()
+        val unlocked = mutableListOf<String>()
+        tryUnlock(id, unlocked)
+        if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
+        return unlocked
+    }
+
+    /**
+     * Stamps the start of a run through [mangaId], if one is not already running.
+     *
+     * Paired with [finishMangaRun] to measure a whole-series run for the speedrun secret, which
+     * is only measurable if the clock starts at the first chapter read rather than at the last.
+     */
+    @Synchronized
+    fun touchMangaRun(mangaId: Long) {
+        if (!prefs.achievementsEnabled().get()) return
+        prefs.mangaRunElapsedMs(mangaId, System.currentTimeMillis())
+    }
+
+    /**
+     * Ends the run through [mangaId] and returns how long it took, or -1 when there is no run
+     * worth judging (never started, or started long enough ago that the elapsed time says
+     * nothing about a sub-hour finish).
+     *
+     * The stamp is cleared either way: a finished series cannot be speedrun again until it is
+     * started again, and leaving the original stamp in place would pin every later attempt to
+     * the elapsed time of the first run forever.
+     */
+    @Synchronized
+    fun finishMangaRun(mangaId: Long): Long {
+        val elapsed = prefs.mangaRunElapsedMs(mangaId, System.currentTimeMillis())
+        prefs.clearMangaRun(mangaId)
+        return elapsed
+    }
+
+    /** Chapters read today, which is what the perfect-day rotating tier is measured against. */
+    fun chaptersReadToday(): Long = prefs.dailyCounter("binge").get().coerceAtLeast(0L)
+
+    /** Whether the user jumped chapters today, which disqualifies the perfect-day tier. */
+    fun skippedToday(): Boolean = prefs.lastSkippedDay().get() == currentEpochDay()
+
+    /**
+     * "Finish a 20+ chapter manga in under an hour."
+     */
     @Synchronized
     fun onMangaSpeedrun(totalChapters: Long, durationMs: Long): List<String> {
         if (!prefs.achievementsEnabled().get()) return emptyList()
@@ -294,13 +377,26 @@ class AchievementManager(
         return unlocked
     }
 
-    /** "Complete 7 manga in 7 days", counted over the recorded reading days. */
+    /**
+     * "Complete 7 manga in 7 days", counted over the days on which a completion actually
+     * happened.
+     *
+     * It used to test `readDays().size >= 7` - seven days on which the user read *anything*,
+     * ever. That made a week of ordinary reading satisfy a secret about finishing series, which
+     * is why it looked broken: the requirement was nowhere near the description. [finishDays]
+     * is only written from the two completion paths, so the count now means what the
+     * achievement says, and the seven-day window keeps it a "perfect week" rather than a total.
+     */
     @Synchronized
     fun onMangaFinishedOnDay(): List<String> {
         if (!prefs.achievementsEnabled().get()) return emptyList()
-        prefs.markReadingDay(currentEpochDay())
+        val today = currentEpochDay()
+        prefs.markReadingDay(today)
+        prefs.markFinishedDay(today)
+        // `count` is an Int; the window is a Long so it can index epoch-day ranges directly.
+        val recent = prefs.finishDays().count { today - it in 0 until PERFECT_WEEK_DAYS }.toLong()
         val unlocked = mutableListOf<String>()
-        if (prefs.readDays().size >= 7) tryUnlock("secret_perfect_week", unlocked)
+        if (recent >= PERFECT_WEEK_DAYS) tryUnlock("secret_perfect_week", unlocked)
         if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
         return unlocked
     }
@@ -348,16 +444,6 @@ class AchievementManager(
     }
 
     @Synchronized
-    fun onLtrFinished(): List<String> {
-        if (!prefs.achievementsEnabled().get()) return emptyList()
-        prefs.incrementLtrFinished()
-        val unlocked = mutableListOf<String>()
-        tryUnlock("ltr_reader", unlocked)
-        if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
-        return unlocked
-    }
-
-    @Synchronized
     fun onNegativeEvent(id: String): List<String> {
         if (!prefs.achievementsEnabled().get()) return emptyList()
         val allowed = setOf(
@@ -385,10 +471,41 @@ class AchievementManager(
         return unlocked
     }
 
+    /**
+     * Records that [mangaId] was finished in reading mode [modeFlag], and unlocks
+     * `webtoon_pager_both` if this series has now been finished both ways.
+     *
+     * [pager] and [webtoon] are passed in rather than re-derived from [modeFlag] because the
+     * pager/webtoon split is a property of `ReadingMode`, which lives in the app module. The
+     * flag is still stored, because the condition spans two separate completions of the same
+     * series - minutes or weeks apart - and no single call can see both.
+     */
     @Synchronized
-    fun onMangaFinished(): List<String> {
+    fun onMangaCompletedInMode(mangaId: Long, modeFlag: Int, pager: Boolean, webtoon: Boolean): List<String> {
+        if (!prefs.achievementsEnabled().get()) return emptyList()
+        if (mangaId <= 0L) return emptyList()
+        val previous = prefs.completionModes()[mangaId]
+        prefs.recordCompletionMode(mangaId, modeFlag)
+        // First completion of this series: there is no earlier attempt to differ from, so
+        // "both ways" cannot be satisfied yet.
+        if (previous == null) return emptyList()
+        val wasPager = previous in PAGER_MODE_FLAGS
+        val wasWebtoon = previous in WEBTOON_MODE_FLAGS
+        if (!((wasPager && webtoon) || (wasWebtoon && pager))) return emptyList()
+        val unlocked = mutableListOf<String>()
+        tryUnlock("webtoon_pager_both", unlocked)
+        if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
+        return unlocked
+    }
+
+    @Synchronized
+    fun onMangaFinished(mangaId: Long = 0L): List<String> {
         if (!prefs.achievementsEnabled().get()) return emptyList()
         if (prefs.suppressOrganicForImport) return emptyList()
+        // KMK --> Reached every time the reader lands on the last page of a series that is
+        // already finished, so without this the tiers counted page views rather than series.
+        // 0 means "no id supplied" and keeps counting, for callers that genuinely cannot tell.
+        if (mangaId > 0L && !prefs.claimFinishedManga(mangaId)) return emptyList()
         prefs.incrementMangaFinished()
         val count = prefs.mangaFinishedCount().get().coerceAtLeast(0L)
         val unlocked = mutableListOf<String>()
@@ -410,9 +527,13 @@ class AchievementManager(
     }
 
     @Synchronized
-    fun onMangaCaughtUp(): List<String> {
+    fun onMangaCaughtUp(mangaId: Long = 0L): List<String> {
         if (!prefs.achievementsEnabled().get()) return emptyList()
         if (prefs.suppressOrganicForImport) return emptyList()
+        // KMK --> Same claim as onMangaFinished. Kept in one shared set rather than two: a
+        // series that is completed as "caught up" can later be completed for real, and that is
+        // still the same piece of work, so it should be claimed once either way.
+        if (mangaId > 0L && !prefs.claimFinishedManga(mangaId)) return emptyList()
         prefs.incrementMangaCaughtUp()
         val count = prefs.mangaCaughtUpCount().get().coerceAtLeast(0L)
         val unlocked = mutableListOf<String>()
@@ -479,17 +600,29 @@ class AchievementManager(
         return unlocked
     }
 
+    /**
+     * Counts one reread of a series and unlocks the reread tiers off a lifetime total.
+     *
+     * [count] is how many series this action started rereading, so a bulk reread counts that
+     * many. It used to be compared against the tiers directly, which meant `reread_five` needed
+     * a single call carrying a count of five - and the only call site passes one - so the three
+     * lifetime tiers were unreachable. The tiers now read `counter("rereads")`, which the same
+     * [count] advances, so description and number agree.
+     *
+     * Starting a reread also releases [mangaId]'s completion claim and run stamp. Completion is
+     * claimed once per series precisely so that reopening a finished series does not count
+     * again; a deliberate reread is new work, and both the completion tiers and the speedrun
+     * clock have to be free for it.
+     */
     @Synchronized
-    fun onReread(count: Int = 1): List<String> {
+    fun onRereadStarted(mangaId: Long, count: Int = 1): List<String> {
         if (!prefs.achievementsEnabled().get()) return emptyList()
-        val safe = count.coerceIn(1, 10_000)
-        val unlocked = mutableListOf<String>()
-        tryUnlock("rereader", unlocked)
-        if (safe >= 5) tryUnlock("reread_five", unlocked)
-        if (safe >= 20) tryUnlock("reread_twenty", unlocked)
-        if (safe >= 100) tryUnlock("reread_hundred", unlocked)
-        if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
-        return unlocked
+        if (count <= 0) return emptyList()
+        if (mangaId > 0L) {
+            prefs.clearFinishedManga(mangaId)
+            prefs.clearMangaRun(mangaId)
+        }
+        return incrementCounter("rereads", count.coerceIn(1, 10_000))
     }
 
     @Synchronized
@@ -598,6 +731,13 @@ class AchievementManager(
         }
 
         if (OPEN_IDS.isNotEmpty() && unlocked.containsAll(OPEN_IDS)) unlockQuietly("secret_100_percent", out)
+
+        // "Complete all weekly dailies at least once" is a function of the unlocked set like the
+        // others here, and was declared with no unlock site at all. It excludes itself: counting
+        // a set that contains the achievement being awarded can never reach the set's size.
+        if (WEEKLY_ROTATING_IDS.isNotEmpty() && unlocked.containsAll(WEEKLY_ROTATING_IDS)) {
+            unlockQuietly(WEEKLY_PERFECT_WEEK, out)
+        }
     }
 
     private fun unlockQuietly(id: String, out: MutableList<String>) {
@@ -627,6 +767,13 @@ class AchievementManager(
             Achievements.all.filterToIdSet { !it.isSecret }
         }
 
+        /** The weekly rotating catalogue minus the meta-tier that is measured against it. */
+        val WEEKLY_ROTATING_IDS: Set<String> by lazy {
+            Achievements.all.filterToIdSet { it.isRotating && it.id.startsWith("rotating_weekly") && it.id != WEEKLY_PERFECT_WEEK }
+        }
+
+        const val WEEKLY_PERFECT_WEEK = "rotating_weekly_extra_9"
+
         /**
          * Ids of the achievements matching [keep], for O(1) membership tests.
          *
@@ -651,6 +798,22 @@ class AchievementManager(
         const val REFRESH_THROTTLE_MS = 15L * 60L * 1000L
         // A single missed day does not end a streak, so "read N days in a row" tolerates one gap.
         const val STREAK_GRACE_DAYS = 1L
+
+        // "Complete 7 manga in 7 days": the window is inclusive of today, hence `0 until N`.
+        const val PERFECT_WEEK_DAYS = 7L
+        const val BINGE_HUNDRED = 100L
+        // Days away after a 100-chapter binge before it counts as a collapse.
+        const val BINGE_GUILT_MIN_DAYS = 3L
+
+        /**
+         * Reading-mode flag values, duplicated here as plain ints because `ReadingMode` lives in
+         * the app module. Only the pager-vs-webtoon split matters to this class, and that split
+         * is a property of the enum that does not change: LTR, RTL and vertical are pagers,
+         * webtoon and continuous vertical are the continuous viewers. `DEFAULT` (0) is in
+         * neither, because a resolved default is not a viewer the user chose.
+         */
+        val PAGER_MODE_FLAGS = setOf(1, 3)
+        val WEBTOON_MODE_FLAGS = setOf(4, 5)
 
         fun currentEpochDay(): Long =
             java.util.concurrent.TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis())
@@ -687,6 +850,17 @@ class AchievementManager(
             "dropped_unfinished" to listOf(10L to "negative_rage_quit"),
             "spoiler_jumps" to listOf(1L to "negative_spoiled"),
             "webgpu_rescues" to listOf(1L to "secret_webgpu_rescue"),
+            // KMK --> Lifetime rereads. These were compared against the per-action count instead,
+            // so reread_five needed one call carrying five and nothing ever passed one.
+            "rereads" to listOf(
+                1L to "rereader",
+                5L to "reread_five",
+                20L to "reread_twenty",
+                100L to "reread_hundred",
+            ),
+            // KMK --> The mango easter egg is countable, so "find it twice" is a tier rather
+            // than a second hand-written call site beside the first.
+            "mango_easter" to listOf(2L to "secret_mango_double"),
         )
 
         /** Counters that reset at the day boundary; same tier shape. */

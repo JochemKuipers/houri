@@ -15,6 +15,61 @@ class AchievementPreferences(
     // the stored list small.
     private companion object {
         const val READING_DAY_WINDOW = 200
+
+        // Completion bookkeeping. The reader re-displays the last page of an already finished
+        // series every time the user opens it, and `ReaderViewModel` only remembers what it
+        // credited for the life of one session. Counting a series once therefore needs state
+        // that outlives the process, or "complete 5 manga" is reachable by reading one series
+        // five times. Bounded, oldest-out, for the same reason `upscalePageCounts` is.
+        const val FINISHED_MANGA_LIMIT = 500
+        const val FINISHED_DAY_WINDOW = 200
+
+        // Per-manga start stamps, only ever read by the speedrun secret. Short window on
+        // purpose: a stamp older than this can no longer contribute to an under-an-hour run.
+        const val MANGA_START_LIMIT = 50
+
+        /**
+         * Upper bound on a run before [mangaRunElapsedMs] stops reporting one at all. A stamp
+         * left behind by a session that never finished would otherwise report an elapsed time
+         * of weeks, and "under an hour" would become "not since March" rather than nothing.
+         */
+        const val MAX_RUN_MS = 24L * 60L * 60L * 1000L
+
+        // One parser per value type rather than each accessor re-implementing the split. `substringAfter`
+        // keeps the value on its own token, so an id or value that somehow contains a separator
+        // cannot swallow the next entry - a malformed pref then drops one record, not two.
+        private fun readIdSet(raw: String): Set<Long> =
+            raw.split(',').mapNotNullTo(mutableSetOf()) { it.trim().toLongOrNull() }
+
+        private fun readIntMap(raw: String): Map<Long, Int> =
+            raw.splitToSequence(',')
+                .mapNotNull { entry ->
+                    val id = entry.substringBefore(':').trim().toLongOrNull()
+                    val value = entry.substringAfter(':', "").trim().toIntOrNull()
+                    if (id == null || value == null) null else id to value
+                }
+                .toMap()
+
+        private fun readLongMap(raw: String): Map<Long, Long> =
+            raw.splitToSequence(',')
+                .mapNotNull { entry ->
+                    val id = entry.substringBefore(':').trim().toLongOrNull()
+                    val value = entry.substringAfter(':', "").trim().toLongOrNull()
+                    if (id == null || value == null) null else id to value
+                }
+                .toMap()
+
+        private fun readDayList(raw: String): List<Long> =
+            raw.split(',').mapNotNull { it.trim().toLongOrNull() }
+
+        /** Keeps the newest [FINISHED_MANGA_LIMIT] ids, oldest out, so the pref cannot grow forever. */
+        private fun boundedIds(ids: List<Long>): String =
+            ids.takeLast(FINISHED_MANGA_LIMIT).joinToString(",")
+
+        // `entries` is a Set, so it has to become a List before `takeLast` - the insertion
+        // order of the parsed map is what makes "newest last" the right end to trim.
+        private fun boundedIntMap(map: Map<Long, Int>): String =
+            map.entries.toList().takeLast(FINISHED_MANGA_LIMIT).joinToString(",") { "${it.key}:${it.value}" }
     }
     fun achievementsEnabled() = preferenceStore.getBoolean("pref_achievements_enabled", true)
     fun achievementToastsEnabled() = preferenceStore.getBoolean("pref_achievement_toasts_enabled", true)
@@ -42,6 +97,17 @@ class AchievementPreferences(
     fun directionStreakDir() = preferenceStore.getInt("pref_achievement_dir_streak_dir", -1)
     fun directionStreakCount() = preferenceStore.getInt("pref_achievement_dir_streak_count", 0)
 
+    // KMK --> Completion bookkeeping, all keyed by manga id so the same shape can be reused.
+    fun finishedMangaIds() = preferenceStore.getString("pref_achievement_finished_manga_ids", "")
+    fun mangaCompletionModes() = preferenceStore.getString("pref_achievement_completion_modes", "")
+    fun mangaStartTimes() = preferenceStore.getString("pref_achievement_manga_start_times", "")
+    fun finishedDays() = preferenceStore.getString("pref_achievement_finished_days", "")
+    // Last epoch day on which the user skipped ahead without reading, for the "perfect day"
+    // rotating tier. -1 rather than 0 so "never skipped" cannot collide with epoch day 0.
+    fun lastSkippedDay() = preferenceStore.getLong("pref_achievement_skipped_day", -1L)
+    // Epoch day a 100-chapter binge happened on; the binge-guilt negative is judged against it.
+    fun bingeHundredDay() = preferenceStore.getLong("pref_achievement_binge_hundred_day", -1L)
+
     @Synchronized
     fun markReadingDay(epochDay: Long) {
         val days = readDays()
@@ -50,13 +116,98 @@ class AchievementPreferences(
         readingDays().set(updated.joinToString(","))
     }
 
-    fun readDays(): List<Long> =
-        readingDays().get().split(",").mapNotNull { it.trim().toLongOrNull() }
+    fun readDays(): List<Long> = readDayList(readingDays().get())
 
     // Chapters read in the current Sat+Sun window, and the Saturday's epoch day as the key. Both
     // reset together, so a new weekend starts from zero without a scheduled cleanup.
     fun weekendReadKey() = preferenceStore.getLong("pref_achievement_weekend_key", 0L)
     fun weekendReadCount() = preferenceStore.getLong("pref_achievement_weekend_count", 0L)
+
+    /**
+     * Claims [mangaId] as "already credited as completed". Returns false when it was claimed
+     * before, which is what makes the completion tiers count series rather than page turns.
+     *
+     * [AchievementManager.onMangaFinished] is reached every time the reader displays the last
+     * page of a finished series, not just the first time, so the guard has to be durable. It
+     * is released again by a real reread (`clearFinishedManga`), so re-reading a series does
+     * earn its tiers a second time.
+     */
+    @Synchronized
+    fun claimFinishedManga(mangaId: Long): Boolean {
+        if (mangaId <= 0L) return false
+        val ids = readIdSet(finishedMangaIds().get()).toMutableList()
+        if (mangaId in ids) return false
+        ids += mangaId
+        finishedMangaIds().set(boundedIds(ids))
+        return true
+    }
+
+    @Synchronized
+    fun clearFinishedManga(mangaId: Long) {
+        if (mangaId <= 0L) return
+        val ids = readIdSet(finishedMangaIds().get()).toMutableList()
+        if (!ids.remove(mangaId)) return
+        finishedMangaIds().set(boundedIds(ids))
+    }
+
+    /** Which reading-mode bucket this manga was last completed in, for "both pager and webtoon". */
+    @Synchronized
+    fun recordCompletionMode(mangaId: Long, modeFlag: Int) {
+        if (mangaId <= 0L) return
+        val map = readIntMap(mangaCompletionModes().get()).toMutableMap()
+        map[mangaId] = modeFlag
+        mangaCompletionModes().set(boundedIntMap(map))
+    }
+
+    fun completionModes(): Map<Long, Int> = readIntMap(mangaCompletionModes().get())
+
+    /**
+     * Stamps the moment reading of [mangaId] first produced a chapter read, and returns the
+     * elapsed milliseconds at [nowMs]. Only the earliest stamp is kept: the speedrun secret
+     * measures the whole run, so re-entering the series must not restart the clock.
+     *
+     * Returns -1 when no usable stamp is available, which the caller treats as "not a run".
+     */
+    @Synchronized
+    fun mangaRunElapsedMs(mangaId: Long, nowMs: Long): Long {
+        if (mangaId <= 0L) return -1L
+        val stamps = readLongMap(mangaStartTimes().get()).toMutableMap()
+        val existing = stamps[mangaId]
+        val startedAt = existing ?: nowMs
+        if (existing == null) stamps[mangaId] = startedAt
+        // Only written when this call actually changed something. It runs once per chapter
+        // read, and rewriting an unchanged pref on every one of them is pure disk churn.
+        if (stamps.size > MANGA_START_LIMIT) {
+            // Oldest first: drop the runs least likely to still be open.
+            stamps.keys.sortedBy { stamps[it] }.take(stamps.size - MANGA_START_LIMIT).forEach {
+                stamps.remove(it)
+            }
+            mangaStartTimes().set(stamps.entries.joinToString(",") { "${it.key}:${it.value}" })
+        } else if (existing == null) {
+            mangaStartTimes().set(stamps.entries.joinToString(",") { "${it.key}:${it.value}" })
+        }
+        val elapsed = nowMs - startedAt
+        return if (elapsed in 0..MAX_RUN_MS) elapsed else -1L
+    }
+
+    /** Forgets [mangaId]'s run stamp, so a reread measures a fresh run. */
+    @Synchronized
+    fun clearMangaRun(mangaId: Long) {
+        if (mangaId <= 0L) return
+        val stamps = readLongMap(mangaStartTimes().get()).toMutableMap()
+        if (stamps.remove(mangaId) == null) return
+        mangaStartTimes().set(stamps.entries.joinToString(",") { "${it.key}:${it.value}" })
+    }
+
+    /** Records that a series was completed today, for the "7 completions in 7 days" secret. */
+    @Synchronized
+    fun markFinishedDay(epochDay: Long) {
+        val days = readDayList(finishedDays().get())
+        if (epochDay in days) return
+        finishedDays().set((days + epochDay).sorted().takeLast(FINISHED_DAY_WINDOW).joinToString(","))
+    }
+
+    fun finishDays(): List<Long> = readDayList(finishedDays().get())
 
     /**
      * Named lifetime counter, keyed off a shared prefix so a new counter needs no accessor.
@@ -101,6 +252,37 @@ class AchievementPreferences(
     // KMK --> Day stamps for the "once per day" rotating ids, so a page turn cannot fill a
     // multi-day tier on its own. Format is id:epochDay,id:epochDay.
     fun rotatingDayStamps() = preferenceStore.getString("pref_achievement_rotating_day_stamps", "")
+
+    /**
+     * Parsed views of the two rotating CSVs. The pool owns the policy around them; the format
+     * lives here with the other accessors, so [tachiyomi.domain.achievement.model.AchievementProgress]
+     * can read a rotating bar without duplicating the parser.
+     */
+    fun rotatingProgressMap(): Map<String, Int> =
+        rotatingProgress().get().splitToSequence(',')
+            .mapNotNull { entry ->
+                val id = entry.substringBefore(':').trim()
+                val value = entry.substringAfter(':', "").trim().toIntOrNull()
+                if (id.isEmpty() || value == null) null else id to value
+            }
+            .toMap()
+
+    fun setRotatingProgress(progress: Map<String, Int>) {
+        rotatingProgress().set(progress.entries.joinToString(",") { "${it.key}:${it.value}" })
+    }
+
+    fun rotatingDayStampMap(): Map<String, Long> =
+        rotatingDayStamps().get().splitToSequence(',')
+            .mapNotNull { entry ->
+                val id = entry.substringBefore(':').trim()
+                val day = entry.substringAfter(':', "").trim().toLongOrNull()
+                if (id.isEmpty() || day == null) null else id to day
+            }
+            .toMap()
+
+    fun setRotatingDayStamps(stamps: Map<String, Long>) {
+        rotatingDayStamps().set(stamps.entries.joinToString(",") { "${it.key}:${it.value}" })
+    }
     fun upscalesServed() = preferenceStore.getLong("pref_achievement_upscales_served", 0)
     fun upscalePageCounts() = preferenceStore.getString("pref_achievement_upscale_page_counts", "")
 
@@ -304,6 +486,16 @@ class AchievementPreferences(
         backlogLastRefresh().set(0)
         readingDays().set("")
         // KMK <--
+        // KMK --> Completion bookkeeping. Left populated, the claim set would keep refusing
+        // completions the user has every right to count again after a wipe, and the run stamps
+        // would keep reporting elapsed times measured before it.
+        // KMK <--
+        finishedMangaIds().set("")
+        mangaCompletionModes().set("")
+        mangaStartTimes().set("")
+        finishedDays().set("")
+        lastSkippedDay().set(-1L)
+        bingeHundredDay().set(-1L)
         ltrMangaFinishedCount().set(0)
         upscalesServed().set(0)
         upscalePageCounts().set("")

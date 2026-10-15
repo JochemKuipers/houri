@@ -63,6 +63,12 @@ enum class ReadingMode(
             return mode.type is ViewerType.Pager
         }
 
+        /** The continuous-scroll counterpart of [isPagerType]; the two partition every mode. */
+        fun isWebtoonType(preference: Int): Boolean {
+            val mode = fromPreference(preference)
+            return mode.type is ViewerType.Webtoon
+        }
+
         fun toViewer(
             preference: Int?,
             activity: ReaderActivity,

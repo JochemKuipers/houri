@@ -224,6 +224,13 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             runCatching { globalAppGraph.achievementManager.refreshBacklog(force = true) }
                 .onFailure { xLogE("Failed to refresh achievement backlog", it) }
         }
+        // KMK --> Roll the rotating pool over on process start. Nothing else did this reliably -
+        // the only other caller was the achievements screen, so an id that was on show yesterday
+        // kept counting all week to anyone who only opened that screen on Monday.
+        ProcessLifecycleOwner.get().lifecycleScope.launchIO {
+            runCatching { globalAppGraph.rotatingAchievementPool.refreshIfNeeded() }
+                .onFailure { xLogE("Failed to roll achievement rotation", it) }
+        }
         // KMK -->
         ProcessLifecycleOwner.get().lifecycleScope.launchIO {
             kotlinx.coroutines.delay(1500)

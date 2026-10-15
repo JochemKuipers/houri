@@ -4,8 +4,10 @@ sealed interface AchievementEvent {
     data class OrganicChapterRead(val totalHint: Long = 0) : AchievementEvent
     data class ReadingTimeMinutes(val minutes: Long) : AchievementEvent
     data class LibraryCountChanged(val count: Long) : AchievementEvent
-    data class MangaFinished(val isPermanent: Boolean) : AchievementEvent
-    object MangaCaughtUp : AchievementEvent
+    // KMK --> mangaId is what makes a completion countable once: the reader redraws the last
+    // page of a finished series on every visit, and without the id each visit counted again.
+    data class MangaFinished(val isPermanent: Boolean, val mangaId: Long = 0L) : AchievementEvent
+    data class MangaCaughtUp(val mangaId: Long = 0L) : AchievementEvent
     object LtrFinished : AchievementEvent
     // KMK --> Carries the count itself, not the two counters it used to be derived from.
     data class BacklogChanged(val staleUnstarted: Long) : AchievementEvent
@@ -15,7 +17,7 @@ sealed interface AchievementEvent {
     object EhBrowsed : AchievementEvent
     data class DirectUnlock(val id: String) : AchievementEvent
     data class TrackerConnected(val total: Int) : AchievementEvent
-    data class Reread(val count: Int = 1) : AchievementEvent
+    data class Reread(val mangaId: Long = 0L, val count: Int = 1) : AchievementEvent
 
     // KMK --> Secrets and negatives. Each carries only what the trigger needs, so the manager
     // keeps the rule and the call site stays a one-liner at an existing event.
@@ -40,9 +42,10 @@ class AchievementDispatcher(
             is AchievementEvent.OrganicChapterRead -> manager.onOrganicChapterRead(event.totalHint)
             is AchievementEvent.ReadingTimeMinutes -> manager.onReadingTimeMinutes(event.minutes)
             is AchievementEvent.LibraryCountChanged -> manager.onLibraryCountChanged(event.count)
-            is AchievementEvent.MangaFinished -> if (event.isPermanent) manager.onMangaFinished() else manager.onMangaCaughtUp()
-            is AchievementEvent.MangaCaughtUp -> manager.onMangaCaughtUp()
-            is AchievementEvent.LtrFinished -> manager.onLtrFinished()
+            is AchievementEvent.MangaFinished ->
+                if (event.isPermanent) manager.onMangaFinished(event.mangaId) else manager.onMangaCaughtUp(event.mangaId)
+            is AchievementEvent.MangaCaughtUp -> manager.onMangaCaughtUp(event.mangaId)
+            is AchievementEvent.LtrFinished -> manager.onReadingModeFinished("ltr_reader")
             // KMK -->
             is AchievementEvent.BacklogChanged -> manager.onBacklogChanged(event.staleUnstarted)
             // KMK <--
@@ -51,7 +54,7 @@ class AchievementDispatcher(
             is AchievementEvent.EhBrowsed -> manager.onEhBrowsed()
             is AchievementEvent.DirectUnlock -> if (manager.tryUnlockDirect(event.id)) listOf(event.id) else emptyList()
             is AchievementEvent.TrackerConnected -> manager.onTrackerConnected(event.total)
-            is AchievementEvent.Reread -> manager.onReread(event.count)
+            is AchievementEvent.Reread -> manager.onRereadStarted(event.mangaId, event.count)
             // KMK -->
             is AchievementEvent.ChapterReadAtHour -> manager.onChapterReadAtHour(event.hour, event.minute)
             is AchievementEvent.AppOpenedAt -> manager.onAppOpenedAt(event.hour, event.minute)

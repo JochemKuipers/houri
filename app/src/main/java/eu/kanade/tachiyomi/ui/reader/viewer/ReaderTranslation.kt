@@ -15,6 +15,11 @@ import tachiyomi.core.common.util.lang.withUIContext
  * [exh.yakuyomi.TranslationManager] pipeline against the original encoded bytes and hands the
  * translated WEBP back on the main thread for the holder to swap in.
  */
+// Top-level rather than a companion: `ReaderTranslation` is an `object`, and a standalone
+// object cannot declare one.
+private const val TRANSLATION_SPRINT_ID = "rotating_weekly_extra_3"
+private const val TRANSLATION_SPRINT_MIN_CHAPTERS = 10
+
 object ReaderTranslation : PageTranslator {
 
     /**
@@ -104,7 +109,11 @@ object ReaderTranslation : PageTranslator {
     // without this the last page of a chapter would count once per remaining page.
     private val countedChapters = mutableSetOf<Pair<Long, Long>>()
 
-    private fun countChapterOnceComplete(mangaId: Long, chapterId: Long) {
+    // Manga whose translation-sprint tier has already been offered this week, so the chapter
+    // count is fetched once per series rather than once per translated chapter.
+    private val sprintChecked = mutableSetOf<Long>()
+
+    private suspend fun countChapterOnceComplete(mangaId: Long, chapterId: Long) {
         runCatching {
             val status = globalAppGraph.translationStatus.chapterStatus(mangaId, chapterId) ?: return
             if (status.pendingCount != 0 || status.translatedCount == 0) return
@@ -112,6 +121,27 @@ object ReaderTranslation : PageTranslator {
             globalAppGraph.achievementManager.incrementCounter("translated_chapters")
             globalAppGraph.rotatingAchievementPool.markProgress("rotating_daily_translate_2")
             globalAppGraph.rotatingAchievementPool.markProgress("rotating_weekly_translate_10")
+            markTranslationSprint(mangaId)
+        }
+    }
+
+    /**
+     * "Translate a 10+ chapter manga this week". The series length is the whole condition, so
+     * it is read from the chapter list - once per series per session, and only when the tier
+     * could still be live.
+     */
+    private suspend fun markTranslationSprint(mangaId: Long) {
+        if (mangaId <= 0L) return
+        // Checked before the memo: the id is usually not on show, and there is no reason to
+        // count a series' chapters for a tier the user cannot currently see. Ordering it first
+        // also keeps the memo meaning "this series has been evaluated", not "was considered".
+        if (!globalAppGraph.rotatingAchievementPool.isActive(TRANSLATION_SPRINT_ID)) return
+        if (!sprintChecked.add(mangaId)) return
+        val chapterCount = runCatching {
+            globalAppGraph.getChaptersByMangaId.await(mangaId).size
+        }.getOrDefault(0)
+        if (chapterCount >= TRANSLATION_SPRINT_MIN_CHAPTERS) {
+            globalAppGraph.rotatingAchievementPool.markProgress(TRANSLATION_SPRINT_ID)
         }
     }
 }
