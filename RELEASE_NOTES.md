@@ -116,3 +116,16 @@ files moved. See .github/scripts/release_notes.py.
   instead of every upload of that chapter and scanlator left it in the counts: read the version you
   had blacklisted and the chapter still counted as read while its unread twin was the one on screen.
   The badge and the History progress now honour both forms of blacklist entry.
+- **Back on a screen opened from an extension dropping you into the Library.** Open a source from
+  Browse and press back and you were sent to the Library tab, with the source screen still sitting
+  behind it - so the next back press walked you back into the source you had just left. The
+  "back goes to the Library tab" shortcut was competing with the back stack pop and could win the
+  press; it now takes it only when there is nothing left to pop.
+- **Migrating a single entry was a dead end that called the series "not found".** With "Use smart
+  search" off - the default - migrating one entry opened the migration list, which immediately
+  opened a search screen of its own on top of it. The list underneath was already showing "No match
+  found" for the entry, because the smart search had been skipped on purpose, so it claimed nothing
+  matched on any of your sources however many you had configured. Getting out took backing out of
+  the search and then answering an exit dialog, and it could simply drop you back into the search.
+  A lone entry with smart search off now opens the search screen itself, which searches every
+  source you selected for migration, and one back press leaves it.

@@ -58,6 +58,7 @@ import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.SOURCE_SEARCH_BOX_HEIGHT
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.ui.browse.migration.search.MigrateSearchScreen
 import eu.kanade.tachiyomi.util.system.LocaleHelper
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.update
@@ -111,21 +112,25 @@ class MigrationConfigScreen(private val mangaIds: Collection<Long>) : Screen() {
         var migrationSheetOpen by rememberSaveable { mutableStateOf(false) }
 
         fun continueMigration(openSheet: Boolean, extraSearchQuery: String?) {
-            // KMK -->
-            // val mangaId = mangaIds.singleOrNull()
-            // if (mangaId == null && openSheet) {
             if (openSheet) {
-                // KMK <--
                 migrationSheetOpen = true
                 return
             }
-            val screen = // KMK --> if (mangaId == null) {
-                MigrationListScreen(mangaIds, extraSearchQuery, screenModel.sourcePreferences.migrationSmartSearchSingleEntry().get())
-            // KMK -->
-            // } else {
-            //     MigrateSearchScreen(mangaId)
-            // }
+            // KMK --> A lone entry with smart search off is a manual job, so open the search
+            // screen directly - the shape upstream uses. Routing it through MigrationListScreen,
+            // which then pushed a MigrateSearchScreen of its own, stacked two screens for one
+            // job: the entry underneath was already showing "not found" (the model marks it so
+            // and skips the search entirely), so backing out of the search landed on a list
+            // claiming nothing matched on any of the selected sources, and the next back had to
+            // go through an exit dialog before the screen would let go.
             // KMK <--
+            val singleMangaId = mangaIds.singleOrNull()
+            val useSmartSearch = screenModel.sourcePreferences.migrationSmartSearchSingleEntry().get()
+            val screen = if (singleMangaId != null && !useSmartSearch) {
+                MigrateSearchScreen(singleMangaId)
+            } else {
+                MigrationListScreen(mangaIds, extraSearchQuery)
+            }
             navigator.replace(screen)
         }
 

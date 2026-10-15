@@ -44,9 +44,6 @@ import tachiyomi.domain.source.service.SourceManager
 class MigrationListScreenModel(
     mangaIds: Collection<Long>,
     extraSearchQuery: String?,
-    // KMK -->
-    runManually: Boolean = false,
-    // KMK <--
     val preferences: SourcePreferences = globalAppGraph.sourcePreferences,
     private val sourceManager: SourceManager = globalAppGraph.sourceManager,
     private val getManga: GetManga = globalAppGraph.getManga,
@@ -98,19 +95,12 @@ class MigrationListScreenModel(
                                 // KMK <--
                             ),
                             parentContext = screenModelScope.coroutineContext,
-                            // KMK -->
-                        ).apply {
-                            if (runManually) searchResult.value = SearchResult.NotFound
-                            // KMK <--
-                        }
+                        )
                     }
                 }
                 .awaitAll()
                 .filterNotNull()
             mutableState.update { it.copy(items = manga.toImmutableList()) }
-            // KMK -->
-            if (runManually) return@launchIO
-            // KMK <--
             runMigrations(manga)
         }
     }

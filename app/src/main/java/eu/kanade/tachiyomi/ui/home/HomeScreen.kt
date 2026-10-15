@@ -188,8 +188,18 @@ object HomeScreen : Screen() {
             }
 
             val goToLibraryTab = { tabNavigator.current = LibraryTab }
+            // KMK --> Switching tabs is what back is for only when there is nothing to pop.
+            // Handlers are dispatched last registered first, and Voyager's own navigator-pop
+            // handler is registered above this subtree, so a handler that stays enabled while a
+            // screen sits on top of HomeScreen outranks it: back on a pushed screen - browsing a
+            // source, the manual migration search - dropped to the library tab and left the
+            // screen on the stack. That window is not just the transition: the outgoing screen is
+            // only disposed once its exit animation finishes, which waits on frames, so on a
+            // slow push the tab handler kept winning. `navigator` is the root navigator, the one
+            // tabs push onto.
+            // KMK <--
             BackHandler(
-                enabled = tabNavigator.current != LibraryTab,
+                enabled = tabNavigator.current != LibraryTab && !navigator.canPop,
                 onBack = goToLibraryTab,
             )
 
