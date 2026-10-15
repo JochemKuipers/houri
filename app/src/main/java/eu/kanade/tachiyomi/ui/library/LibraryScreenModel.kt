@@ -35,7 +35,6 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.ui.category.categorySortOrderOf
 import eu.kanade.tachiyomi.ui.library.handler.LibraryFilterHandler
-import eu.kanade.tachiyomi.util.chapter.applyScanlatorVisibility
 import eu.kanade.tachiyomi.util.chapter.getNextUnread
 import eu.kanade.tachiyomi.util.retainCovers
 import exh.favorites.FavoritesSyncHelper
@@ -106,6 +105,7 @@ import tachiyomi.domain.chapter.interactor.GetBookmarkedChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.service.applyScanlatorVisibility
 import tachiyomi.domain.history.interactor.GetNextChapters
 import tachiyomi.domain.library.model.LibraryDisplayMode
 import tachiyomi.domain.library.model.LibraryGroup
@@ -239,6 +239,9 @@ class LibraryScreenModel(
                     isInitialized = true,
                     // KMK --> display order only; the stored manual order is untouched
                     categories = categories.sortedForDisplay(categorySortOrderOf(categorySortMode)),
+                    // KMK --> carried alongside so the subcategories the reader sees under a
+                    // category are ordered by the mode they chose, not just the tabs
+                    categorySortOrder = categorySortOrderOf(categorySortMode),
                     favorites = filteredFavorites,
                     tracksMap = tracksMap,
                     loggedInTrackerIds = trackingFilters.keys,
@@ -957,7 +960,7 @@ class LibraryScreenModel(
                 if (isMergedSourceId(manga.source)) {
                     val mergedMangas = getMergedMangaById.await(manga.id)
                         .associateBy { it.id }
-                    getNextChapters.await(manga.id)
+                    getNextChapters.await(manga.id, mergeEnabled = libraryPreferences.smartScanlatorMerge().get())
                         .let { if (amount != null) it.take(amount) else it }
                         .groupBy { it.mangaId }
                         .forEach ab@{ (mangaId, chapters) ->
@@ -980,7 +983,7 @@ class LibraryScreenModel(
                 }
 
                 // SY <--
-                val chapters = getNextChapters.await(manga.id)
+                val chapters = getNextChapters.await(manga.id, mergeEnabled = libraryPreferences.smartScanlatorMerge().get())
                     .fastFilterNot { chapter ->
                         downloadManager.getQueuedDownloadOrNull(chapter.id) != null ||
                             downloadManager.isChapterDownloaded(
@@ -1727,7 +1730,7 @@ class LibraryScreenModel(
     // KMK -->
     fun getSubcategoriesForCategory(category: Category): List<Category> {
         if (category.id == Companion.ACHIEVEMENTS_CATEGORY_ID) return emptyList()
-        return state.value.libraryData.categories.filter { it.parentId == category.id && it.name.isNotBlank() }
+        return state.value.sortedSubcategories(category)
     }
 
     fun selectSubcategory(subCategoryId: Long?) {
@@ -2036,6 +2039,9 @@ class LibraryScreenModel(
         val favorites: List<LibraryItem> = emptyList(),
         val tracksMap: Map</* Manga */ Long, List<Track>> = emptyMap(),
         val loggedInTrackerIds: Set<Long> = emptySet(),
+        // KMK --> the mode `categories` is ordered by, needed to order subcategories too: the
+        // count-based modes cannot be applied there, see sortedSubcategories
+        val categorySortOrder: CategorySortOrder = CategorySortOrder.MANUAL,
     ) {
         val favoritesById by lazy { favorites.associateBy { it.id } }
     }
@@ -2154,14 +2160,38 @@ class LibraryScreenModel(
         }
 
         /**
+         * The subcategories of [category] in the mode chosen in the category manager, so the chips
+         * and the folders under a category line up with the tabs above them.
+         *
+         * [LibraryData.categories] already arrives in that order and filtering keeps it, so the
+         * name and date modes need nothing here. The two count-based modes are the exception: they
+         * need a per-subcategory count, and those only exist once the library has been grouped -
+         * which is why the tabs are re-sorted over the groups they just built while subcategories
+         * used to keep the stored order.
+         */
+        fun sortedSubcategories(category: Category): List<Category> {
+            val subcategories = libraryData.categories
+                .filter { it.parentId == category.id && it.name.isNotBlank() }
+            val sortOrder = libraryData.categorySortOrder
+            if (sortOrder != CategorySortOrder.MOST_ITEMS && sortOrder != CategorySortOrder.LEAST_ITEMS) {
+                return subcategories
+            }
+            return subcategories.sortedForDisplay(
+                sortOrder,
+                subcategories.associate { it.id to (subcategoryMangaMap[it.id]?.size ?: 0) },
+            )
+        }
+
+        /**
          * Splits a category's tree content into non-empty subcategory folders plus
          * the manga living directly in the category for the folder layout.
          */
         fun getFolderViewData(category: Category): Pair<List<Pair<Category, List<LibraryItem>>>, List<LibraryItem>> {
-            val folders = libraryData.categories
-                .filter { it.parentId == category.id }
+            // KMK --> Sorted by the chosen mode, not by the stored order: the folders are
+            // subcategories of the category on screen, and the chips next to this layout were
+            // already following it while the folders were the one list left on manual order.
+            val folders = sortedSubcategories(category)
                 .filterNot(Category::hidden)
-                .sortedBy { it.order }
                 .mapNotNull { subcategory ->
                     getItemsForSubcategory(subcategory.id)
                         .takeIf { items -> items.isNotEmpty() }

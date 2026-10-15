@@ -1,14 +1,13 @@
-package eu.kanade.tachiyomi.util.chapter
+package tachiyomi.domain.chapter.service
 
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
 import tachiyomi.domain.chapter.model.Chapter
-import tachiyomi.domain.chapter.service.scanlatorBlacklistKey
 
 @Execution(ExecutionMode.CONCURRENT)
-class ScanlatorVisibilityTest {
+class ChapterVisibilityTest {
 
     private fun chapter(
         id: Long,

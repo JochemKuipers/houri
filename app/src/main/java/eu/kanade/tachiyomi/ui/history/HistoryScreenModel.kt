@@ -148,13 +148,22 @@ class HistoryScreenModel(
 
     suspend fun getNextChapter(): Chapter? {
         // KMK -->
-        return withIOContext { getNextChapters.awaitFirstReadable() }
+        return withIOContext {
+            getNextChapters.awaitFirstReadable(mergeEnabled = libraryPreferences.smartScanlatorMerge().get())
+        }
         // KMK <--
     }
 
     fun getNextChapterForManga(mangaId: Long, chapterId: Long) {
         screenModelScope.launchIO {
-            sendNextChapterEvent(getNextChapters.await(mangaId, chapterId, onlyUnread = false))
+            sendNextChapterEvent(
+                getNextChapters.await(
+                    mangaId,
+                    chapterId,
+                    onlyUnread = false,
+                    mergeEnabled = libraryPreferences.smartScanlatorMerge().get(),
+                ),
+            )
         }
     }
 

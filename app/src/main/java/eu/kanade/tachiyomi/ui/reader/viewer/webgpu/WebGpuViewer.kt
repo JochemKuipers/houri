@@ -997,7 +997,22 @@ open class WebGpuViewer(
         pageListWatch.reset(chapters.pageListVersions())
 
         val chapterId = chapters.currChapter.chapter.id
-        val stored = if (chapterId != null && chapterId != -1L) positionStore.load(chapterId) else null
+        // KMK --> The store holds what this viewer needs to restore a page the DB cannot express -
+        // the offset within a continuous page, the zoom, the horizontal pan - so it deliberately
+        // outranks last_page_read, which is why a process kill can land you back where you were.
+        //
+        // It has no idea the position was reset from outside, though. Marking a chapter unread
+        // zeroes last_page_read and the anchor stayed behind, so this chapter reopened at the page
+        // the reader had stopped on - the one viewer of the four that did it, since pager, webtoon
+        // and novel restore from requestedPage alone. last_page_read is the one place that says
+        // whether this chapter has a position at all, so ask it before trusting the store. A stale
+        // entry needs no cleanup: reopening overwrites it on the first page report.
+        val hasSavedPosition = chapters.currChapter.chapter.last_page_read > 0
+        val stored = if (chapterId != null && chapterId != -1L && hasSavedPosition) {
+            positionStore.load(chapterId)
+        } else {
+            null
+        }
         val targetIndex = stored?.pageIndex?.coerceIn(0, pages.lastIndex)
             ?: min(chapters.currChapter.requestedPage, pages.lastIndex)
         val requestedPage = pages[targetIndex]

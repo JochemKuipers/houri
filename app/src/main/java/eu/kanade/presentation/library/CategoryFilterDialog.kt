@@ -41,6 +41,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.text.BidiFormatter
 import eu.kanade.presentation.category.hierarchicalVisualName
 import eu.kanade.presentation.category.sortedByHierarchy
+import eu.kanade.tachiyomi.ui.category.categorySortOrderOf
+import mihon.app.di.globalAppGraph
 import tachiyomi.domain.category.model.Category
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
@@ -84,7 +86,14 @@ fun CategoryFilterDialog(
     var query by rememberSaveable { mutableStateOf("") }
     var collapsed by rememberSaveable { mutableStateOf(setOf<Long>()) }
 
-    val ordered = remember(categories) { categories.sortedByHierarchy() }
+    // KMK --> The mode picked in the category manager, read straight from the preference: this
+    // dialog is rebuilt every time it opens and the mode can only change from another screen. The
+    // tabs above it already follow it, so a hierarchical list that ignored it was the odd one out -
+    // and it ignored it for the subcategories as well as the roots.
+    val sortMode = remember {
+        categorySortOrderOf(globalAppGraph.libraryPreferences.categoryManagerSortMode().get())
+    }
+    val ordered = remember(categories, sortMode) { categories.sortedByHierarchy(sortMode) }
     val trimmed = query.trim()
     val rows = remember(ordered, trimmed, collapsed) {
         buildList {

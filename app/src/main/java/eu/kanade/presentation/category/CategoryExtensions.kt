@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.compose.runtime.Composable
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.domain.category.model.Category
+import tachiyomi.domain.category.model.CategorySortOrder
+import tachiyomi.domain.category.model.sortedForDisplay
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 
@@ -23,26 +25,35 @@ fun Category.visualName(context: Context): String =
 // KMK -->
 /**
  * Returns the categories ordered for hierarchical display: every root category
- * (sorted by [Category.order]) followed immediately by its subcategories (also
- * sorted by order). Subcategories whose root no longer exists are appended at
- * the end so they remain selectable.
+ * followed immediately by its subcategories. Each level is ordered by [sortOrder],
+ * so a reader who picked "name A → Z" in the category manager gets the same order
+ * here - on the roots and on the subcategories under them - instead of the stored
+ * order in one list and the chosen one in the other. Subcategories whose root no
+ * longer exists are appended at the end so they remain selectable.
+ *
+ * The two count-based modes are the exception, and are left to the stored order:
+ * a bare list of categories carries no counts, so [sortedForDisplay] has nothing
+ * to rank by. Only the library's grouped tabs and its folder layout have counts,
+ * and they order their own lists.
  */
-fun List<Category>.sortedByHierarchy(): List<Category> {
-    val roots = filter { it.parentId == 0L }.sortedBy { it.order }
+fun List<Category>.sortedByHierarchy(
+    sortOrder: CategorySortOrder = CategorySortOrder.MANUAL,
+): List<Category> {
+    val roots = filter { it.parentId == 0L }.sortedForDisplay(sortOrder)
     val subcategories = filter { it.parentId != 0L }
     return buildList {
         val attached = mutableSetOf<Long>()
         roots.forEach { root ->
             add(root)
             subcategories.filter { it.parentId == root.id }
-                .sortedBy { it.order }
+                .sortedForDisplay(sortOrder)
                 .forEach {
                     add(it)
                     attached += it.id
                 }
         }
         subcategories.filterNot { it.id in attached }
-            .sortedBy { it.order }
+            .sortedForDisplay(sortOrder)
             .forEach(::add)
     }
 }

@@ -5,6 +5,7 @@ import dev.zacsweers.metro.ContributesBinding
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
 import logcat.LogPriority
 import tachiyomi.core.common.util.lang.toLong
 import tachiyomi.core.common.util.system.logcat
@@ -13,6 +14,7 @@ import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.StringListColumnAdapter
 import tachiyomi.data.UpdateStrategyColumnAdapter
 import tachiyomi.domain.library.model.LibraryManga
+import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MangaUpdate
 import tachiyomi.domain.manga.model.MangaWithChapterCount
@@ -25,6 +27,11 @@ import java.time.ZoneId
 @ContributesBinding(AppScope::class)
 class MangaRepositoryImpl(
     private val handler: DatabaseHandler,
+    // KMK --> libraryView carries its chapter counts on both bases - one per chapter number and
+    // one per upload - and the queries pick between them with this. The switch is the same one the
+    // details list, the reader and the library's continue button read, so with the merge off the
+    // badge counts the uploads the reader can actually see rather than the numbers behind them.
+    private val libraryPreferences: LibraryPreferences,
 ) : MangaRepository {
 
     override suspend fun getMangaById(id: Long): Manga {
@@ -65,7 +72,12 @@ class MangaRepositoryImpl(
 
     override suspend fun getLibraryManga(): List<LibraryManga> {
         return try {
-            handler.awaitList { libraryViewQueries.library(MangaMapper::mapLibraryManga) }
+            handler.awaitList {
+                libraryViewQueries.library(
+                    libraryPreferences.smartScanlatorMerge().get().toLong(),
+                    MangaMapper::mapLibraryManga,
+                )
+            }
         } catch (e: OutOfMemoryError) {
             logcat(LogPriority.ERROR, e) { "OOM loading library (1000+ entries), returning empty guard" }
             emptyList()
@@ -73,7 +85,14 @@ class MangaRepositoryImpl(
     }
 
     override fun getLibraryMangaAsFlow(): Flow<List<LibraryManga>> {
-        return handler.subscribeToList { libraryViewQueries.library(MangaMapper::mapLibraryManga) }
+        // KMK --> Re-subscribed when the switch flips: the counts it feeds are only correct for one
+        // basis or the other, and a query already in flight cannot change its parameters. Toggling
+        // it re-runs the library query once, which is the same cost as the next chapter change.
+        return libraryPreferences.smartScanlatorMerge().changes().flatMapLatest { merge ->
+            handler.subscribeToList {
+                libraryViewQueries.library(merge.toLong(), MangaMapper::mapLibraryManga)
+            }
+        }
     }
 
     override fun getFavoritesBySourceId(sourceId: Long): Flow<List<Manga>> {
@@ -255,7 +274,12 @@ class MangaRepositoryImpl(
     }
 
     override suspend fun getReadMangaNotInLibraryView(): List<LibraryManga> {
-        return handler.awaitList { libraryViewQueries.readMangaNonLibrary(MangaMapper::mapLibraryManga) }
+        return handler.awaitList {
+            libraryViewQueries.readMangaNonLibrary(
+                libraryPreferences.smartScanlatorMerge().get().toLong(),
+                MangaMapper::mapLibraryManga,
+            )
+        }
     }
     // SY <--
 }

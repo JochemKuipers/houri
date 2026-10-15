@@ -130,7 +130,9 @@ class DomainModule : InjektModule {
         addFactory { MergeCategories(get(), get()) }
         // KMK <--
 
-        addSingletonFactory<MangaRepository> { MangaRepositoryImpl(get()) }
+        // KMK --> Second get() is LibraryPreferences: the library counts pick their chapter
+        // counting basis with the smart merge switch.
+        addSingletonFactory<MangaRepository> { MangaRepositoryImpl(get(), get()) }
         addFactory { GetDuplicateLibraryManga(get()) }
         addFactory { GetFavorites(get()) }
         addFactory { GetMangaWithChapters(get(), get()) }
@@ -191,7 +193,7 @@ class DomainModule : InjektModule {
         addFactory { GetAvailableScanlators(get()) }
         addFactory { FilterChaptersForDownload(get(), get(), get(), get()) }
 
-        addSingletonFactory<HistoryRepository> { HistoryRepositoryImpl(get(), get()) }
+        addSingletonFactory<HistoryRepository> { HistoryRepositoryImpl(get(), get(), get()) }
         addFactory { GetHistory(get()) }
         addFactory { UpsertHistory(get()) }
         addFactory { RemoveHistory(get()) }

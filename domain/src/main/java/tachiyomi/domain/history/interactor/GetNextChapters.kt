@@ -6,8 +6,8 @@ import exh.source.isEhBasedManga
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
+import tachiyomi.domain.chapter.service.applyScanlatorVisibility
 import tachiyomi.domain.chapter.service.getChapterSort
-import tachiyomi.domain.chapter.service.isChapterBlacklisted
 import tachiyomi.domain.history.repository.HistoryRepository
 import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.manga.model.Manga
@@ -28,9 +28,12 @@ class GetNextChapters(
     private val historyRepository: HistoryRepository,
 ) {
 
-    suspend fun await(onlyUnread: Boolean = true): List<Chapter> {
+    suspend fun await(
+        onlyUnread: Boolean = true,
+        mergeEnabled: Boolean = true,
+    ): List<Chapter> {
         val history = historyRepository.getLastHistory() ?: return emptyList()
-        return await(history.mangaId, history.chapterId, onlyUnread)
+        return await(history.mangaId, history.chapterId, onlyUnread, mergeEnabled)
     }
 
     // KMK -->
@@ -48,9 +51,12 @@ class GetNextChapters(
      * [scanLimit] bounds the walk so a long, fully-read History cannot turn one resume tap
      * into a full-table scan.
      */
-    suspend fun awaitFirstReadable(scanLimit: Long = DEFAULT_HISTORY_SCAN_LIMIT): Chapter? {
+    suspend fun awaitFirstReadable(
+        scanLimit: Long = DEFAULT_HISTORY_SCAN_LIMIT,
+        mergeEnabled: Boolean = true,
+    ): Chapter? {
         historyRepository.getRecentHistory(scanLimit).forEach { history ->
-            val next = await(history.mangaId, history.chapterId, onlyUnread = false)
+            val next = await(history.mangaId, history.chapterId, onlyUnread = false, mergeEnabled = mergeEnabled)
                 .firstOrNull { !it.read }
             if (next != null) return next
         }
@@ -58,16 +64,23 @@ class GetNextChapters(
     }
     // KMK <--
 
-    suspend fun await(mangaId: Long, onlyUnread: Boolean = true): List<Chapter> {
+    suspend fun await(mangaId: Long, onlyUnread: Boolean = true, mergeEnabled: Boolean = true): List<Chapter> {
         val manga = getManga.await(mangaId) ?: return emptyList()
-        // KMK --> A blacklisted chapter is one the user chose not to read, so it must not come back
-        // from here whatever the source. Applied on the way out rather than inside each branch below,
-        // because the merged and E-Hentai paths return early and would otherwise skip it. It cannot
-        // live in the chapter query the way excluded scanlators can: the blacklist is per series and
-        // keyed by scanlator, so it needs the manga row.
+        // KMK --> Everything the other three surfaces use to decide what exists, so the History tab
+        // cannot resume something the details list does not show. Before it filtered the blacklist
+        // and nothing else, so a series carried by several scanlator groups handed back an upload
+        // the merge had collapsed: with scanlator A holding 1-2 and B holding 1-70, finishing A's
+        // chapter 2 and resuming from History opened B's chapter 1 instead of chapter 3. The
+        // blacklist is no longer applied separately either - applyScanlatorVisibility applies it
+        // first, and applies it again per number inside the merge.
         // KMK <--
         return chaptersFor(manga, onlyUnread)
-            .filterNot { isChapterBlacklisted(it, manga.blacklistedChapters) }
+            .applyScanlatorVisibility(
+                priority = manga.scanlatorPriority,
+                blacklistedChapters = manga.blacklistedChapters,
+                rangeRules = manga.scanlatorRangeRules,
+                mergeEnabled = mergeEnabled,
+            )
     }
 
     private suspend fun chaptersFor(manga: Manga, onlyUnread: Boolean): List<Chapter> {
@@ -110,8 +123,9 @@ class GetNextChapters(
         mangaId: Long,
         fromChapterId: Long,
         onlyUnread: Boolean = true,
+        mergeEnabled: Boolean = true,
     ): List<Chapter> {
-        val chapters = await(mangaId, onlyUnread)
+        val chapters = await(mangaId, onlyUnread, mergeEnabled)
         val currChapterIndex = chapters.indexOfFirst { it.id == fromChapterId }
         val nextChapters = chapters.subList(max(0, currChapterIndex), chapters.size)
 

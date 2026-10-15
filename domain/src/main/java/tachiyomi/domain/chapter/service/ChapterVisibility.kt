@@ -1,18 +1,102 @@
-package eu.kanade.tachiyomi.util.chapter
+package tachiyomi.domain.chapter.service
 
 import tachiyomi.domain.chapter.model.Chapter
-import tachiyomi.domain.chapter.service.isChapterBlacklisted
 
 // KMK -->
+/**
+ * A rule pinning one scanlator over a span of chapter numbers, stored encoded as
+ * "from:to:scanlator" inside [tachiyomi.domain.manga.model.Manga.scanlatorRangeRules].
+ */
+data class ScanlatorRangeRule(
+    val from: Double,
+    val to: Double,
+    val scanlator: String,
+) {
+    fun covers(chapterNumber: Double): Boolean = chapterNumber >= from && chapterNumber <= to
+}
+
+fun encodeScanlatorRangeRule(rule: ScanlatorRangeRule): String = "${rule.from}:${rule.to}:${rule.scanlator}"
+
+fun parseScanlatorRangeRule(raw: String): ScanlatorRangeRule? {
+    val parts = raw.split(':', limit = 3)
+    if (parts.size != 3) return null
+    val from = parts[0].toDoubleOrNull() ?: return null
+    val to = parts[1].toDoubleOrNull() ?: return null
+    if (from > to) return null
+    return ScanlatorRangeRule(from, to, parts[2])
+}
+
+/**
+ * Smart merge: keeps one chapter per chapter number, preferring scanlators in
+ * [priority] order (unknown scanlators sort last, stable by original order).
+ * Chapters whose "number@scanlator" key is in [blacklisted] are skipped for
+ * that number; a number with no remaining candidates is hidden entirely.
+ * Chapters without a positive number are never deduplicated.
+ *
+ * When [rangeRules] contain a rule covering a number, its scanlator wins for that
+ * number regardless of global order; if it has no candidate for the number, the
+ * global priority order applies. The last matching rule wins when several overlap.
+ *
+ * Within what the range rules leave open, an upload the reader has already read or
+ * bookmarked wins for its number before [priority] is consulted at all. Without
+ * this the merge can swap in a different group's upload for a chapter that was
+ * already read, which shows it as unread again in the chapter list while
+ * libraryView still counts the number as read - the two then disagree about how
+ * much is left, because the view counts read state across every upload of a
+ * number rather than only the one the merge picked. See LibraryManga.unreadCount.
+ *
+ * Internal rather than private because its own tests drive it: several cases are about
+ * which upload wins one number while every other candidate is still a candidate, and
+ * [applyScanlatorVisibility] takes blacklisted chapters out of the list before it gets
+ * here, so going through it would test a different question in those cases.
+ */
+internal fun List<Chapter>.applyScanlatorPriority(
+    priority: List<String>,
+    blacklistedChapters: Set<String>,
+    rangeRules: List<String> = emptyList(),
+): List<Chapter> {
+    if (priority.isEmpty() && blacklistedChapters.isEmpty() && rangeRules.isEmpty()) return this
+
+    val rules = rangeRules.mapNotNull(::parseScanlatorRangeRule)
+
+    val chosenIds = asSequence()
+        .filter { it.chapterNumber > 0.0 }
+        .groupBy { it.chapterNumber }
+        .values
+        .mapNotNull { sameNumber ->
+            val preferredScanlator = rules.lastOrNull { it.covers(sameNumber.first().chapterNumber) }?.scanlator
+            sameNumber
+                .filterNot { isChapterBlacklisted(it, blacklistedChapters) }
+                .minWithOrNull(
+                    compareBy<Chapter> { chapter ->
+                        if (chapter.scanlator == preferredScanlator) 0 else 1
+                    }.thenBy { chapter ->
+                        if (chapter.read) 0 else 1
+                    }.thenBy { chapter ->
+                        if (chapter.bookmark) 0 else 1
+                    }.thenBy { candidate ->
+                        priority.indexOf(candidate.scanlator)
+                            .takeIf { it != -1 }
+                            ?: Int.MAX_VALUE
+                    },
+                )
+                ?.id
+        }
+        .toSet()
+
+    return filter { it.chapterNumber <= 0.0 || it.id in chosenIds }
+}
+
 private const val TENTHS = 10L
 
 /**
  * The one entry point every surface uses to decide which of a manga's chapters are visible.
  *
- * Three surfaces need this answer - the details list, the library's continue-reading pick, and the
- * reader's chapter sheet - and they used to each re-implement it with a slightly different gate.
- * That drift had already caused the reader to disagree with the details screen about which
- * chapters exist, so the rules live here once and the callers only choose *when* to ask.
+ * Four surfaces need this answer - the details list, the library's continue-reading pick, the
+ * reader's chapter sheet and the History tab's resume - and they used to each re-implement it with
+ * a slightly different gate. That drift had already caused the reader to disagree with the details
+ * screen about which chapters exist, and the History tab to resume a chapter the details list
+ * hides. The rules live here once, in domain, and the callers only choose *when* to ask.
  *
  * Two things are decided, in order:
  *
@@ -31,7 +115,9 @@ private const val TENTHS = 10L
  * deduplicate them against.
  *
  * [mergeEnabled] is the global user switch. Passing a non-empty [priority] alone does not force a
- * merge, so the toggle can always turn this off.
+ * merge, so the toggle can always turn this off. It is passed in rather than read here because
+ * this lives in domain: the caller already has the preference, and an interactor that has to go
+ * looking for it is one more thing that can answer a different question than the surface asking.
  *
  * [alwaysVisibleChapterId] is for the reader, which owns exactly one chapter that must not be
  * filtered away: the one open right now. It survives both steps - it stays in the list even when it
@@ -86,8 +172,8 @@ fun List<Chapter>.applyScanlatorVisibility(
  *    could pick a different winner for the same chapter between two runs purely on hash order, and
  *    a series would appear to swap upload at random.
  *
- * Numbers are compared in tenths of a chapter, matching [scanlatorCoverage], so float noise from
- * source parsing neither breaks a run nor changes the ranking.
+ * Numbers are compared in tenths of a chapter, the same unit the scanlator coverage readout uses,
+ * so float noise from source parsing neither breaks a run nor changes the ranking.
  *
  * Only chapters with a positive, recognised number are counted; a nameless chapter belongs to no
  * scanlator and chapters with no number cannot be ranked. A group whose numbers are all half-steps

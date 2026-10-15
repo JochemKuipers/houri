@@ -554,6 +554,17 @@ line, for instance, does not appear anywhere in the current tree.
 
 ## KNOWN LANDMINES (each one was a real bug)
 
+- **The position store outranks `last_page_read`, so it has to be gated on it.**
+  `WebGpuReadingPositionStore` keeps `pageIndex`/`documentY`/`zoom`/`offsetX` per chapter in the
+  `webgpu_positions` prefs, because no DB column can express the last three, and
+  `setChaptersInternal` reads it *before* `requestedPage`. That precedence is what survives a
+  process kill — and what made a position reset from outside the reader invisible: marking a
+  chapter unread zeroes `last_page_read` (`SetReadStatus` owns that, and has since upstream
+  #7475) while the anchor stayed behind, so the chapter reopened at the page it had been stopped
+  on. Only this viewer did it — pager, webtoon and novel restore from `requestedPage` alone,
+  which *is* `last_page_read`. The store is now consulted only when `last_page_read > 0`.
+  **Rule: a position reset from outside the reader has to overrule the store, and `last_page_read`
+  is the only signal that can do it.**
 - **`retryPage` is not eviction.** If the cache entry is the defect, `no-stream` → `retryPage`
   is a no-op by design and leaves the page wedged in LOADING with no timeout (see *Page
   loading*). `requerySuspectPage` is the one that evicts first.
