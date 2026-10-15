@@ -773,5 +773,8 @@ internal fun restoreOrderComparator(
     // KMK -->
     compareBy<BackupManga> { isMergedSourceId(it.source) }
         // KMK <--
-        .then(compareBy { knownUrlsBySource[it.source]?.contains(it.url) ?: false })
+        // Descending: `compareBy` on a Boolean ranks false (unknown) first, which is the
+        // opposite of the order above - it made every unknown entry restore before the known
+        // ones it was supposed to update.
+        .thenByDescending { knownUrlsBySource[it.source]?.contains(it.url) ?: false }
         .thenByDescending { it.lastModifiedAt }
