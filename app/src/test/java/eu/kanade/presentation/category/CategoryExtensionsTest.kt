@@ -77,8 +77,10 @@ class CategoryExtensionsTest {
 
     @Test
     fun `a subcategory whose root is gone stays selectable`() {
+        // Root 7 is not in the list at all - the row it pointed at was deleted - so the
+        // subcategory has no root to be attached to and would otherwise be dropped.
         val orphaned = category(9, "orphan sub", parentId = 7, order = 1)
 
-        tree.sortedByHierarchy(CategorySortOrder.NAME_ASC).last() shouldBe orphaned
+        (tree + orphaned).sortedByHierarchy(CategorySortOrder.NAME_ASC).last() shouldBe orphaned
     }
 }

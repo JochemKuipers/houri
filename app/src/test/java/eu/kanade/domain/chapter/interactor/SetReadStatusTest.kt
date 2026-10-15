@@ -7,9 +7,11 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
+import tachiyomi.core.common.preference.InMemoryPreferenceStore
 import tachiyomi.domain.chapter.interactor.GetMergedChaptersByMangaId
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.model.ChapterUpdate
@@ -27,7 +29,10 @@ import tachiyomi.domain.manga.repository.MangaRepository
 @Execution(ExecutionMode.CONCURRENT)
 class SetReadStatusTest {
 
-    private val downloadPreferences: DownloadPreferences = mockk(relaxed = true)
+    // A real store, not a relaxed mock: `removeAfterMarkedAsRead()` hands back a `Preference<Boolean>`,
+    // and a relaxed mock returns a generic placeholder for it that cannot be cast to Boolean. Real
+    // defaults also put "delete downloads after marking read" off, which is not what these cover.
+    private val downloadPreferences = DownloadPreferences(InMemoryPreferenceStore())
     private val deleteDownload: DeleteDownload = mockk(relaxed = true)
     private val mangaRepository: MangaRepository = mockk(relaxed = true)
     private val chapterRepository: ChapterRepository = mockk()
@@ -52,6 +57,13 @@ class SetReadStatusTest {
 
     private fun givenChapters(vararg chapters: Chapter) {
         coEvery { chapterRepository.getChapterByMangaId(10L) } returns chapters.toList()
+    }
+
+    @BeforeEach
+    fun stubRepositoryWrites() {
+        // A strict mock, so the write under test needs an answer of its own. `coVerify` below
+        // still sees exactly which updates were made - stubbing is not a call.
+        coEvery { chapterRepository.updateAll(any()) } returns Unit
     }
 
     @Test
