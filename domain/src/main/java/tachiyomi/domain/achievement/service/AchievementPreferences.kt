@@ -80,7 +80,6 @@ class AchievementPreferences(
     fun mangaFinishedCount() = preferenceStore.getLong("pref_achievement_manga_finished", 0)
     fun mangaCaughtUpCount() = preferenceStore.getLong("pref_achievement_manga_caught_up", 0)
     fun libraryMangaCount() = preferenceStore.getLong("pref_achievement_library_count", 0)
-    fun achievementsData() = preferenceStore.getString("pref_achievements_data", "")
     fun unlockedTimestamps() = preferenceStore.getString("pref_achievement_timestamps", "")
     fun totalReadingTimeMinutes() = preferenceStore.getLong("pref_achievement_reading_time_minutes", 0)
     fun backlogClearedCount() = preferenceStore.getLong("pref_achievement_backlog_cleared", 0)
@@ -242,7 +241,6 @@ class AchievementPreferences(
         return next
     }
     // KMK <--
-    fun ltrMangaFinishedCount() = preferenceStore.getLong("pref_achievement_ltr_finished", 0)
     fun animationsEnabled() = preferenceStore.getBoolean("pref_achievement_animations_enabled", true)
     fun rotatingLastDailyEpoch() = preferenceStore.getLong("pref_achievement_rotating_daily_epoch", 0)
     fun rotatingLastWeeklyEpoch() = preferenceStore.getLong("pref_achievement_rotating_weekly_epoch", 0)
@@ -334,12 +332,6 @@ class AchievementPreferences(
     // KMK <--
 
     @Synchronized
-    fun incrementLtrFinished() {
-        val cur = ltrMangaFinishedCount().get()
-        if (cur < 1_000_000L) ltrMangaFinishedCount().set(cur + 1)
-    }
-
-    @Synchronized
     fun incrementUpscalesServed(): Long {
         val next = (upscalesServed().get() + 1).coerceIn(0L, 1_000_000L)
         upscalesServed().set(next)
@@ -413,20 +405,11 @@ class AchievementPreferences(
         return current.split(",").map { it.trim() }.filter { it.isNotBlank() && it.length <= 64 && Achievements.forId(it) != null }.toSet()
     }
 
-    @Synchronized
-    fun getUnlockedWithTimestamps(): Map<String, Long> {
-        val raw = unlockedTimestamps().get()
-        if (raw.isBlank()) return emptyMap()
-        return raw.split(",").mapNotNull {
-            val parts = it.split(":", limit = 2)
-            if (parts.size != 2) return@mapNotNull null
-            val id = parts[0].trim()
-            if (id.isBlank() || id.length > 64 || Achievements.forId(id) == null) return@mapNotNull null
-            val ts = parts[1].toLongOrNull() ?: return@mapNotNull null
-            if (ts <= 0L || ts > System.currentTimeMillis() + 86_400_000L) return@mapNotNull null
-            id to ts
-        }.toMap()
-    }
+    // KMK --> `unlockedTimestamps` is written on every unlock but had no reader: its only
+    // consumer was a manager accessor nothing called. The recording is kept rather than
+    // removed - it is accumulated user data, it costs one append per unlock, and the tier
+    // animation and any future "unlocked on" display both want it. What was removed is the
+    // dead parser, so there is now exactly one format to keep in step.
 
     @Volatile
     var suppressOrganicForImport: Boolean = false
@@ -496,7 +479,6 @@ class AchievementPreferences(
         finishedDays().set("")
         lastSkippedDay().set(-1L)
         bingeHundredDay().set(-1L)
-        ltrMangaFinishedCount().set(0)
         upscalesServed().set(0)
         upscalePageCounts().set("")
         rotatingDailyIds().set("")
@@ -505,15 +487,8 @@ class AchievementPreferences(
         rotatingDayStamps().set("")
         rotatingLastDailyEpoch().set(0)
         rotatingLastWeeklyEpoch().set(0)
-        achievementsData().set("")
         unlockedTimestamps().set("")
     }
 
     fun isEnabled(): Boolean = achievementsEnabled().get()
-
-    fun hasCompletedOnboarding(): Boolean = preferenceStore.getBoolean("pref_achievements_onboarded", false).get()
-
-    fun setOnboarded() {
-        preferenceStore.getBoolean("pref_achievements_onboarded", false).set(true)
-    }
 }

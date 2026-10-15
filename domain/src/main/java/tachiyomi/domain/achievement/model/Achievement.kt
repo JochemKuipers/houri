@@ -53,16 +53,6 @@ data class AchievementStats(
         unlockedCount >= 8 -> "Apprentice"
         else -> "Novice"
     }
-
-    val rankTier: AchievementTier get() = when (rank) {
-        "Ultimate" -> AchievementTier.ULTIMATE
-        "Mythic" -> AchievementTier.MYTHIC
-        "Legend" -> AchievementTier.LEGENDARY
-        "Master" -> AchievementTier.PLATINUM
-        "Veteran" -> AchievementTier.GOLD
-        "Explorer" -> AchievementTier.SILVER
-        else -> AchievementTier.BRONZE
-    }
 }
 
 object Achievements {
@@ -332,6 +322,5 @@ object Achievements {
     val visible get() = all.filter { !it.isSecret }
     val negatives get() = all.filter { it.isNegative }
     val rotating get() = all.filter { it.isRotating }
-    val nonNegative get() = all.filter { !it.isNegative }
     val countable get() = all.filter { it.countsTowardsProgress }
 }

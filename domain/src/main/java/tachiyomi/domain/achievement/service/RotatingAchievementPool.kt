@@ -32,7 +32,7 @@ class RotatingAchievementPool(
      * pruned away by the winner's call.
      */
     @Synchronized
-    fun getActiveDaily(): List<Achievement> {
+    private fun getActiveDaily(): List<Achievement> {
         val epoch = TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis())
         val storedEpoch = prefs.rotatingLastDailyEpoch().get()
         val storedIds = prefs.rotatingDailyIds().get()
@@ -54,7 +54,7 @@ class RotatingAchievementPool(
 
     /** This week's four weekly achievements. Same rules as [getActiveDaily]. */
     @Synchronized
-    fun getActiveWeekly(): List<Achievement> {
+    private fun getActiveWeekly(): List<Achievement> {
         val epoch = TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis()) / 7
         val storedEpoch = prefs.rotatingLastWeeklyEpoch().get()
         val storedIds = prefs.rotatingWeeklyIds().get()

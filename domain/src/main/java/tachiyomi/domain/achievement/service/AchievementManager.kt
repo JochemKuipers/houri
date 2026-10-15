@@ -5,7 +5,6 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import tachiyomi.domain.achievement.interactor.GetStaleUnstartedBacklog
 import tachiyomi.domain.achievement.model.Achievement
-import tachiyomi.domain.achievement.model.AchievementStats
 import tachiyomi.domain.achievement.model.AchievementTier
 import tachiyomi.domain.achievement.model.Achievements
 import java.util.concurrent.atomic.AtomicBoolean
@@ -154,18 +153,6 @@ class AchievementManager(
         return unlocked
     }
 
-    /** Longest run of reading days in the recorded window, breaking a gap of over [STREAK_GRACE_DAYS]. */
-    fun longestStreak(): Int {
-        val days = prefs.readDays()
-        var best = 0
-        var run = 0
-        for (i in days.indices) {
-            val expected = if (i == 0) days[0] else days[i - 1] + 1
-            run = if (days[i] - expected <= STREAK_GRACE_DAYS) run + 1 else 1
-            if (run > best) best = run
-        }
-        return best
-    }
     // KMK <--
 
     // KMK -->
@@ -187,7 +174,7 @@ class AchievementManager(
      * [DAILY_COUNTER_TIERS]; anything else is ignored so a stray call cannot create junk prefs.
      */
     @Synchronized
-    fun incrementDailyCounter(name: String, amount: Int = 1): List<String> {
+    private fun incrementDailyCounter(name: String, amount: Int = 1): List<String> {
         if (!prefs.achievementsEnabled().get()) return emptyList()
         if (name !in DAILY_COUNTER_TIERS) return emptyList()
         if (amount <= 0) return emptyList()
@@ -318,17 +305,6 @@ class AchievementManager(
         return unlocked
     }
 
-    /** "Complete a manga in <mode>". The id is resolved by the caller, which owns `ReadingMode`. */
-    @Synchronized
-    fun onReadingModeFinished(id: String): List<String> {
-        if (!prefs.achievementsEnabled().get()) return emptyList()
-        if (id == "ltr_reader") prefs.incrementLtrFinished()
-        val unlocked = mutableListOf<String>()
-        tryUnlock(id, unlocked)
-        if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
-        return unlocked
-    }
-
     /**
      * Stamps the start of a run through [mangaId], if one is not already running.
      *
@@ -421,13 +397,6 @@ class AchievementManager(
         return unlocked
     }
 
-    @Synchronized
-    fun onBacklogCleared(count: Int = 1): List<String> {
-        val unlocked = onBacklogClearedQuiet(count)
-        if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
-        return unlocked
-    }
-
     /**
      * Counts a cleared backlog entry and returns what it unlocked, without notifying. Callers
      * that own a wider batch add the result to their own list so one event yields one toast
@@ -440,25 +409,6 @@ class AchievementManager(
         val unlocked = mutableListOf<String>()
         if (total >= 10) tryUnlock("backlog_cleared_10", unlocked)
         if (total >= 100) tryUnlock("backlog_cleared_100", unlocked)
-        return unlocked
-    }
-
-    @Synchronized
-    fun onNegativeEvent(id: String): List<String> {
-        if (!prefs.achievementsEnabled().get()) return emptyList()
-        val allowed = setOf(
-            "negative_binge_guilt",
-            "negative_abandoned",
-            "negative_midnight_oil",
-            "negative_spoiled",
-            "negative_hoarder_shame",
-            "negative_rage_quit",
-            "negative_do_not_disturb",
-        )
-        if (id !in allowed) return emptyList()
-        val unlocked = mutableListOf<String>()
-        tryUnlock(id, unlocked)
-        if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
         return unlocked
     }
 
@@ -752,8 +702,6 @@ class AchievementManager(
         }
     }
 
-    fun getStats(): AchievementStats = prefs.computeStats(Achievements.all.size)
-
     // KMK -->
     private companion object {
         val SECRET_IDS: Set<String> by lazy { Achievements.secrets.mapToIdSet() }
@@ -872,11 +820,6 @@ class AchievementManager(
         )
     }
     // KMK <--
-
-    fun getUnlockedWithMeta(): List<Pair<String, Long>> {
-        val map = prefs.getUnlockedWithTimestamps()
-        return map.entries.map { it.key to it.value }.sortedBy { it.second }
-    }
 
     fun wipeWithConfirmation(firstConfirmed: Boolean, secondConfirmed: Boolean): Boolean {
         if (!firstConfirmed || !secondConfirmed) return false

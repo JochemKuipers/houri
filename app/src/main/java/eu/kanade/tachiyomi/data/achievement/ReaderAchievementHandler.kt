@@ -180,7 +180,7 @@ class ReaderAchievementHandler(
             ReadingMode.DEFAULT -> null
         } ?: return
 
-        step("reading mode achievement") { achievementManager.onReadingModeFinished(id) }
+        step("reading mode achievement") { achievementManager.tryUnlockDirect(id) }
         // "Complete 3 manga in LTR mode this week" is the same event at weekly cadence.
         if (id == "ltr_reader") mark("rotating_weekly_ltr_3")
         if (mangaId > 0L) {
