@@ -153,6 +153,7 @@ fun MangaInfoBox(
     // KMK -->
     val usePanoramaCover by globalAppGraph.uiPreferences.usePanoramaCoverMangaInfo().collectAsState()
     val topAlignCover by globalAppGraph.uiPreferences.topAlignCover().collectAsState()
+    val coverLoadingSpinner by globalAppGraph.uiPreferences.mangaInfoCoverLoadingSpinner().collectAsState()
     val censorEnabled by globalAppGraph.uiPreferences.censorLewdManga().collectAsState()
     val shouldCensor = censorEnabled && manga.isLewd()
     val displayManga = if (shouldCensor) manga.copy(ogTitle = stringResource(KMR.strings.censored_title)) else manga
@@ -217,6 +218,7 @@ fun MangaInfoBox(
                     coverRatio = coverRatio,
                     usePanoramaCover = usePanoramaCover,
                     topAlignCover = topAlignCover,
+                    showCoverSpinner = coverLoadingSpinner,
                     // KMK <--
                     displayTitle = titleOverride,
                 )
@@ -237,6 +239,7 @@ fun MangaInfoBox(
                     onCoverLoaded = onCoverLoaded,
                     coverRatio = coverRatio,
                     usePanoramaCover = usePanoramaCover,
+                    showCoverSpinner = coverLoadingSpinner,
                     // KMK <--
                     displayTitle = titleOverride,
                 )
@@ -547,6 +550,7 @@ private fun MangaAndSourceTitlesLarge(
     onCoverLoaded: (DomainMangaCover, Image) -> Unit,
     coverRatio: MutableFloatState,
     usePanoramaCover: Boolean = false,
+    showCoverSpinner: Boolean = true,
     // KMK <--
     displayTitle: String? = null,
 ) {
@@ -577,6 +581,7 @@ private fun MangaAndSourceTitlesLarge(
                     coverRatio.floatValue = image.height.toFloat() / image.width
                     onCoverLoaded(mangaCover, image)
                 },
+                showLoadingSpinner = showCoverSpinner,
                 // KMK <--
             )
         } else {
@@ -596,6 +601,7 @@ private fun MangaAndSourceTitlesLarge(
                     coverRatio.floatValue = image.height.toFloat() / image.width
                     onCoverLoaded(mangaCover, image)
                 },
+                showLoadingSpinner = showCoverSpinner,
                 // KMK <--
             )
         }
@@ -639,6 +645,7 @@ private fun MangaAndSourceTitlesSmall(
     coverRatio: MutableFloatState,
     usePanoramaCover: Boolean = false,
     topAlignCover: Boolean = false,
+    showCoverSpinner: Boolean = true,
     // KMK <--
     displayTitle: String? = null,
 ) {
@@ -673,6 +680,7 @@ private fun MangaAndSourceTitlesSmall(
                     coverRatio.floatValue = image.height.toFloat() / image.width
                     onCoverLoaded(mangaCover, image)
                 },
+                showLoadingSpinner = showCoverSpinner,
                 // KMK <--
             )
         } else {
@@ -695,6 +703,7 @@ private fun MangaAndSourceTitlesSmall(
                     coverRatio.floatValue = image.height.toFloat() / image.width
                     onCoverLoaded(mangaCover, image)
                 },
+                showLoadingSpinner = showCoverSpinner,
                 // KMK <--
             )
         }

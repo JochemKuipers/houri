@@ -25,6 +25,9 @@ files moved. See .github/scripts/release_notes.py.
   reflects how much of the book is really left rather than how many files it has.
 - **Books with a table of contents can be navigated by it**, and text can be searched within the
   current book.
+- **A switch for the cover loading spinner** on a series' details page, in Settings > Appearance >
+  Manga Info. On by default, as before; turn it off to get Mihon's plain skeleton placeholder
+  instead of the spinner while the cover loads.
 
 ### Improve
 - **EPUB files are parsed properly now.** Titles, authors, publishers and descriptions appear instead

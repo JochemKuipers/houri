@@ -88,6 +88,9 @@ class UiPreferences(
 
     fun topAlignCover() = preferenceStore.getBoolean("top_align_cover", false)
 
+    // Spinner over the details-page cover while it loads. Off keeps Mihon's behaviour: plain skeleton.
+    fun mangaInfoCoverLoadingSpinner() = preferenceStore.getBoolean("manga_info_cover_loading_spinner", true)
+
     fun censorLewdManga() = preferenceStore.getBoolean("pref_censor_lewd_manga", false)
 
     fun showSequelPrequel() = preferenceStore.getBoolean(

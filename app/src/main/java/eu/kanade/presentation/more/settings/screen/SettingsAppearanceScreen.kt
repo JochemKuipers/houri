@@ -205,6 +205,11 @@ object SettingsAppearanceScreen : SearchableSettings {
                     title = stringResource(KMR.strings.pref_top_align_cover),
                     subtitle = stringResource(KMR.strings.pref_top_align_cover_summary),
                 ),
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = uiPreferences.mangaInfoCoverLoadingSpinner(),
+                    title = stringResource(KMR.strings.pref_manga_info_cover_loading_spinner),
+                    subtitle = stringResource(KMR.strings.pref_manga_info_cover_loading_spinner_summary),
+                ),
             ),
         )
     }

@@ -69,6 +69,8 @@ enum class MangaCover(val ratio: Float) {
         onCoverLoaded: ((DomainMangaCover, result: AsyncImagePainter.State.Success) -> Unit)? = null,
         size: Size = Size.Normal,
         scale: ContentScale = ContentScale.Crop,
+        /** Off draws no spinner while loading, leaving just the skeleton placeholder (Mihon's look). */
+        showLoadingSpinner: Boolean = true,
         // KMK <--
     ) {
         // KMK -->
@@ -100,22 +102,24 @@ enum class MangaCover(val ratio: Float) {
                 Box(
                     modifier = modifierColored,
                 ) {
-                    CircularProgressIndicator(
-                        color = tint?.let { Color(it) } ?: CoverPlaceholderOnBgColor,
-                        modifier = Modifier
-                            .size(
-                                when (size) {
-                                    Size.Big -> COVER_TEMPLATE_SIZE_BIG
-                                    Size.Medium -> COVER_TEMPLATE_SIZE_MEDIUM
-                                    else -> COVER_TEMPLATE_SIZE_NORMAL
-                                },
-                            )
-                            .align(Alignment.Center),
-                        strokeWidth = when (size) {
-                            Size.Normal -> 3.dp
-                            else -> 2.dp
-                        },
-                    )
+                    if (showLoadingSpinner) {
+                        CircularProgressIndicator(
+                            color = tint?.let { Color(it) } ?: CoverPlaceholderOnBgColor,
+                            modifier = Modifier
+                                .size(
+                                    when (size) {
+                                        Size.Big -> COVER_TEMPLATE_SIZE_BIG
+                                        Size.Medium -> COVER_TEMPLATE_SIZE_MEDIUM
+                                        else -> COVER_TEMPLATE_SIZE_NORMAL
+                                    },
+                                )
+                                .align(Alignment.Center),
+                            strokeWidth = when (size) {
+                                Size.Normal -> 3.dp
+                                else -> 2.dp
+                            },
+                        )
+                    }
                 }
             },
             error = {
