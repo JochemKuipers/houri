@@ -250,6 +250,11 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // KMK -->
         runCatching { eu.kanade.tachiyomi.ui.reader.viewer.ViewerRegistry.register(eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelViewerProvider) }
             .onFailure { xLogE("Failed to register novel viewer", it) }
+        // Touched for its `init`: a Kotlin object body only runs on first access, so without this
+        // the novel typography keys never reach SettingsRegistry and the global key-uniqueness
+        // check silently does nothing.
+        runCatching { eu.kanade.tachiyomi.ui.reader.setting.NovelTypographySettingsHost }
+            .onFailure { xLogE("Failed to register novel typography settings", it) }
         // KMK <--
         // KMK <--
         // MetroInteropModule bridges Metro singletons to Injekt for extension backwards compat;

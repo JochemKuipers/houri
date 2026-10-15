@@ -16,6 +16,46 @@ Defines the contract that APK extensions (installed separately) must conform to.
 - `NamespaceSource` – Sources with tag namespaces
 - `PagePreviewSource` – Sources supporting page preview thumbnails
 
+## Text source API (`eu.kanade.tachiyomi.source.text`, KMK)
+
+The extension point for **EPUBs and web novels**. It sits *beside* the image `Page` model rather than
+replacing it: an image source implements `getPageList(chapter): List<Page>`, a text source implements
+`getTextPageList(chapter): List<TextPage>`. A host checks which applies before building a renderer.
+
+| File | Contract |
+|------|----------|
+| `TextPage.kt` | One unit of text. `kind` is `HTML` or `PLAIN`; `baseHref` resolves relative refs |
+| `TextSource.kt` | `getTextPageList` + `textCapabilities` |
+| `TextCapabilities.kt` | What the source actually implements, so hosts hide controls they cannot honour |
+| `TextTocSource.kt` | `getTableOfContents` -> `TocEntry` (nested) |
+| `TextSearchSource.kt` | `searchInChapter` -> `TextSearchHit` |
+| `TextAnnotationSource.kt` | Highlights / bookmarks / notes persistence |
+| `TextResourceSource.kt` | Streams a page's images, CSS and fonts |
+
+**Why `TextPage` is not `Page`.** An image has progressive load states, a progress flow and a retry
+path. Text arrives with the chapter list. Modelling it as `Page` would make every host carry a status
+machine for a failure mode that cannot occur.
+
+**Why `TextResourceSource` is separate from `TextSource`.** Markup references resources the host
+cannot reach. Inlining every image as a `data:` URI turns one illustrated chapter into tens of
+megabytes of base64 held for as long as the chapter is open. Instead the source streams them on
+demand — see `source-epub/EpubResourceReader.kt` for the reserved `.internal` scheme that makes
+`../images/plate.jpg` resolve inside a zip file.
+
+**Rules for implementors.** All three are enforced by hosts and all three are easy to get wrong:
+
+- `TextPage.url` must be **stable across library refreshes** — it is the identity for reading
+  position and annotations. No timestamps, no array indexes.
+- `TextPage.text` must be **self-contained** — hosts hand it straight to a WebView, so inline the
+  styles a page needs rather than assuming host-supplied CSS.
+- Set `TextPage.baseHref` whenever a page references external resources.
+- Return **natural units** (EPUB spine items, one webnovel chapter per page), not pre-paginated
+  chunks: hosts re-flow text to the screen, so a fixed character count is cut mid-sentence at most
+  font sizes.
+
+R8: every class here is covered by `consumer-proguard.pro`. Extension APKs load via classloader, so
+R8 cannot see their implementations across the dex boundary.
+
 ## KMP structure
 
 - `commonMain` source set defines the extension API

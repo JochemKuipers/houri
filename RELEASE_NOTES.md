@@ -9,8 +9,29 @@ files moved. See .github/scripts/release_notes.py.
 -->
 
 ### New
+- **EPUB books can now be read as books.** A new built-in **EPUB library** source appears in Browse.
+  Drop a folder of `.epub` files under your local source directory (in a `novels` folder) and each
+  folder becomes a series, with one chapter per book inside it. Previously an EPUB could only be added
+  as a manga, where it was read as a pile of illustrations and the text was never shown.
+- **Reading appearance settings for books**: font, font size, font scale, text colour, background
+  colour, smooth text, justified alignment, hyphenation, line spacing, paragraph spacing, character
+  spacing, and left/right/top/bottom margins. Alignment, hyphenation and vertical writing each have
+  a **"Follow book"** option, so a book that already looks right keeps its own styling and you only
+  change what you want changed.
+- **Vertical writing (縦書き)** is supported, which Japanese and Chinese novels usually expect.
+- **Your place in a book is remembered by where you got to, not by page number.** Text reflows
+  differently on every screen size and at every font size, so remembering "page 4" dropped you
+  somewhere different each time. Progress now follows the actual paragraph, and the percentage shown
+  reflects how much of the book is really left rather than how many files it has.
+- **Books with a table of contents can be navigated by it**, and text can be searched within the
+  current book.
 
 ### Improve
+- **EPUB files are parsed properly now.** Titles, authors, publishers and descriptions appear instead
+  of coming out blank for books that used their own namespace prefixes; the contents page is read from
+  both modern and older EPUB formats; embedded images, stylesheets and fonts load; and a DRM-locked
+  book now says so plainly rather than opening to a run of blank pages. Font-obfuscated books - the
+  common "protected" kind - read normally, as they always should.
 - **The rotating daily and weekly challenges now actually rotate.** Only the three and four
   achievements currently on show made progress - everything else in the rotating pool was still
   being counted in the background and quietly unlocking itself the first time you happened to do

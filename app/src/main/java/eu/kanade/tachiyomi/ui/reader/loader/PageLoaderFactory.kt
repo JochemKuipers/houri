@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
+import eu.kanade.tachiyomi.source.text.TextSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import mihon.core.archive.archiveReader
@@ -43,7 +44,9 @@ data class PageLoaderRequest(
 )
 
 object PageLoaderRegistry {
-    private val providers = mutableListOf<PageLoaderProvider>(DefaultPageLoaderProvider)
+    // KMK -->
+    private val providers = mutableListOf<PageLoaderProvider>(TextPageLoaderProvider, DefaultPageLoaderProvider)
+    // KMK <--
 
     fun register(provider: PageLoaderProvider) {
         providers.removeAll { it::class == provider::class }
@@ -59,6 +62,23 @@ object PageLoaderRegistry {
         error(request.context.stringResource(MR.strings.loader_not_implemented_error))
     }
 }
+
+// KMK --> Text sources (EPUB, web novel) are consulted first: they are a distinct contract with no
+// image fallback, and letting the default chain try an image loader first would produce a confusing
+// "page list empty" for every chapter.
+private object TextPageLoaderProvider : PageLoaderProvider {
+    override val order: Int = -10
+
+    override fun create(request: PageLoaderRequest): PageLoader? {
+        val source = request.source as? TextSource ?: return null
+        // A downloaded chapter has no text to load — downloads only store images — so a text source
+        // is always read live.
+        return TextPageLoader(source, request.chapter.chapter).apply {
+            isLocal = source !is HttpSource
+        }
+    }
+}
+// KMK <--
 
 private object DefaultPageLoaderProvider : PageLoaderProvider {
     override val order: Int = 100

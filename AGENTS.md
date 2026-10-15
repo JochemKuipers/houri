@@ -24,6 +24,7 @@ Houri (`applicationId app.houri`) — Android manga reader (min SDK 26, target 3
 | `core/common/AGENTS.md` | Network, prefs framework, storage, utils, logging |
 | `core/archive/AGENTS.md` | CBZ/archive reading + encryption |
 | `presentation-core/AGENTS.md` | Shared Compose components (+ parallel SettingsItems system) |
+| `scripts/kotlinc-check/` | Offline syntax check agents may run (no Gradle) — see *Fast offline syntax check* |
 | `presentation-widget/AGENTS.md` | Glance home-screen widget |
 | `yakuyomi-engine/AGENTS.md` | MTL orchestration (wrapper; native engine is a submodule, commit it first) |
 | `llamatik-native/AGENTS.md` | On-device LLM runtime: vendored llama.cpp from the `external/llamatik` fork (Vulkan on by default, 64-bit ABIs only; Windows hosts build in WSL) |
@@ -45,6 +46,33 @@ Houri (`applicationId app.houri`) — Android manga reader (min SDK 26, target 3
 | Branch / commit | Work directly on `master`. Do not create a feature branch and do not commit unless the user asks. |
 
 The verification commands below are the **user's** to run. Report the expected result alongside the change so it can be checked in one pass. Only run a build when the user explicitly requests it in that request.
+
+### Fast offline syntax check (agents may run this)
+
+The no-Gradle rule leaves a gap: a few hundred new lines of Kotlin get zero compiler feedback, so typos, JVM signature clashes and receiver-type mistakes reach CI. `scripts/kotlinc-check/` closes that gap **without** invoking `./gradlew`.
+
+```bash
+scripts/kotlinc-check/check.sh core/archive/src/main/kotlin/mihon/core/archive/Epub*.kt
+scripts/kotlinc-check/run-harness.sh     # asserts pure-JVM logic, prints PASS/FAIL per case
+```
+
+It drives the Kotlin compiler straight out of the Gradle dependency cache (`kotlin-compiler-embeddable`
++ `kotlin-reflect` + `kotlinx-coroutines-core-jvm`, all of which are already downloaded), so it needs
+no network, no Android SDK and no Compose plugin, and finishes in about a second. Dependencies that
+are not cached (jsoup, libarchive) and platform classes that do not exist off-device
+(`android.util.Xml`, `org.xmlpull`) are satisfied by deliberately fake stubs in `stubs/`, which are
+never compiled into the app.
+
+**What it catches:** syntax errors, JVM declaration clashes (`getPackageHref()` colliding with a
+`packageHref` property), intra-module type errors, and anything a pure function can be asserted
+against. Add a new stub under `stubs/` when a fresh external class is needed.
+
+**What it is not:** not a build. Unresolved-reference diagnostics are suppressed and reported as a
+count, because almost all of them come from the absent project classpath. It runs neither spotless
+nor ktlint. It does not replace the user's `spotlessApply` → `spotlessCheck` → `assembleDebug` pass —
+it just catches the class of mistake that would otherwise only show up there.
+
+This is the **only** build-adjacent command an agent may run. `./gradlew` remains off limits.
 
 ### Git
 
@@ -107,7 +135,7 @@ Before `git push`, confirm the working tree contains only the intended changes (
 | `core:concurrency/` | Coroutine dispatch helpers |
 | `core:archive/` | CBZ/archive reading with optional encryption |
 | `core-metadata/` | Comic-info metadata parsing |
-| `source-api/` / `source-local/` | Extension `Source` API (KMP `commonMain`/`androidMain`) + local source |
+| `source-api/` / `source-local/` / `source-epub/` | Extension `Source` API (KMP `commonMain`/`androidMain`) + local manga source + built-in EPUB library source |
 | `presentation-core/` | Shared Compose components |
 | `presentation-widget/` | Home-screen Glance widget |
 | `yakuyomi-engine/` (`:yakuyomi`) | Komikku-side MTL wrapper (`exh.yakuyomi.*`: manager, translators, models, cache) |

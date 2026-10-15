@@ -673,4 +673,31 @@
     <string name="pref_test_flare_solverr_and_update_user_agent_summary">Test FlareSolverr to update the user agent. Only required once; then toggle as needed.</string>
     <string name="pref_cloudflare_bypass_banner">Cloudflare bypass banner</string>
     <string name="pref_cloudflare_bypass_banner_summary">Show a banner naming the host and method while a Cloudflare challenge is being bypassed</string>
+    <!-- KMK: EPUB library source + novel reader -->
+    <string name="local_epub_source">EPUB library</string>
+    <string name="novel_reader_typography">Reading appearance</string>
+    <string name="pref_novel_font_size">Font size</string>
+    <string name="pref_novel_font_scale">Font scale</string>
+    <string name="pref_novel_font_family">Font</string>
+    <string name="pref_novel_font_color">Font colour</string>
+    <string name="pref_novel_background_color">Background colour</string>
+    <string name="pref_novel_smooth_text">Smooth text</string>
+    <string name="pref_novel_smooth_text_summary">Anti-alias text rendering. Off uses LCD subpixels, which is sharper on light backgrounds but adds colour fringing to coloured text</string>
+    <string name="pref_novel_justified">Justified alignment</string>
+    <string name="pref_novel_justified_summary">Even out both margins. Use \"Follow book\" to keep the publisher\u2019s own alignment</string>
+    <string name="pref_novel_hyphenation">Hyphenation</string>
+    <string name="pref_novel_hyphenation_summary">Break words across lines to reduce gaps when the text is justified</string>
+    <string name="pref_novel_vertical_writing">Vertical writing</string>
+    <string name="pref_novel_vertical_writing_summary">Top-to-bottom, right-to-left. Japanese and Chinese novels often expect this</string>
+    <string name="pref_novel_line_spacing">Line spacing</string>
+    <string name="pref_novel_paragraph_spacing">Paragraph spacing</string>
+    <string name="pref_novel_font_spacing">Font spacing</string>
+    <string name="pref_novel_margins">Margins</string>
+    <string name="pref_novel_margin_left">Left margin</string>
+    <string name="pref_novel_margin_right">Right margin</string>
+    <string name="pref_novel_margin_top">Top margin</string>
+    <string name="pref_novel_margin_bottom">Bottom margin</string>
+    <string name="novel_follow_publisher">Follow book</string>
+    <string name="novel_error_drm_protected">This book is DRM-protected and cannot be read</string>
+    <string name="novel_error_chapter_not_found">Chapter not found</string>
 </resources>

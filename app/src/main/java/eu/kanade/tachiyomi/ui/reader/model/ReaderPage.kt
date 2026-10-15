@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.model
 
 import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.source.text.TextPage
 import java.io.InputStream
 
 open class ReaderPage(
@@ -58,5 +59,15 @@ open class ReaderPage(
      * chapter's resume target, which after a mid-session split is a different page entirely.
      */
     var splitSourcePage: ReaderPage? = null
+
+    /**
+     * The text this page carries, when the source is a text source.
+     *
+     * Null for every image page, which is the overwhelming majority — the field exists so a chapter
+     * can be *either* images or text without the page list, the chapter state machine, the progress
+     * bar or the volume tracking needing a second parallel representation. A viewer picks its
+     * renderer from this field's presence, exactly as it picks an image loader from `stream`.
+     */
+    var textPage: TextPage? = null
     // KMK <--
 }

@@ -47,6 +47,45 @@ model, the page state machine, the stuck-page ladder, the device-recovery rule (
 consumed and cannot be reused), a symptom→cause table, and the landmines that have already cost
 an incident each.
 
+## Novel / text reader (`viewer/novel/`, KMK)
+
+Renders text chapters (EPUB, web novel) in a WebView rather than in a native text widget. Chosen
+because an EPUB *is* an XHTML document with the publisher's own stylesheet — drop caps, ruby,
+columns, vertical writing, tables. Re-implementing that in Compose means re-implementing a browser.
+The reader's preferences are layered on as an injected stylesheet; the document keeps its own.
+
+| File | Concern |
+|------|---------|
+| `NovelWebViewer.kt` | The WebView, resource interception, and the `ViewerProvider` that selects it |
+| `NovelTypography.kt` | The settings value. No Android imports, so it is unit-testable |
+| `NovelTypographyCss.kt` | Turns that value into a stylesheet; `applyTo` is idempotent |
+| `NovelProgress.kt` | Reading position and percentage progress |
+
+**Tri-state preferences.** `justified`, `hyphenation` and `verticalWriting` are `Boolean?` where
+`null` means *follow the publisher*, stored as the string `"follow"`. They are nullable on purpose: a
+default of `false` would mean "emit `text-align: left !important`", which silently restyles a
+Japanese light novel out of vertical writing and cannot be turned off again.
+
+**The stylesheet is never empty.** Even for default typography, because that is the only way a user
+can turn *off* a publisher's own justification. Properties that default to "follow the publisher" are
+simply omitted when null.
+
+**`!important` everywhere on purpose.** An EPUB stylesheet sets `font-size` on `body` or a class; on
+specificity grounds those win over a host rule and the user's font size silently does nothing. This is
+the single most common complaint about EPUB readers.
+
+**Progress is a character offset, not a page index.** A page index in a reflowable document means
+something different on every device and at every font size; `NovelProgress.Position`
+(`documentIndex:characterOffset:characterLength`) is stable across all of them. Chapters are weighted
+by character length so a book with 200 one-paragraph interstitial files does not read as 2% done.
+
+**Viewer selection is by content, not by source id.** `NovelViewerProvider` picks itself when the
+loaded chapter's pages carry `textPage`. An extension therefore gets this reader the moment it
+implements `TextSource`, with no change here.
+
+Resources (images, CSS, fonts) are streamed by the `TextPageLoader`'s `resourceSource` over the
+reserved `epub-archive://book.internal/` scheme — see `source-epub/AGENTS.md`.
+
 ## Page splitting
 
 A page too tall for the decoder is cut into segments by `HttpPageLoader` and **replaces** its parent
@@ -81,3 +120,7 @@ Strip and continuous reading use separate image processors (split 2026-08-31):
   `WebGpuViewer` extension, so the class stays readable as a whole.
 - Do not build an `ImagePage` and drop the reference without `cleanup()` — it owns uploaded GPU
   textures.
+- Do not give a text preference a non-null `false` default. `null` = follow the publisher; `false` =
+  force it, and it cannot then be unforced.
+- Do not re-run `loadDataWithBaseURL` to apply a typography change — it drops the scroll position on
+  every slider drag. Swap the stylesheet in the live DOM (`liveTypographyJs`).

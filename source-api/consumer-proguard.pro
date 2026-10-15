@@ -34,6 +34,26 @@
 # across dex boundaries. Devirtualization + null-check stripping = NPE.
 -keep,allowobfuscation interface eu.kanade.tachiyomi.source.Source { *; }
 
+# KMK -->
+# Text source API. Extensions loaded via classloader implement these
+# interfaces, so R8 must keep them whole - same reason as Source above.
+-keep class eu.kanade.tachiyomi.source.text.** { public protected *; }
+-keep,allowobfuscation interface eu.kanade.tachiyomi.source.text.TextSource { *; }
+-keep,allowobfuscation interface eu.kanade.tachiyomi.source.text.TextTocSource { *; }
+-keep,allowobfuscation interface eu.kanade.tachiyomi.source.text.TextSearchSource { *; }
+-keep,allowobfuscation interface eu.kanade.tachiyomi.source.text.TextAnnotationSource { *; }
+
+# Data classes reached through extension code paths, including the synthetic
+# $default bridges that Kotlin generates for parameters with defaults.
+-keepclassmembers class eu.kanade.tachiyomi.source.text.TextPage { <init>(...); *; }
+-keepclassmembers class eu.kanade.tachiyomi.source.text.TocEntry { <init>(...); *; }
+-keepclassmembers class eu.kanade.tachiyomi.source.text.TextCapabilities { <init>(...); *; }
+-keepclassmembers class eu.kanade.tachiyomi.source.text.TextSearchHit { <init>(...); *; }
+-keepclassmembers class eu.kanade.tachiyomi.source.text.TextAnnotation { <init>(...); *; }
+-keepclassmembers class eu.kanade.tachiyomi.source.text.TextAnnotation$Kind { *; }
+-keepclassmembers class eu.kanade.tachiyomi.source.text.TextPage$Kind { *; }
+# KMK <--
+
 # Keep HttpSource methods to prevent R8 from making them final when it
 # cannot see classloader-loaded overrides.
 -keep,allowobfuscation class eu.kanade.tachiyomi.source.online.HttpSource {

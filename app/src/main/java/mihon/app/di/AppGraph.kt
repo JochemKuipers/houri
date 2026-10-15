@@ -88,6 +88,7 @@ import eu.kanade.tachiyomi.network.interceptor.FlareSolverr
 import eu.kanade.tachiyomi.ui.base.delegate.SecureActivityDelegateImpl
 import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
+import eu.kanade.tachiyomi.ui.reader.setting.NovelTypographyPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.UpscaleEngine
 import eu.kanade.tachiyomi.ui.reader.setting.UpscaleMangaStore
@@ -236,6 +237,7 @@ import tachiyomi.domain.track.interactor.GetTracksPerManga
 import tachiyomi.domain.track.interactor.InsertTrack
 import tachiyomi.domain.updates.interactor.GetUpdates
 import tachiyomi.domain.updates.service.UpdatesPreferences
+import tachiyomi.source.epub.EpubSourceFileSystem
 import tachiyomi.source.local.image.LocalCoverManager
 import tachiyomi.source.local.io.LocalSourceFileSystem
 
@@ -478,6 +480,10 @@ interface AppGraph : ViewModelGraph {
     val xml: XML
     val localCoverManager: LocalCoverManager
     val localSourceFileSystem: LocalSourceFileSystem
+    // KMK --> built-in EPUB library source (folder = series, .epub = chapter)
+    val epubSourceFileSystem: EpubSourceFileSystem
+    val novelTypographyPreferences: NovelTypographyPreferences
+    // KMK <--
     val getExhFavoriteMangaWithMetadata: GetExhFavoriteMangaWithMetadata
     val chapterRepository: ChapterRepository
     val deleteCachedRecommendations: DeleteCachedRecommendations

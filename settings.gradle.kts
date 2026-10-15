@@ -79,6 +79,9 @@ include(":macrobenchmark")
 include(":presentation-core")
 include(":presentation-widget")
 include(":source-api")
+// KMK --> built-in EPUB / webnovel library source: folder = series, .epub file = chapter
+include(":source-epub")
+// KMK <--
 include(":source-local")
 include(":telemetry")
 include(":yakuyomi")
