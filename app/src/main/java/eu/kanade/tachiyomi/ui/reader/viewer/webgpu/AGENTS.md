@@ -599,15 +599,27 @@ line, for instance, does not appear anywhere in the current tree.
   (`webgpuviewer-houri` @ `06d2b1001`). `ImagePage.Render` pages — `ProgressPage`, `TransitionPage`,
   `ErrorPage` — are drawn **after** that pass, each opening its own pass over the shared screen
   texture via `renderLoaded`. So they are the one kind of content in continuous mode that can still
-  land on top of a neighbour's last row of real pixels, and they get **no underlay of their own**:
-  `renderLoaded` loads the destination and paints only its own footprint.
+  land on top of a neighbour's last row of real pixels, and they had **no underlay of their own**.
 
-  This matters for a long strip precisely because it is *intermittent*: a placeholder exists only
-  while a segment is still decoding, so the symptom appears and disappears as you scroll rather
-  than reproducing on every chapter. Treat "a 1px line at a segment boundary" as this until proven
-  otherwise, and check it against the two other candidates the crop path introduced in v1.24.0
-  (`5e15bcf`/`5c610cb`/`46d1abe`) — with crop-borders on, the crop edge *is* the slot edge, so any
-  edge rounding in `Image.prepareTilesForRender`'s `src` cropping lands on the same seam.
+  The underlay loop now paints a Render page's background too, spanning its slot. The extent is the
+  **slot** (`vp.docTop` + `vp.pageHeight`), never the page's own height.
+
+- **A `Render` page must be drawn at its slot's scale, not at `s.scale * page.scale`.** This is what
+  the seam line actually was, and it is intermittent for a structural reason: a `Render` page
+  deliberately gets its own live pan/zoom (see `ImagePage.Render.drawLive`), so a pinch or fling
+  running while a segment is still decoding is enough to move it off 1. `fillPage` paints
+  `scale * page.height` tall while the document laid the next page out from
+  `getPageHeight(page) * s.scale` - and those agree only at `page.scale == 1`.
+
+  Off 1, taller repaints over the last row of **both** neighbours (it runs after all of them) and
+  shorter leaves the difference unpainted. Either way: a thin line at every boundary the placeholder
+  touches, on a long strip, only while a neighbour is decoding - which is why it reads as sporadic
+  and shows between ordinary pages as readily as between segments.
+
+  > **Rule:** in continuous mode the *slot* is the only size the document lays pages out from.
+  > Anything drawn into it must be sized from the slot. Two code paths that size the same boundary
+  > differently leave a fractional disagreement, and a fractional disagreement at a page boundary
+  > *is* the seam.
 - **Never reuse a GPU adapter** (above).
 - **Never call `WebGpuMemoryBudget.sample()` from a getter.** `cacheSize` is read by the render
   walk; `sample()` is a binder call. The snapshot exists so hot paths only ever read a volatile

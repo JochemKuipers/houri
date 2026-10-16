@@ -24,6 +24,10 @@ files moved. See .github/scripts/release_notes.py.
   out of the database just to measure the list.
 
 ### Fix
+- **A thin line between pages in the long-strip WebGPU reader is fixed.** It came and went, and
+  showed up most often where a page had not finished loading yet. The loading placeholder was drawn
+  at a slightly different height from the space the reader had set aside for it, so it either
+  painted over the row of real artwork above it or left a gap.
 - **Bookmark colours now show in the reader's chapter list and in the Updates tab.** Both were
   dropping the colour on the way to the screen — the reader's list because its chapter model never
   carried the field, and the Updates list because its bookmark icon was always drawn in the theme's
