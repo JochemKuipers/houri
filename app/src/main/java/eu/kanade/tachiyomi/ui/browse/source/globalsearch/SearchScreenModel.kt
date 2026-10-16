@@ -32,6 +32,8 @@ import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
+import tachiyomi.source.epub.LocalEpubSource
+import tachiyomi.source.local.isLocal
 
 abstract class SearchScreenModel(
     initialState: State = State(),
@@ -113,7 +115,14 @@ abstract class SearchScreenModel(
 
     open fun getEnabledSources(): List<Source> {
         return sourceManager.getVisibleSources()
-            .filter { it.lang in enabledLanguages && "${it.id}" !in disabledSources }
+            // KMK --> The local sources bypass the language filter, as the sources list already
+            // lets them. Both are lang "other"; without this a user who has not enabled "other"
+            // cannot search their own local library or find a series to migrate into it from the
+            // global search, while the same series is one tap away in the browse tab.
+            .filter {
+                (it.lang in enabledLanguages || it.isLocal() || it.id == LocalEpubSource.ID) &&
+                    "${it.id}" !in disabledSources
+            }
             .sortedWith(
                 compareBy(
                     { "${it.id}" !in pinnedSources },

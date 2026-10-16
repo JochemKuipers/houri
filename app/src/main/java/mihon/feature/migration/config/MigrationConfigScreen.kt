@@ -82,6 +82,8 @@ import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.icons.FlagEmoji
 import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.presentation.core.util.shouldExpandFAB
+import tachiyomi.source.epub.LocalEpubSource
+import tachiyomi.source.local.isLocal
 
 /**
  * Screen that allows the user to configure which sources should be used when migrating manga.
@@ -453,8 +455,13 @@ class MigrationConfigScreen(private val mangaIds: Collection<Long>) : Screen() {
                 .getVisibleSources()
                 // KMK <--
                 .asSequence()
-                .filterIsInstance<HttpSource>()
-                .filter { it.lang in languages }
+                // KMK --> Anything searchable, not just HttpSource. The filter excluded the local
+                // libraries outright - they are `CatalogueSource`, never `HttpSource` - so
+                // migrating *into* a local folder (a common destination for a downloaded series)
+                // was impossible: the source was not on the list to tick. Both are lang "other"
+                // and bypass the language filter like everywhere else.
+                .filter { it is HttpSource || it.isLocal() || it.id == LocalEpubSource.ID }
+                .filter { it is HttpSource || it.lang in languages }
                 .map {
                     val source = Source(
                         id = it.id,

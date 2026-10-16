@@ -154,9 +154,12 @@ class DomainModule : InjektModule {
         addFactory { SyncCategoriesWithTrackStatus(get(), get()) }
         // KMK <--
         // KMK -->
-        addFactory { StartRereading(get(), get(), get(), get(), get(), get(), get(), get()) }
-        addFactory { StopRereading(get(), get(), get(), get(), get(), get(), get(), get()) }
-        addFactory { CompleteRereadIfNeeded(get(), get(), get(), get(), get(), get(), get(), get()) }
+        // KMK --> The trailing `get()` on each is RereadPreferences, which records the pre-reread
+        // read state that StopRereading restores. Without it stopping a reread had to guess
+        // from a fetch timestamp and marked the whole series read.
+        addFactory { StartRereading(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+        addFactory { StopRereading(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
+        addFactory { CompleteRereadIfNeeded(get(), get(), get(), get(), get(), get(), get(), get(), get()) }
         // KMK <--
         addFactory { GetExcludedScanlators(get()) }
         addFactory { SetExcludedScanlators(get()) }

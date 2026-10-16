@@ -63,6 +63,7 @@ import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.di.AppModule
 import eu.kanade.tachiyomi.di.PreferenceModule
 import eu.kanade.tachiyomi.di.SYPreferenceModule
+import eu.kanade.tachiyomi.extension.ExtensionAutoUpdateWorker
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.ui.base.delegate.SecureActivityDelegate
 import eu.kanade.tachiyomi.util.CrashLogUtil
@@ -385,6 +386,11 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         if (syncPreferences.isSyncEnabled() && syncTriggerOpt.syncOnAppStart) {
             SyncDataJob.startNow(this@App)
         }
+
+        // KMK --> After WorkManager is up. Reconciled on every app start rather than only when
+        // the setting changes, so a build that introduced the worker picks it up, a reboot does not
+        // lose it, and switching installer to one that cannot update silently cancels it.
+        ExtensionAutoUpdateWorker.schedule(this@App)
 
         initializeMigrator()
     }

@@ -22,6 +22,7 @@ import tachiyomi.domain.library.model.LibraryDisplayMode
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.source.epub.LocalEpubSource
 import tachiyomi.source.local.LocalSource
 
 @Composable
@@ -37,6 +38,8 @@ fun BrowseSourceToolbar(
     // KMK -->
     onToggleIncognito: () -> Unit,
     onSettingsClick: (() -> Unit)?,
+    // KMK --> Re-scans a local source's folder; null for every other source.
+    onRefreshLibraryClick: (() -> Unit)?,
     // KMK <--
     onSearch: (String) -> Unit,
     scrollBehavior: TopAppBarScrollBehavior? = null,
@@ -48,6 +51,9 @@ fun BrowseSourceToolbar(
     // Avoid capturing unstable source in actions lambda
     val title = source?.name
     val isLocalSource = source is LocalSource
+    // KMK --> Both built-in libraries are folders, so both can be re-read. `source is LocalSource`
+    // missed the EPUB library, which is why it had no refresh at all.
+    val isBuiltInLibrary = isLocalSource || source?.id == LocalEpubSource.ID
 
     var selectingDisplayMode by remember { mutableStateOf(false) }
 
@@ -84,7 +90,19 @@ fun BrowseSourceToolbar(
                             ),
                         )
                         // KMK <--
-                        if (isLocalSource) {
+                        // KMK --> Before the help/webview pair: re-reading the folder is the one
+                        // action a local library has that no online source does, and it is what
+                        // makes a newly added book show up without waiting for a library update.
+                        if (onRefreshLibraryClick != null) {
+                            add(
+                                AppBar.OverflowAction(
+                                    title = stringResource(KMR.strings.action_refresh_library),
+                                    onClick = onRefreshLibraryClick,
+                                ),
+                            )
+                        }
+                        // KMK <--
+                        if (isBuiltInLibrary) {
                             add(
                                 AppBar.OverflowAction(
                                     title = stringResource(MR.strings.label_help),

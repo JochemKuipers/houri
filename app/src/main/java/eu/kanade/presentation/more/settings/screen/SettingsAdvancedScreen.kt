@@ -46,6 +46,7 @@ import eu.kanade.tachiyomi.core.security.SecurityPreferences
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.library.MetadataUpdateJob
+import eu.kanade.tachiyomi.extension.ExtensionAutoUpdateWorker
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.network.PREF_DOH_360
@@ -607,6 +608,13 @@ object SettingsAdvancedScreen : SearchableSettings {
         val extensionInstallerPref = basePreferences.extensionInstaller()
         var shizukuMissing by rememberSaveable { mutableStateOf(false) }
         val trustExtension = remember { globalAppGraph.trustExtension }
+        // KMK --> Auto extension updates. Resolved per composition rather than cached, because
+        // both the toggle and the interval are also written from the extensions page, and the
+        // schedule has to be reconciled whenever either changes.
+        val sourcePreferences = globalAppGraph.sourcePreferences
+        val autoUpdatePref = sourcePreferences.extensionAutoUpdate()
+        val autoUpdateIntervalPref = sourcePreferences.extensionAutoUpdateInterval()
+        val autoUpdateSupported = sourcePreferences.extensionAutoUpdateSupported()
 
         if (shizukuMissing) {
             val dismiss = { shizukuMissing = false }
@@ -662,6 +670,42 @@ object SettingsAdvancedScreen : SearchableSettings {
                 // KMK -->
                 Preference.PreferenceItem.InfoPreference(stringResource(KMR.strings.pref_private_installer_warning)),
                 // KMK <--
+                // KMK --> Automatic extension updates. The interval row is kept enabled when the
+                // toggle is off on purpose: turning auto-update off and back on should restore the
+                // interval the user picked, not reset it. Grayed when the selected installer
+                // cannot finish an install in the background, with the reason stated, instead of
+                // silently doing nothing.
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = autoUpdatePref,
+                    title = stringResource(KMR.strings.pref_auto_update_extensions),
+                    subtitle = stringResource(
+                        if (autoUpdateSupported) {
+                            KMR.strings.pref_auto_update_extensions_summary
+                        } else {
+                            KMR.strings.pref_auto_update_extensions_unsupported
+                        },
+                    ),
+                    enabled = autoUpdateSupported,
+                    onValueChanged = {
+                        ExtensionAutoUpdateWorker.schedule(context)
+                        true
+                    },
+                ),
+                Preference.PreferenceItem.ListPreference(
+                    preference = autoUpdateIntervalPref,
+                    entries = persistentMapOf(
+                        6 to stringResource(KMR.strings.update_6hour),
+                        12 to stringResource(MR.strings.update_12hour),
+                        24 to stringResource(MR.strings.update_24hour),
+                        168 to stringResource(MR.strings.update_weekly),
+                    ),
+                    title = stringResource(MR.strings.pref_library_update_interval),
+                    enabled = autoUpdateSupported,
+                    onValueChanged = {
+                        ExtensionAutoUpdateWorker.schedule(context)
+                        true
+                    },
+                ),
                 Preference.PreferenceItem.TextPreference(
                     title = stringResource(MR.strings.ext_revoke_trust),
                     onClick = {

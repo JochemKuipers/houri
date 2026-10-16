@@ -287,7 +287,15 @@ class MangaBakaApi(
     companion object {
         private const val CLIENT_ID = "KGYevUxfQRNJcAuYZARthnRYIVIhNAGP"
 
-        private const val BASE_URL = "https://mangabaka.org"
+        /**
+         * The site's public host, and the prefix of every `tracking_url` this tracker writes.
+         *
+         * Public because [MangaBaka.parseRelatedEntryId] has to recognise its own urls to read a
+         * series id back out of one. That used to take the text after the last slash and read it
+         * as a number, which matched *any* url ending in digits - other services' included - and
+         * then fetched those series' relations for an unrelated manga.
+         */
+        const val BASE_URL = "https://mangabaka.org"
         private const val API_BASE_URL = "https://api.mangabaka.org"
         private const val LIBRARY_API_URL = "$API_BASE_URL/v1/my/library"
         private const val OAUTH_URL = "$BASE_URL/auth/oauth2"

@@ -3,6 +3,7 @@ package eu.kanade.domain.source.service
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.source.interactor.SetMigrateSorting
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.SourceFilter
 import eu.kanade.tachiyomi.util.system.LocaleHelper
@@ -17,6 +18,11 @@ import tachiyomi.domain.library.model.LibraryDisplayMode
 @Inject
 class SourcePreferences(
     private val preferenceStore: PreferenceStore,
+    // KMK --> For extensionAutoUpdateSupported: whether a background update can finish unattended
+    // depends on which installer is selected. Injected rather than reached for through the global
+    // graph - it is the same preference store, so a preferences class has no reason to need a
+    // singleton lookup.
+    private val basePreferences: BasePreferences,
 ) {
 
     fun sourceDisplayMode() = preferenceStore.getObjectFromString(
@@ -99,6 +105,46 @@ class SourcePreferences(
      * back on brings back what is currently true rather than starting from nothing.
      */
     fun extensionErrorTextEnabled() = preferenceStore.getBoolean("extension_error_text_enabled", true)
+
+    /**
+     * Whether installed extensions are updated without being asked.
+     *
+     * Off by default: an update swaps a scraper under the user, and a user who wants that can say
+     * so. Only the installers that can install without a system dialog are eligible - see
+     * [extensionAutoUpdateSupported] - so turning this on with the legacy installer selected does
+     * nothing rather than failing.
+     */
+    fun extensionAutoUpdate() = preferenceStore.getBoolean("extension_auto_update", false)
+
+    /**
+     * How often the auto-update check runs, in hours.
+     *
+     * Two rather than one setting: the interval is only meaningful when auto-update is on, and a
+     * stored interval that outlives the toggle is what the toggle being switched back on should
+     * restore, not reset to a default.
+     *
+     * 6h is the default - long enough not to hammer the repo API on every app start, short enough
+     * that a scraper fixed this morning is usually fixed by the evening.
+     */
+    fun extensionAutoUpdateInterval() = preferenceStore.getInt("extension_auto_update_interval", 6)
+
+    /**
+     * Whether [extensionAutoUpdate] can actually act with the installer currently selected.
+     *
+     * Only PRIVATE (installs the APK itself) and SHIZUKU (installs through the shell) can finish
+     * an update with no user interaction. LEGACY and PACKAGEINSTALLER both raise a system
+     * confirmation dialog, which a background worker cannot answer - and a worker that posted a
+     * dialog would do it from the background, where the user may not be, and repeatedly.
+     */
+    fun extensionAutoUpdateSupported(): Boolean {
+        val installer = try {
+            basePreferences.extensionInstaller().get()
+        } catch (_: Exception) {
+            return false
+        }
+        return installer == BasePreferences.ExtensionInstaller.PRIVATE ||
+            installer == BasePreferences.ExtensionInstaller.SHIZUKU
+    }
     // KMK <--
 
     fun trustedExtensions() = preferenceStore.getStringSet(

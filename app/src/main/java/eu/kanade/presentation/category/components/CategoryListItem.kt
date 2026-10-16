@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ChromeReaderMode
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DragHandle
@@ -76,6 +77,8 @@ fun ReorderableCollectionItemScope.CategoryListItem(
     onToggleSelection: (() -> Unit)? = null,
     onClickTrackStatus: (() -> Unit)? = null,
     onClickUpdateInterval: (() -> Unit)? = null,
+    // KMK --> Per-category reading mode; `null` hides the action entirely.
+    onClickReaderMode: (() -> Unit)? = null,
     // KMK <--
     modifier: Modifier = Modifier,
 ) {
@@ -152,6 +155,7 @@ fun ReorderableCollectionItemScope.CategoryListItem(
                         onCreateSubcategory = onCreateSubcategory?.takeIf { isTopLevel },
                         onClickTrackStatus = onClickTrackStatus,
                         onClickUpdateInterval = onClickUpdateInterval,
+                        onClickReaderMode = onClickReaderMode,
                     )
                 } else {
                     IconButton(onClick = onRename) {
@@ -204,6 +208,14 @@ fun ReorderableCollectionItemScope.CategoryListItem(
                             )
                         }
                     }
+                    if (onClickReaderMode != null) {
+                        IconButton(onClick = onClickReaderMode) {
+                            Icon(
+                                imageVector = Icons.Outlined.ChromeReaderMode,
+                                contentDescription = stringResource(KMR.strings.category_reader_mode),
+                            )
+                        }
+                    }
                     // KMK <--
                     IconButton(onClick = onDelete) {
                         Icon(
@@ -225,6 +237,9 @@ private fun CategoryActionsOverflow(
     onCreateSubcategory: (() -> Unit)?,
     onClickTrackStatus: (() -> Unit)? = null,
     onClickUpdateInterval: (() -> Unit)? = null,
+    // KMK -->
+    onClickReaderMode: (() -> Unit)? = null,
+    // KMK <--
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -275,6 +290,18 @@ private fun CategoryActionsOverflow(
                 },
             )
         }
+        // KMK -->
+        if (onClickReaderMode != null) {
+            DropdownMenuItem(
+                text = { Text(stringResource(KMR.strings.category_reader_mode)) },
+                leadingIcon = { Icon(Icons.Outlined.ChromeReaderMode, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onClickReaderMode()
+                },
+            )
+        }
+        // KMK <--
         DropdownMenuItem(
             text = { Text(stringResource(KMR.strings.action_hide)) },
             leadingIcon = { Icon(Icons.Outlined.VisibilityOff, contentDescription = null) },

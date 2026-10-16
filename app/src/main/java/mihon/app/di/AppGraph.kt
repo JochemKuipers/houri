@@ -148,6 +148,7 @@ import tachiyomi.domain.category.interactor.SetMangaCategories
 import tachiyomi.domain.category.interactor.SetSortModeForCategory
 import tachiyomi.domain.category.interactor.SyncCategoriesWithTrackStatus
 import tachiyomi.domain.category.interactor.UpdateCategory
+import tachiyomi.domain.category.service.CategoryReaderPreferences
 import tachiyomi.domain.chapter.interactor.DeleteChapters
 import tachiyomi.domain.chapter.interactor.GetBookmarkedChaptersByMangaId
 import tachiyomi.domain.chapter.interactor.GetChapter
@@ -334,6 +335,8 @@ interface AppGraph : ViewModelGraph {
     // Domain
     val getFavorites: GetFavorites
     val getCategories: GetCategories
+    // KMK --> Per-category reading mode, read by the reader and written by the category manager.
+    val categoryReaderPreferences: CategoryReaderPreferences
     val resetViewerFlags: ResetViewerFlags
     val resetCategoryFlags: ResetCategoryFlags
     val addTracks: AddTracks

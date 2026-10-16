@@ -128,12 +128,7 @@ class AchievementManager(
         if (!prefs.achievementsEnabled().get()) return emptyList()
         val today = currentEpochDay()
         prefs.markReadingDay(today)
-        val days = prefs.readDays()
-        var streak = 0
-        for (i in days.indices.reversed()) {
-            if (today - days[i] > STREAK_GRACE_DAYS) break
-            streak++
-        }
+        val streak = readingStreak(today)
         val unlocked = mutableListOf<String>()
         if (streak >= 3) tryUnlock("streak_3", unlocked)
         if (streak >= 7) tryUnlock("streak_7", unlocked)
@@ -151,6 +146,26 @@ class AchievementManager(
         }
         if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
         return unlocked
+    }
+
+    /**
+     * Consecutive reading days ending today, tolerating [STREAK_GRACE_DAYS] missed days.
+     *
+     * Each day is compared against the one *before it*, not against today. Comparing every entry
+     * to today broke at the third day of any perfect run - `days = [1,2,3]`, today = 3, and the
+     * entry two days back is 2 away, which exceeds the grace - so "Three Day Run" and every
+     * longer tier were unreachable no matter how consistent the reader was.
+     */
+    private fun readingStreak(today: Long): Int {
+        val days = prefs.readDays().filter { it <= today }.sortedDescending()
+        var streak = 0
+        var previous = today
+        for (day in days) {
+            if (previous - day > STREAK_GRACE_DAYS) break
+            streak++
+            previous = day
+        }
+        return streak
     }
 
     // KMK <--
@@ -279,13 +294,20 @@ class AchievementManager(
     fun onReaderDirectionChanged(direction: Int): List<String> {
         if (!prefs.achievementsEnabled().get()) return emptyList()
         val unlocked = mutableListOf<String>()
-        val streak = if (prefs.directionStreakDir().get() == direction) {
-            prefs.directionStreakCount().get()
-        } else {
-            prefs.directionStreakDir().set(direction)
-            0
+        // "Switch reader direction 20 times in a row" counts switches, so a *change* is what
+        // advances the streak and a rebuild in the same direction is what breaks it.
+        //
+        // It was the other way round: a run of identical directions incremented the count and a
+        // real switch reset it to zero. Every chapter transition rebuilds the viewer, so reading a
+        // series start to finish without touching the mode button filled the counter - the exact
+        // opposite of what the achievement describes - while a reader genuinely flipping between
+        // directions twenty times never moved it at all.
+        if (prefs.directionStreakDir().get() == direction) {
+            prefs.directionStreakCount().set(0)
+            return unlocked
         }
-        val next = (streak + 1).coerceAtMost(1_000)
+        prefs.directionStreakDir().set(direction)
+        val next = (prefs.directionStreakCount().get() + 1).coerceAtMost(1_000)
         prefs.directionStreakCount().set(next)
         if (next >= 20) tryUnlock("secret_flip_phone", unlocked)
         if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
@@ -763,8 +785,21 @@ class AchievementManager(
         val PAGER_MODE_FLAGS = setOf(1, 3)
         val WEBTOON_MODE_FLAGS = setOf(4, 5)
 
-        fun currentEpochDay(): Long =
-            java.util.concurrent.TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis())
+        /**
+         * Days are the reader's, not Greenwich's.
+         *
+         * This used to divide `System.currentTimeMillis()` by the epoch-day length, which counts
+         * UTC days. Every time-driven achievement inherited that: a reader east of Greenwich was
+         * credited with Friday-evening reads on Saturday (the weekend window opened at 8 PM on
+         * the wrong day), and anyone whose local midnight fell after 00:00 UTC had their streak
+         * and daily counters turn over during the evening. `LocalDate` resolves the day in the
+         * device's own zone, which is what "today" means to the person holding the phone.
+         *
+         * Stored stamps stay valid: a value written under the old rule is still a day number, it
+         * just sits at most one day away from where the same wall-clock day now lands, and every
+         * comparison here is between two stamps written by the same rule.
+         */
+        fun currentEpochDay(): Long = java.time.LocalDate.now().toEpochDay()
 
         /** Counter name -> ordered (count, achievement id) tiers. */
         val COUNTER_TIERS: Map<String, List<Pair<Long, String>>> = mapOf(

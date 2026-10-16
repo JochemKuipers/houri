@@ -71,6 +71,7 @@ import tachiyomi.domain.chapter.interactor.SetMangaDefaultChapterFlags
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.interactor.GetDuplicateLibraryManga
 import tachiyomi.domain.manga.interactor.GetFlatMetadataById
+import tachiyomi.domain.manga.interactor.GetLibraryManga
 import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MangaWithChapterCount
@@ -113,6 +114,8 @@ open class BrowseSourceScreenModel(
     // KMK -->
     private val updateMangaFromRemote: UpdateMangaFromRemote = globalAppGraph.updateMangaFromRemote,
     private val toggleIncognito: ToggleIncognito = globalAppGraph.toggleIncognito,
+    // KMK --> For refreshLocalLibrary: the local source's library entries to re-sync.
+    private val getLibraryManga: GetLibraryManga = globalAppGraph.getLibraryManga,
     private val extensionManager: ExtensionManager = globalAppGraph.extensionManager,
     private val basePreferences: BasePreferences = globalAppGraph.basePreferences,
     // KMK <--
@@ -514,6 +517,65 @@ open class BrowseSourceScreenModel(
         return getRemoteManga(sourceId, query, filters)
     }
     // SY <--
+
+    // KMK -->
+    /**
+     * Re-reads the on-disk library of a local source and re-syncs everything of it in the user's
+     * library.
+     *
+     * ### Why this exists
+     *
+     * A local source is a folder. Adding a series, or a `.epub` inside a series, changes nothing
+     * the app knows about: the browse grid is built from the source's directory listing and the
+     * chapter lists are snapshots taken when the series was opened. For the manga source that is
+     * mostly invisible - the library update job covers it - but the EPUB library has no library
+     * update path at all (its chapters come from the filesystem, and a Library Update run has no
+     * reason to walk it), so a newly added book simply never appeared.
+     *
+     * Two halves, both needed:
+     *
+     *  - the *series list* is re-read by rebuilding the listing, which is what puts a newly
+     *    created folder on screen;
+     *  - the *chapters* of each series the user already has are re-fetched, which is what adds
+     *    the new book to a series they had already opened.
+     *
+     * Nothing is deleted here: a file removed from disk is not removed from the library, because
+     * the user's reading history on it is worth more than the chapter row. Sync only adds and
+     * updates.
+     */
+    fun refreshLocalLibrary() {
+        screenModelScope.launchIO {
+            val libraryManga = runCatching { getLibraryManga.await() }
+                .getOrElse { emptyList() }
+                .filter { it.manga.source == sourceId }
+
+            for (entry in libraryManga) {
+                runCatching {
+                    updateMangaFromRemote(
+                        source = source,
+                        manga = entry.manga,
+                        fetchDetails = false,
+                        fetchChapters = true,
+                    )
+                }.onFailure { logcat(LogPriority.ERROR, it) { "Local library refresh failed for '${entry.manga.title}'" } }
+            }
+
+            // Re-read the directory listing. A fresh Listing instance, because the pager flow
+            // below is keyed on the listing value and `distinctUntilChanged` would swallow a copy
+            // that compares equal to the one already showing.
+            val current = state.value.listing
+            mutableState.update {
+                it.copy(
+                    listing = when (current) {
+                        is Listing.Search -> current.copy()
+                        Listing.Latest -> Listing.Search(GetRemoteManga.QUERY_LATEST, source.getFilterList())
+                        Listing.Popular -> Listing.Search(GetRemoteManga.QUERY_POPULAR, source.getFilterList())
+                    },
+                )
+            }
+        }
+    }
+    // KMK <--
 
     /**
      * Get user categories.

@@ -82,7 +82,9 @@ import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.LoadingScreen
+import tachiyomi.source.epub.LocalEpubSource
 import tachiyomi.source.local.LocalSource
+import tachiyomi.source.local.isLocal
 
 data class BrowseSourceScreen(
     val sourceId: Long,
@@ -233,6 +235,8 @@ data class BrowseSourceScreen(
                                     else -> {}
                                 }
                             }.takeIf { isConfigurableSource },
+                            onRefreshLibraryClick = screenModel::refreshLocalLibrary
+                                .takeIf { screenModel.source.isLocal() || screenModel.source.id == LocalEpubSource.ID },
                             // KMK <--
                             onSearch = screenModel::search,
                             // KMK -->

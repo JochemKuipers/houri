@@ -10,6 +10,7 @@ import tachiyomi.domain.source.model.Pin
 import tachiyomi.domain.source.model.Pins
 import tachiyomi.domain.source.model.Source
 import tachiyomi.domain.source.repository.SourceRepository
+import tachiyomi.source.epub.LocalEpubSource
 import tachiyomi.source.local.isLocal
 
 @Inject
@@ -46,7 +47,11 @@ class GetEnabledSources(
             }
             val sourcesInSourceCategories = sourcesAndCategories.map { it.first }
             sources
-                .filter { it.lang in enabledLanguages || it.isLocal() }
+                // KMK --> Both built-in libraries bypass the language filter, not just the manga
+                // one. `isLocal()` only matches LocalSource.ID, so the EPUB source - lang "other"
+                // like its sibling - was hidden for every user who had not enabled "other", which
+                // is most of them. A source the user cannot find is a source that does not exist.
+                .filter { it.lang in enabledLanguages || it.isLocal() || it.id == LocalEpubSource.ID }
                 .filterNot { it.id.toString() in disabledSources || it.id in BlacklistedSources.HIDDEN_SOURCES }
                 .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
                 .flatMap {

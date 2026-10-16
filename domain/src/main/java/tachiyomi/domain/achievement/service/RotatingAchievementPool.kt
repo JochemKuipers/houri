@@ -5,7 +5,6 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import tachiyomi.domain.achievement.model.Achievement
 import tachiyomi.domain.achievement.model.Achievements
-import java.util.concurrent.TimeUnit
 import kotlin.random.Random
 
 /**
@@ -33,7 +32,7 @@ class RotatingAchievementPool(
      */
     @Synchronized
     private fun getActiveDaily(): List<Achievement> {
-        val epoch = TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis())
+        val epoch = today()
         val storedEpoch = prefs.rotatingLastDailyEpoch().get()
         val storedIds = prefs.rotatingDailyIds().get()
         if (storedEpoch == epoch && storedIds.isNotBlank()) {
@@ -55,7 +54,7 @@ class RotatingAchievementPool(
     /** This week's four weekly achievements. Same rules as [getActiveDaily]. */
     @Synchronized
     private fun getActiveWeekly(): List<Achievement> {
-        val epoch = TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis()) / 7
+        val epoch = today() / 7
         val storedEpoch = prefs.rotatingLastWeeklyEpoch().get()
         val storedIds = prefs.rotatingWeeklyIds().get()
         if (storedEpoch == epoch && storedIds.isNotBlank()) {
@@ -95,10 +94,11 @@ class RotatingAchievementPool(
         val ach = Achievements.forId(id) ?: return
         if (!ach.isRotating) return
         if (prefs.getUnlockedIds().contains(id)) return
-        // Resolves the sets itself rather than trusting that something else already drew them:
-        // nothing else reliably does, so testing against empty stored ids discarded every mark
-        // until the user happened to open the achievements screen.
-        if (id !in activeIds()) return
+        // Resolves (and, on the first call of a period, draws) the sets itself rather than
+        // trusting that something else already drew them: nothing else reliably did, so testing
+        // against empty stored ids discarded every mark until the user happened to open the
+        // achievements screen.
+        if (id !in drawnActiveIds()) return
 
         val map = prefs.rotatingProgressMap().toMutableMap()
         val current = ((map[id] ?: 0) + progress).coerceAtMost(PROGRESS_CEILING)
@@ -125,8 +125,8 @@ class RotatingAchievementPool(
      */
     @Synchronized
     fun markOncePerDay(id: String) {
-        if (id !in activeIds()) return
-        val epoch = TimeUnit.MILLISECONDS.toDays(System.currentTimeMillis())
+        if (id !in drawnActiveIds()) return
+        val epoch = today()
         val stamps = prefs.rotatingDayStampMap().toMutableMap()
         if (stamps[id] == epoch) return
         stamps[id] = epoch
@@ -140,7 +140,7 @@ class RotatingAchievementPool(
      * Whether [id] is currently on show in either period. The same test [markProgress] applies,
      * exposed so callers can skip work whose only purpose is to advance a tier that is not live.
      */
-    fun isActive(id: String): Boolean = id in activeIds()
+    fun isActive(id: String): Boolean = id in drawnActiveIds()
 
     /**
      * Rolls both periods forward if the stored epoch is stale. Idempotent, so process start can
@@ -166,12 +166,33 @@ class RotatingAchievementPool(
     private fun pruneProgress() {
         val parsed = prefs.rotatingProgressMap()
         if (parsed.isEmpty()) return
-        val kept = parsed.filterKeys { it in activeIds() }
+        val active = activeIds()
+        val kept = parsed.filterKeys { it in active }
         if (kept.size != parsed.size) prefs.setRotatingProgress(kept)
     }
 
     private fun pruneDayStamps(stamps: Map<String, Long>): Map<String, Long> =
         if (stamps.size <= DAY_STAMP_LIMIT) stamps else stamps.filterKeys { it in activeIds() }
+
+    /**
+     * The active sets, drawing them first if the stored ids belong to an earlier period.
+     *
+     * This is the fix for the rotation being silently ignored. [activeIds] reads whatever is
+     * stored, and the stored ids were only ever written by a draw - which in practice meant the
+     * achievements screen being opened. A reader who never opened it got `markProgress` calls
+     * against an empty set, so every rotating count was thrown away and none of the daily or
+     * weekly cards could ever unlock. Rolling the draw in here means the first mark of a period
+     * draws the period.
+     *
+     * `@Synchronized` because it mutates: two marks racing a rollover would each draw their own
+     * set and the loser's progress would be pruned by the winner's.
+     */
+    @Synchronized
+    private fun drawnActiveIds(): Set<String> {
+        getActiveDaily()
+        getActiveWeekly()
+        return activeIds()
+    }
 
     private fun activeIds(): Set<String> {
         val raw = prefs.rotatingDailyIds().get() + ',' + prefs.rotatingWeeklyIds().get()
@@ -182,6 +203,18 @@ class RotatingAchievementPool(
     }
 
     companion object {
+        /**
+         * Today in the reader's own timezone, matching the day stamps the rest of the
+         * achievement layer writes.
+         *
+         * The pool used to divide the epoch millis by the day length, which counts UTC days: a
+         * draw therefore rolled over at 00:00 UTC rather than at the reader's midnight, so the
+         * "daily" cards could disappear before the user's day was over and a mark could be
+         * discarded by a rollover the reader had not reached yet. Same reason as
+         * [AchievementManager.currentEpochDay].
+         */
+        fun today(): Long = java.time.LocalDate.now().toEpochDay()
+
         const val DAILY_SLOTS = 3
         const val WEEKLY_SLOTS = 4
 
@@ -210,7 +243,20 @@ class RotatingAchievementPool(
          */
         private val THRESHOLDS: Map<String, Int> = buildMap {
             // Explicit where the target is not 1.
+            //
+            // Every count in the id belongs here. The suffix table below only carries ids whose
+            // target is *not* the number in the id (`_tracker_5` covers the weekly tracker tier
+            // and would also match a hypothetical `_tracker_5` daily), so relying on it for
+            // `_read_5`, `_library_add_3`, `_search_5`, `_genre_explore`, `_webtoon_5` and
+            // `_data_saver_5` left all six at the default of 1: the first chapter, the first
+            // search, the first browse of the day unlocked a tier described as five or three.
+            put("rotating_daily_read_5", 5)
             put("rotating_daily_read_15", 15)
+            put("rotating_daily_library_add_3", 3)
+            put("rotating_daily_search_5", 5)
+            put("rotating_daily_genre_explore", 3)
+            put("rotating_daily_webtoon_5", 5)
+            put("rotating_daily_data_saver_5", 5)
             put("rotating_weekly_read_30", 30)
             put("rotating_weekly_read_75", 75)
             put("rotating_weekly_library_10", 10)

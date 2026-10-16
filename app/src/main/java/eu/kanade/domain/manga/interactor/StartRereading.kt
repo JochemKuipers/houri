@@ -2,6 +2,7 @@ package eu.kanade.domain.manga.interactor
 
 import dev.zacsweers.metro.Inject
 import eu.kanade.domain.chapter.interactor.SetReadStatus
+import eu.kanade.domain.manga.service.RereadPreferences
 import eu.kanade.domain.source.interactor.GetIncognitoState
 import eu.kanade.domain.track.model.toDbTrack
 import eu.kanade.domain.track.service.TrackPreferences
@@ -29,6 +30,10 @@ class StartRereading(
     private val trackerManager: TrackerManager,
     private val getIncognitoState: GetIncognitoState,
     private val trackPreferences: TrackPreferences,
+    // KMK --> Records what was read, which StopRereading restores. Without it stopping a reread
+    // had to guess from a fetch timestamp and marked the whole series read.
+    // KMK <--
+    private val rereadPreferences: RereadPreferences,
 ) {
 
     suspend fun await(manga: Manga): Result {
@@ -44,6 +49,11 @@ class StartRereading(
         )
 
         val chapters = chaptersOf(manga)
+        // KMK --> Before the unread write, so the baseline is the pre-reread state by ordering
+        // rather than by assumption. Recorded even on a manga with nothing read, so stopping
+        // restores nothing rather than falling back to the dateFetch guess.
+        // KMK <--
+        rereadPreferences.recordBaseline(manga.id, chapters.filter { it.read }.map { it.id })
         setReadStatus.await(
             read = false,
             manually = false,

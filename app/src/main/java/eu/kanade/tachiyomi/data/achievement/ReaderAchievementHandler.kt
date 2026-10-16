@@ -159,8 +159,18 @@ class ReaderAchievementHandler(
         step("reading mode") { onReadingModeCompleted(mangaId, readingModeFlag) }
     }
 
+    /**
+     * Banks [minutes] of reading. Whole minutes only, and a session shorter than one is not
+     * banked at all.
+     *
+     * The caller rounds up (`coerceAtLeast(1L)`), so every chapter - including one abandoned
+     * after two seconds - credited a minute. `reading_time_1h` was therefore reachable in a
+     * fraction of an hour of actual reading, and the same inflation reached every higher tier
+     * and the rank that reads off the total. A partial minute is not rounded up because there
+     * is nothing to bank until the next one completes.
+     */
     fun onReadingTimeMinutes(minutes: Long) {
-        if (minutes <= 0) return
+        if (minutes < 1L) return
         step("reading time") { achievementManager.onReadingTimeMinutes(minutes) }
         // KMK --> The weekly tier is five hours and the counter is in minutes, so this advances
         // by the amount read rather than one tick per call.

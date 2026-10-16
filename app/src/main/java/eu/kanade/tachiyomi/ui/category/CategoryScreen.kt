@@ -81,6 +81,10 @@ class CategoryScreen : Screen() {
             onSelectUpdateInterval = { category, days ->
                 screenModel.setCategoryUpdateInterval(category.id, days)
             },
+            onSelectReaderMode = { category, flag ->
+                screenModel.setCategoryReaderMode(category, flag)
+            },
+            readerModeFor = screenModel::categoryReaderMode,
             // KMK <--
             navigateUp = navigator::pop,
         )

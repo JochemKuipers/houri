@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.category.components.CategoryFloatingActionButton
 import eu.kanade.presentation.category.components.CategoryListItem
+import eu.kanade.presentation.category.components.ReaderModePickerDialog
 import eu.kanade.presentation.category.components.TrackStatusPickerDialog
 import eu.kanade.presentation.category.components.UpdateIntervalPickerDialog
 import eu.kanade.presentation.components.AppBar
@@ -91,6 +92,9 @@ fun CategoryScreen(
     onShowDeleteMany: () -> Unit,
     onSelectTrackStatus: (Category, Int?) -> Unit,
     onSelectUpdateInterval: (Category, Int?) -> Unit,
+    // KMK --> Per-category reading mode. (category, flagValue|null) - null clears the override.
+    onSelectReaderMode: (Category, Int?) -> Unit,
+    readerModeFor: (Category) -> Int?,
     // KMK <--
     navigateUp: () -> Unit,
 ) {
@@ -157,6 +161,8 @@ fun CategoryScreen(
             onShowDeleteMany = onShowDeleteMany,
             onSelectTrackStatus = onSelectTrackStatus,
             onSelectUpdateInterval = onSelectUpdateInterval,
+            onSelectReaderMode = onSelectReaderMode,
+            readerModeFor = readerModeFor,
             // KMK <--
         )
     }
@@ -194,11 +200,15 @@ private fun CategoryContent(
     onShowDeleteMany: () -> Unit,
     onSelectTrackStatus: (Category, Int?) -> Unit,
     onSelectUpdateInterval: (Category, Int?) -> Unit,
+    // KMK -->
+    onSelectReaderMode: (Category, Int?) -> Unit,
+    readerModeFor: (Category) -> Int?,
     // KMK <--
 ) {
     // KMK -->
     var trackStatusTarget by remember { mutableStateOf<Category?>(null) }
     var updateIntervalTarget by remember { mutableStateOf<Category?>(null) }
+    var readerModeTarget by remember { mutableStateOf<Category?>(null) }
     // KMK <--
     val query = searchQuery.trim()
     // KMK --> Sort the whole list once, then split by level. Only the subcategories used to be
@@ -410,6 +420,7 @@ private fun CategoryContent(
                     onToggleSelection = ({ onToggleSelection(row.category.id) }).takeIf { selectMode },
                     onClickTrackStatus = { trackStatusTarget = row.category },
                     onClickUpdateInterval = { updateIntervalTarget = row.category },
+                    onClickReaderMode = { readerModeTarget = row.category },
                 )
                 // KMK <--
             }
@@ -435,6 +446,16 @@ private fun CategoryContent(
                 updateIntervalTarget = null
             },
             onDismiss = { updateIntervalTarget = null },
+        )
+    }
+    readerModeTarget?.let { target ->
+        ReaderModePickerDialog(
+            currentFlag = readerModeFor(target),
+            onSelect = { flag ->
+                onSelectReaderMode(target, flag)
+                readerModeTarget = null
+            },
+            onDismiss = { readerModeTarget = null },
         )
     }
     // KMK <--

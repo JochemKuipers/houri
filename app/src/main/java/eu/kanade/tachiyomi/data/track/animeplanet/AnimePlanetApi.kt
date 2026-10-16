@@ -103,6 +103,17 @@ class AnimePlanetApi(
         } ?: 0L
     }
 
+    /**
+     * Pushes status, progress and rating to a user's list.
+     *
+     * The rating was accepted as a parameter and never sent: the two calls below cover status and
+     * progress only, so a score picked in the app reached the local row and stopped there - the
+     * remote entry kept whatever rating it had (none, if it was just added). Anime-Planet exposes
+     * the third write on the same token as the other two, which is what [updateRating] uses.
+     *
+     * Returns false only when the *status* write is rejected, which is the one that decides
+     * whether the entry exists at all; the rating is best-effort and does not fail the update.
+     */
     suspend fun updateMangaListEntry(
         username: String,
         mangaId: Long,
@@ -130,7 +141,26 @@ class AnimePlanetApi(
             .build()
         authClient.newCall(updateRequest).await()
 
+        updateRating(mangaId, rating, token)
+
         true
+    }
+
+    /**
+     * Writes the rating for a list entry.
+     *
+     * Zero means "unrated" locally, which Anime-Planet expresses as rating 0 on this endpoint
+     * rather than as an omitted call - the same shape as the status and progress writes.
+     */
+    private suspend fun updateRating(mangaId: Long, rating: Double, token: String) {
+        val ratingValue = rating.toInt().coerceIn(0, 10)
+        val url = "$BASE_URL/api/list/rating/manga/$mangaId/$ratingValue/$token"
+        val request = Request.Builder()
+            .url(url)
+            .addHeader("X-Requested-With", "XMLHttpRequest")
+            .addHeader("Accept", "application/json, text/javascript, */*; q=0.01")
+            .build()
+        authClient.newCall(request).await().close()
     }
 
     suspend fun deleteMangaFromList(username: String, mangaId: Long, slug: String): Boolean = withIOContext {

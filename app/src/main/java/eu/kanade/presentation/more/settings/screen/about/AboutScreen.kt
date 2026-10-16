@@ -60,8 +60,16 @@ import java.time.LocalDateTime
 import java.time.ZoneId
 
 class AboutScreen : Screen() {
+    /**
+     * Voyager persists the back stack with the `Serializable` saver, so Java deserialization
+     * calls this on every restored instance. It must hand back a *Serializable* object: it used
+     * to return the companion (`AboutScreen` unqualified resolves to the classifier's companion),
+     * which is not serializable, so `Parcel.readSerializable`'s checkcast threw and every cold
+     * start whose saved state still held this screen crashed on launch. A fresh instance is the
+     * screen, which is what the companion was standing in for anyway.
+     */
     @Suppress("unused")
-    private fun readResolve(): Any = AboutScreen
+    private fun readResolve(): Any = AboutScreen()
 
     @Composable
     override fun Content() {

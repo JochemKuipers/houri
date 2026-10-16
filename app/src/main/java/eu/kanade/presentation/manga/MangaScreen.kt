@@ -783,7 +783,12 @@ private fun MangaScreenSmallImpl(
                             interval = state.manga.fetchInterval,
                             rereadCount = state.manga.rereadCount,
                             isRereading = state.manga.rereading,
-                            onRereadClicked = onStartRereadingClick ?: onStopRereadingClick,
+                            // KMK --> Picked on the state, not by elvis. Both callbacks are non-null
+                            // for a library entry, so `start ?: stop` always resolved to start: the
+                            // chip labelled "Rereading" opened the start dialog, whose confirm then
+                            // did nothing because the reread was already running.
+                            // KMK <--
+                            onRereadClicked = if (state.manga.rereading) onStopRereadingClick else onStartRereadingClick,
                             // KMK <--
                         )
                     }
@@ -1362,7 +1367,12 @@ private fun MangaScreenLargeImpl(
                             interval = state.manga.fetchInterval,
                             rereadCount = state.manga.rereadCount,
                             isRereading = state.manga.rereading,
-                            onRereadClicked = onStartRereadingClick ?: onStopRereadingClick,
+                            // KMK --> Picked on the state, not by elvis. Both callbacks are non-null
+                            // for a library entry, so `start ?: stop` always resolved to start: the
+                            // chip labelled "Rereading" opened the start dialog, whose confirm then
+                            // did nothing because the reread was already running.
+                            // KMK <--
+                            onRereadClicked = if (state.manga.rereading) onStopRereadingClick else onStartRereadingClick,
                             // KMK <--
                         )
                         // KMK --> Tablet layout: off-device toggle available on nomtl as well.

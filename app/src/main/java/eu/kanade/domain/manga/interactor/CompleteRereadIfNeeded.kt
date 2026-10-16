@@ -1,6 +1,7 @@
 package eu.kanade.domain.manga.interactor
 
 import dev.zacsweers.metro.Inject
+import eu.kanade.domain.manga.service.RereadPreferences
 import eu.kanade.domain.source.interactor.GetIncognitoState
 import eu.kanade.domain.track.model.toDbTrack
 import eu.kanade.domain.track.model.toDomainTrack
@@ -26,6 +27,9 @@ class CompleteRereadIfNeeded(
     private val trackerManager: TrackerManager,
     private val getIncognitoState: GetIncognitoState,
     private val trackPreferences: TrackPreferences,
+    // KMK --> See RereadPreferences.
+    // KMK <--
+    private val rereadPreferences: RereadPreferences,
 ) {
 
     /**
@@ -54,6 +58,11 @@ class CompleteRereadIfNeeded(
                 rereadStartedAt = 0L,
             ),
         )
+        // KMK --> A completed reread restores nothing, so its baseline is dead weight. Left in
+        // place it would be picked up by a later StartRereading's Stop, which overwrites it
+        // anyway - but only after it had already been read from.
+        // KMK <--
+        rereadPreferences.clearBaseline(mangaId)
 
         syncTrackers(manga.source, mangaId, manga.rereadCount + 1)
 

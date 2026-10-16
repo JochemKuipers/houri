@@ -251,9 +251,17 @@ class Anilist(id: Long) : BaseTracker(id, "AniList"), DeletableTracker {
         }
     }
 
+    /**
+     * Prel/sequel entries from AniList.
+     *
+     * `null` means the query failed; an empty list means the query succeeded and AniList has no
+     * prequel or sequel for this title. The sequel/prequel provider treats the two differently -
+     * see [MangaBaka.getRelatedEntries] - so conflating them lets another tracker's relations
+     * (or the MangaDex fallback) be shown for a title this one says is standalone.
+     */
     override suspend fun getRelatedEntries(remoteId: Long): List<SequelPrequelEntry>? {
         val relations = getMangaRelations(remoteId) ?: return null
-        val entries = relations.data.media.relations.edges.mapNotNull { edge ->
+        return relations.data.media.relations.edges.mapNotNull { edge ->
             val relation = SequelPrequelRelation.fromAniList(edge.relationType)
                 ?.takeIf { it == SequelPrequelRelation.PREQUEL || it == SequelPrequelRelation.SEQUEL }
                 ?: return@mapNotNull null
@@ -267,8 +275,7 @@ class Anilist(id: Long) : BaseTracker(id, "AniList"), DeletableTracker {
                 coverUrl = edge.node.coverImage?.large,
                 // KMK <--
             )
-        }.orEmpty()
-        return entries.ifEmpty { null }
+        }
     }
 
     override fun parseRelatedEntryId(url: String): Long? {

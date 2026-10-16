@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import mihon.app.di.globalAppGraph
+import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.domain.category.interactor.CreateCategoryWithName
 import tachiyomi.domain.category.interactor.DeleteCategory
 import tachiyomi.domain.category.interactor.GetCategories
@@ -28,6 +29,7 @@ import tachiyomi.domain.category.interactor.UpdateCategory
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.category.model.CategorySortOrder
 import tachiyomi.domain.category.model.CategoryUpdate
+import tachiyomi.domain.category.service.CategoryReaderPreferences
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.interactor.GetLibraryManga
 import tachiyomi.i18n.MR
@@ -46,6 +48,8 @@ class CategoryScreenModel(
     private val libraryPreferences: LibraryPreferences = globalAppGraph.libraryPreferences,
     private val setCategoryTrackStatus: SetCategoryTrackStatus = globalAppGraph.setCategoryTrackStatus,
     private val setCategoryUpdateInterval: SetCategoryUpdateInterval = globalAppGraph.setCategoryUpdateInterval,
+    // KMK --> Per-category reading mode, so a shelf can pin the viewer (webtoon for long strips).
+    private val categoryReaderPreferences: CategoryReaderPreferences = globalAppGraph.categoryReaderPreferences,
     // KMK <--
 ) : StateScreenModel<CategoryScreenState>(CategoryScreenState.Loading) {
 
@@ -213,6 +217,31 @@ class CategoryScreenModel(
             setCategoryUpdateInterval.await(categoryId, updateIntervalDays)
         }
     }
+
+    // KMK -->
+    /**
+     * Sets (or clears, with [flag] null) the reading mode this category's manga open with.
+     *
+     * Stored on the subcategory's own key when it has a parent, so a subcategory can override its
+     * parent's mode - which is the whole reason the preference has two shapes.
+     */
+    fun setCategoryReaderMode(category: Category, flag: Int?) {
+        screenModelScope.launchIO {
+            categoryReaderPreferences.setReaderMode(
+                categoryId = category.id,
+                mode = flag?.toString(),
+                parentId = category.parentId,
+            )
+        }
+    }
+
+    /** The reading mode flag set on [category], or null when it has none of its own. */
+    fun categoryReaderMode(category: Category): Int? {
+        // Read through the same accessor the write goes through, so the two cannot disagree about
+        // which key a subcategory uses.
+        return categoryReaderPreferences.getReaderMode(category.id, category.parentId)?.toIntOrNull()
+    }
+    // KMK <--
 
     fun toggleCollapsed(categoryId: Long) {
         mutableState.update {

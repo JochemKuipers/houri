@@ -88,7 +88,8 @@ class AchievementPreferences(
     fun staleUnstartedCount() = preferenceStore.getLong("pref_achievement_stale_unstarted", 0)
     fun backlogLastRefresh() = preferenceStore.getLong("pref_achievement_backlog_refresh", 0)
     // KMK <--
-    // KMK --> Day epochs (UTC) on which a chapter was read, comma separated, oldest first.
+    // KMK --> Day epochs (local, see AchievementManager.currentEpochDay) on which a chapter was read,
+    // comma separated, oldest first.
     // Bounded to the trailing window the longest streak needs, so it cannot grow without limit.
     fun readingDays() = preferenceStore.getString("pref_achievement_reading_days", "")
 
@@ -216,7 +217,17 @@ class AchievementPreferences(
 
     /** Day-stamped counters (binge) reset when [dayEpoch] no longer matches the stored one. */
     fun dailyCounter(name: String) = preferenceStore.getLong("pref_achievement_day_$name", 0)
-    fun dailyCounterDay() = preferenceStore.getLong("pref_achievement_day_epoch", 0)
+
+    /**
+     * The day a given daily counter was last bumped on.
+     *
+     * Per counter, not one shared stamp: the counters are independent ("chapters read today" and
+     * "chapters read after midnight" are separate tiers and a reader has plenty of nights where
+     * only one of them moves). A single stamp meant whichever counter happened to be bumped first
+     * each day published *its* day for all of them, so the others carried yesterday's total into
+     * today and unlocked at, say, four chapters instead of ten.
+     */
+    fun dailyCounterDay(name: String) = preferenceStore.getLong("pref_achievement_day_epoch_$name", 0)
 
     @Synchronized
     fun incrementCounter(name: String, amount: Int = 1) {
@@ -226,13 +237,13 @@ class AchievementPreferences(
     }
 
     /**
-     * Returns the day's count, resetting first when the stored day is not [dayEpoch]. Returns 0
-     * after a reset so a caller can treat "count before increment" and "count after" the same.
+     * Bumps [name] for [dayEpoch] and returns the new count, resetting first when the day has
+     * rolled over. Only the named counter is reset; the others keep their own stamps.
      */
     @Synchronized
     fun bumpDailyCounter(name: String, dayEpoch: Long): Long {
-        if (dailyCounterDay().get() != dayEpoch) {
-            dailyCounterDay().set(dayEpoch)
+        if (dailyCounterDay(name).get() != dayEpoch) {
+            dailyCounterDay(name).set(dayEpoch)
             dailyCounter(name).set(0)
         }
         val cur = dailyCounter(name).get()
@@ -450,8 +461,12 @@ class AchievementPreferences(
         // Only touch counters that hold something, so a wipe does not materialise preferences
         // for tiers the user never came near.
         counterNames.forEach { if (counter(it).get() != 0L) counter(it).set(0) }
-        dailyCounterNames.forEach { if (dailyCounter(it).get() != 0L) dailyCounter(it).set(0) }
-        dailyCounterDay().set(0)
+        // The day stamp travels with its counter: resetting only the count would leave the stamp
+        // pointing at today, so the first bump after a wipe would carry the old day over.
+        dailyCounterNames.forEach {
+            if (dailyCounter(it).get() != 0L) dailyCounter(it).set(0)
+            dailyCounterDay(it).set(0)
+        }
         directionStreakDir().set(-1)
         directionStreakCount().set(0)
         weekendReadKey().set(0)

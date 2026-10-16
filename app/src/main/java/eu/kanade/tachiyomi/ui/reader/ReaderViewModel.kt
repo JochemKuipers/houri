@@ -167,6 +167,9 @@ class ReaderViewModel(
     private val achievementManager: tachiyomi.domain.achievement.service.AchievementManager,
     private val achievementPreferences: tachiyomi.domain.achievement.service.AchievementPreferences,
     private val readerAchievementHandler: eu.kanade.tachiyomi.data.achievement.ReaderAchievementHandler,
+    // KMK --> Per-category reading mode, for the override step in [getMangaReadingMode].
+    private val categoryReaderPreferences: tachiyomi.domain.category.service.CategoryReaderPreferences,
+    private val getCategories: tachiyomi.domain.category.interactor.GetCategories,
     // KMK <--
 ) : ViewModel() {
 
@@ -318,6 +321,15 @@ class ReaderViewModel(
         } else {
             getChaptersByMangaId.await(manga.id, applyFilter = false)
         }
+        // Category ids, for the per-category reading-mode override (see [categoryReadingMode]).
+        // One query at open: the reader does not re-resolve this mid-session, so a pref read on
+        // every page turn is all that would be avoided by caching.
+        runCatching {
+            getCategories.await(manga.id).forEach { category ->
+                mangaCategoryIds += category.id
+                if (category.parentId != 0L) mangaCategoryParents[category.id] = category.parentId
+            }
+        }
         // KMK <--
 
         // SY -->
@@ -406,7 +418,30 @@ class ReaderViewModel(
             .map(::ReaderChapter)
     }
 
-    val incognitoMode: Boolean by lazy { getIncognitoState.await(manga?.source) }
+    // KMK --> Resolved per source rather than `by lazy`. The lazy captured `manga?.source` on
+    // first read, and the first read happens before the chapter list has loaded - manga is still
+    // null there, so [GetIncognitoState.await] fell back to the global switch only and a
+    // per-extension incognito toggle was invisible for the rest of the session. That made
+    // `incognito_reader` ("read 10 chapters in incognito") and its rotating tier unreachable:
+    // the handler was always told the flag was false, and it writes no progress or history in
+    // incognito, so the reads it counts were the only evidence there was.
+    // Re-resolved whenever the source changes; the reader opens on one manga for its lifetime.
+    // KMK <--
+    private var incognitoSource: Long? = null
+    private var incognitoResolved = false
+    private var incognitoValue: Boolean = false
+
+    val incognitoMode: Boolean
+        get() {
+            val source = manga?.source
+            if (!incognitoResolved || incognitoSource != source) {
+                incognitoValue = getIncognitoState.await(source)
+                incognitoSource = source
+                incognitoResolved = true
+            }
+            return incognitoValue
+        }
+
     private val downloadAheadAmount = downloadPreferences.autoDownloadWhileReading().get()
 
     // KMK -->
@@ -425,6 +460,36 @@ class ReaderViewModel(
     private val achievementCountedChapterIds = mutableSetOf<Long>()
     private val mangaCompletedFiredFor = mutableSetOf<Long>()
     // KMK <--
+
+    // KMK --> Category ids of the open manga, and the parent of each subcategory among them, for
+    // the per-category reading-mode override. Populated once at open by
+    // [initializeChapterLists].
+    private val mangaCategoryIds = mutableSetOf<Long>()
+    private val mangaCategoryParents = mutableMapOf<Long, Long>()
+
+    // KMK --> Chapters this session has completed.
+    //
+    // [unfilteredChapterList] is the DB list captured when the reader opened. Nothing writes back
+    // to it, so every read decision made from it described the state at open time for as long as
+    // the session lasted. Three things were wrong because of it:
+    //
+    //  - "finish this manga" could never fire on the chapter that completed it, because that
+    //    chapter still read as unread in the snapshot
+    //  - "started this manga" fired on every chapter of the first session, since the first
+    //    chapter was the only one the snapshot thought was read
+    //  - the spoiler check compared list positions of a snapshot that had not moved
+    //
+    // An id set is enough and cannot go stale: a chapter id is read or it is not, and the DB
+    // write that follows is what persists it beyond the session.
+    private val chaptersReadThisSession = mutableSetOf<Long>()
+    // KMK <--
+
+    // KMK --> One completion event per chapter per session: the webhook, the completion sound and
+    // the started/finished notifications all live in [updateChapterProgressOnComplete], which the
+    // viewer re-enters every time the last page is *displayed* - including the swipe back that
+    // re-shows it after turning forward. That is one chapter finishing several times over.
+    // KMK <--
+    private val chapterCompletionHandledFor = mutableSetOf<Long>()
 
     init {
         // To save state
@@ -1016,6 +1081,19 @@ class ReaderViewModel(
 
     private suspend fun updateChapterProgressOnComplete(readerChapter: ReaderChapter) {
         readerChapter.chapter.read = true
+        // KMK --> Completion side effects (webhook, sound, started/finished events) fire once per
+        // chapter. The viewer calls this again every time the last page is *displayed*, so
+        // swiping forward and back re-ran all of it: the webhook fired again and the completion
+        // sound played again for a chapter that had already finished. The read flag is still set
+        // every time (it is idempotent) and the DB write below still persists the page position,
+        // so only the notification side of a completion is gated.
+        // KMK <--
+        val chapterIdValue = readerChapter.chapter.id
+        val firstCompletion = chapterIdValue != null && chapterCompletionHandledFor.add(chapterIdValue)
+        // KMK --> Read within this session, for the decisions that consult the snapshot below.
+        // KMK <--
+        if (chapterIdValue != null) chaptersReadThisSession += chapterIdValue
+        if (!firstCompletion) return
         // KMK -->
         val deferBetweenChapters = readerPreferences.chapterCompletionSoundRandomLocation().get() &&
             kotlin.random.Random.nextBoolean()
@@ -1029,8 +1107,16 @@ class ReaderViewModel(
             chapterCompleteSoundPlayer.playChapterCompleteSound()
         }
         manga?.let { currentManga ->
-            val wasFirstReadChapter = unfilteredChapterList
-                .count { it.read && it.id != readerChapter.chapter.id } == 0
+            // KMK --> "First chapter of the series", counted against the snapshot *plus* what has
+            // been read this session. The snapshot alone reported the same answer for every
+            // chapter of the opening session - it showed nothing read, because it is the state as
+            // of open time - so MangaStarted, and the "new manga" webhook built on it, fired for
+            // every chapter the user finished until they closed the reader.
+            // KMK <--
+            val wasFirstReadChapter = unfilteredChapterList.count { chapter ->
+                chapter.id != readerChapter.chapter.id &&
+                    (chapter.read || chapter.id in chaptersReadThisSession)
+            } == 0
             val chapterData = buildMap {
                 put("manga", currentManga.title)
                 put("chapter", readerChapter.chapter.name)
@@ -1065,21 +1151,44 @@ class ReaderViewModel(
             }
             // KMK --> "Skip to the last chapter without reading the middle". Needs the whole
             // list, so it is judged here rather than on a page turn: the completed chapter has
-            // to be the final one, and something before it has to still be unread. Position in
-            // the list is the user's own ordering, which is what "the middle" means here.
-            val completedIndex = unfilteredChapterList.indexOfFirst { it.id == readerChapter.chapter.id }
-            if (completedIndex >= 0 &&
-                completedIndex == unfilteredChapterList.lastIndex &&
-                unfilteredChapterList.take(completedIndex).any { !it.read }
-            ) {
+            // to be the final one, and something before it has to still be unread.
+            //
+            // Judged on chapter *numbers*, not on list position. `unfilteredChapterList` arrives
+            // ordered by `source_order`, which is the order the source returned - for most sources
+            // newest first, so its last element is chapter 1, not the final chapter. The old test
+            // (`completedIndex == lastIndex && any unread before it`) therefore only ever fired
+            // for whoever finished chapter 1, and mislabelled a legitimate read of the last
+            // chapter of a series whose middle was already read. A recognized chapter number is
+            // order-independent, which is what "the last chapter" has to mean.
+            //
+            // `readerChapter.chapter` is the legacy [Chapter] here, so the number is spelled
+            // `chapter_number` and "recognized" uses the same `>= 0f` rule the domain model's
+            // `isRecognizedNumber` is; widened to Double so it compares against the list below on
+            // one type.
+            val completedNumber = readerChapter.chapter.chapter_number.toDouble()
+            val isFinalChapter = readerChapter.chapter.chapter_number >= 0f &&
+                unfilteredChapterList.none { it.isRecognizedNumber && it.chapterNumber > completedNumber }
+            val skippedEarlier = unfilteredChapterList.any { chapter ->
+                chapter.id != readerChapter.chapter.id &&
+                    chapter.isRecognizedNumber &&
+                    chapter.chapterNumber < completedNumber &&
+                    !chapter.read &&
+                    chapter.id !in chaptersReadThisSession
+            }
+            if (isFinalChapter && skippedEarlier) {
                 runCatching { achievementManager.incrementCounter("spoiler_jumps") }
                 // The perfect-day rotating tier reads "10 chapters without skipping", so a skip
                 // has to be recorded as well as counted - otherwise the day still qualifies.
                 runCatching { achievementManager.onChapterSkipped() }
             }
             // KMK <--
+            // KMK --> "Every chapter read" against the snapshot *plus* this session's reads. The snapshot
+            // alone could never satisfy it for the chapter that completed the series - that row
+            // was still `read = false` as of open time - so finishing a series never registered
+            // until the reader had been closed and reopened.
+            // KMK <--
             if (unfilteredChapterList.isNotEmpty() &&
-                unfilteredChapterList.all { it.read } &&
+                unfilteredChapterList.all { it.read || it.id in chaptersReadThisSession } &&
                 !currentManga.rereading &&
                 mangaCompletedFiredFor.add(currentManga.id)
             ) {
@@ -1188,9 +1297,14 @@ class ReaderViewModel(
             val sessionReadDuration = chapterReadStartTime?.let { endTime.time - it } ?: 0
 
             upsertHistory.await(HistoryUpdate(chapterId, endTime, sessionReadDuration))
-            if (sessionReadDuration > 0) {
-                val minutes = (sessionReadDuration / 60000L).coerceAtLeast(1L)
-                readerAchievementHandler.onReadingTimeMinutes(minutes)
+            // KMK --> Whole minutes, and no rounding up. `coerceAtLeast(1L)` banked a minute for
+            // every chapter, including one abandoned seconds in, which is what made the reading
+            // time tiers (1h .. 1000h) and the rank that reads the total reachable without the
+            // reading. Sub-minute sessions now bank nothing; the remainder is lost rather than
+            // credited early, which is the same rule the webhook's second-level counter uses.
+            // KMK <--
+            if (sessionReadDuration >= MINUTE_MS) {
+                readerAchievementHandler.onReadingTimeMinutes(sessionReadDuration / MINUTE_MS)
             }
             chapterReadStartTime = null
         }
@@ -1280,6 +1394,12 @@ class ReaderViewModel(
 
     /**
      * Returns the viewer position used by this manga or the default one.
+     *
+     * Per-manga first, then the manga's categories, then the global default. The middle step is
+     * the per-category override: a category can name a reading mode (webtoon for a long-strip
+     * shelf, vertical for a manhwa one) and every manga in it opens that way unless the manga
+     * itself overrides. The stored value never becomes the manga's own `readingMode`, so removing
+     * the category override restores the global default rather than leaving a copy behind.
      */
     fun getMangaReadingMode(resolveDefault: Boolean = true): Int {
         val default = readerPreferences.defaultReadingMode().get()
@@ -1289,13 +1409,35 @@ class ReaderViewModel(
         return when {
             resolveDefault && readingMode == ReadingMode.DEFAULT && readerPreferences.useAutoWebtoon().get() -> {
                 manga.defaultReaderType(manga.mangaType(sourceName = sourceManager.get(manga.source)?.name))
+                    ?: categoryReadingMode()
                     ?: default
             }
-            resolveDefault && readingMode == ReadingMode.DEFAULT -> default
+            resolveDefault && readingMode == ReadingMode.DEFAULT -> categoryReadingMode() ?: default
             else -> manga.readingMode.toInt()
         }
         // SY <--
     }
+
+    // KMK -->
+    /**
+     * The reading mode configured on any of this manga's categories, or null when none is set.
+     *
+     * Resolved from the categories fetched at init rather than from a live query: the reader opens
+     * on one manga, and a category change mid-session is not something the viewer should pick up
+     * under the user mid-page.
+     */
+    private fun categoryReadingMode(): Int? {
+        if (mangaCategoryIds.isEmpty()) return null
+        val parentOf = mangaCategoryIds.mapNotNull { id -> mangaCategoryParents[id]?.let { id to it } }.toMap()
+        val stored = categoryReaderPreferences.resolveForManga(mangaCategoryIds.toList(), parentOf) ?: return null
+        // Stored as ReadingMode's flag value; anything unrecognised (an older build's string, a
+        // hand-edited pref) falls through to the global default rather than pinning the viewer.
+        val flag = stored.toIntOrNull() ?: return null
+        val mode = ReadingMode.fromPreference(flag)
+        return if (mode == ReadingMode.DEFAULT) null else mode.flagValue
+    }
+
+    // KMK <--
 
     /**
      * Updates the viewer position for the open manga.
@@ -1875,5 +2017,10 @@ class ReaderViewModel(
             // SY <--
         ) : Event
         data class CopyImage(val uri: Uri) : Event
+    }
+
+    private companion object {
+        /** Whole minutes only: see [updateHistory]'s reading-time banking. */
+        const val MINUTE_MS = 60_000L
     }
 }

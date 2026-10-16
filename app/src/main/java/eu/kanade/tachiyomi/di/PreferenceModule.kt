@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.di
 import android.app.Application
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.connections.service.ConnectionsPreferences
+import eu.kanade.domain.manga.service.RereadPreferences
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.domain.sync.SyncPreferences
 import eu.kanade.domain.track.service.TrackPreferences
@@ -37,7 +38,17 @@ class PreferenceModule(val app: Application) : InjektModule {
             )
         }
         addSingletonFactory {
-            SourcePreferences(get())
+            // KMK --> BasePreferences is injected for extensionAutoUpdateSupported: which
+            // installer is selected decides whether a background extension update can finish
+            // unattended. Resolved lazily, so registering it further down this module is fine.
+            SourcePreferences(preferenceStore = get(), basePreferences = get())
+        }
+        // KMK --> RereadPreferences is @Inject for the Metro graph, but the three reread
+        // interactors are built through Injekt (see DomainModule), so it needs a registration
+        // here too. It is stateless - it reads and writes the same preference keys either way -
+        // so the two graphs agreeing on those keys is not a problem.
+        addSingletonFactory {
+            RereadPreferences(get())
         }
         addSingletonFactory {
             SecurityPreferences(get())

@@ -83,6 +83,8 @@ class ComicKApi(
             val url = libraryUrl(track.remote_id.toHid())
             val body = buildJsonObject {
                 put("status", track.status.toApiListStatus())
+                // ratings are integers 1-10; null clears. 0 means "unrated" locally.
+                put("rating", track.score.toInt().takeIf { it > 0 })
                 // progress.number is a string per the API schema; null clears it.
                 if (track.last_chapter_read > 0) {
                     putJsonObject("progress") {
@@ -149,11 +151,31 @@ class ComicKApi(
                 .toString()
                 .toRequestBody(jsonMime)
 
-            authClient
+            val response = authClient
                 .newCall(PATCH(url, body = body))
                 .awaitSuccess()
 
-            // only returns the same data back with nothing additionally useful
+            // The response is the entry as Comick stores it *after* the write, which is worth reading.
+            // This returned the request track untouched, so the local row kept whatever was asked
+            // for whether or not Comick had taken it - and the caller's row is what the app
+            // persists from this call, so a field the server quietly ignored sat in the UI looking
+            // saved until the next refresh pulled it back down. Reading the server's copy is what
+            // keeps the two honest.
+            //
+            // Only the three fields the write covers are adopted, onto the caller's own track:
+            // everything else (the local id, start/finish dates, the private flag, the reread
+            // count) is not in this response and replacing the object would blank it.
+            //
+            // A body that cannot be read leaves the caller's track as it was rather than failing
+            // a write that did land.
+            runCatching {
+                with(json) { response.parseAs<ComickLibraryEntry>().toTrack(trackerId) }
+            }.getOrNull()?.let { stored ->
+                track.status = stored.status
+                track.last_chapter_read = stored.last_chapter_read
+                track.score = stored.score
+            }
+
             track
         }
     }

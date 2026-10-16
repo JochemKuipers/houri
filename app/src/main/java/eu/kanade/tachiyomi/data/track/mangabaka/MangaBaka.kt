@@ -158,16 +158,29 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
     // KMK --> relations come from the series-detail payload; every known
     // kind resolves and is labeled in the row (per-type toggles not coded yet).
     // Titles need one detail fetch per related id (usually 1-2).
+    //
+    // `null` and `emptyList()` mean different things here, and the sequel/prequel provider acts
+    // on the difference: null is "this service could not tell", emptyList is "this service
+    // answered and the series has no relations". They used to be the same thing - the mapping
+    // ended in `entries.ifEmpty { null }` - so a series MangaBaka reports as unlinked was treated
+    // as unanswerable, and the provider moved on to another tracker (or the MangaDex fallback)
+    // and showed *its* relations under the MangaBaka-bound manga. That is how a title MangaBaka
+    // lists with no relations at all could show a prequel or a source that has nothing to do
+    // with it. Only a failed fetch returns null now.
     override suspend fun getRelatedEntries(remoteId: Long): List<SequelPrequelEntry>? {
         val item = try {
             api.getSeriesItem(remoteId)
         } catch (e: Exception) {
             logcat(LogPriority.WARN, e) { "MangaBaka relations lookup failed for '$remoteId'" }
-            null
+            return null
         } ?: return null
         val entries = item.relationshipsV2.orEmpty().mapNotNull { rel ->
             val relation = SequelPrequelRelation.fromMangaBaka(rel.relationType)
                 ?: return@mapNotNull null
+            // A series related to itself would render as a card that opens the page it was
+            // already on. MangaBaka does not emit one, but the payload is user-editable
+            // (`is_manual` on each relationship), so the guard is cheap insurance.
+            if (rel.toSeriesId == remoteId) return@mapNotNull null
             val details = try {
                 api.getMangaDetails(rel.toSeriesId.toInt())
             } catch (e: Exception) {
@@ -189,12 +202,18 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
                 // KMK <--
             )
         }
-        return entries.ifEmpty { null }
+        return entries
     }
 
     override fun parseRelatedEntryId(url: String): Long? {
-        // tracking_url looks like https://mangabaka.org/12345
-        return url.substringAfterLast("/").toLongOrNull()
+        // tracking_url is "$BASE_URL/<series id>", e.g. https://mangabaka.org/12345. The host is
+        // part of the test rather than a nicety: the provider hands this any manga url it is
+        // looking at, and "take the text after the last slash, read it as a number" also matches
+        // a foreign url that happens to end in digits - which then had that unrelated series'
+        // relations rendered under this manga.
+        val prefix = MangaBakaApi.BASE_URL
+        if (!url.startsWith("$prefix/", ignoreCase = true)) return null
+        return url.removePrefix(prefix).trim('/').substringBefore('/').toLongOrNull()
     }
     // KMK <--
 

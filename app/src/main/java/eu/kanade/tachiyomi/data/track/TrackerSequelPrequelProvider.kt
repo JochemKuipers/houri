@@ -25,6 +25,13 @@ import tachiyomi.domain.track.interactor.GetTracks
  * When no tracker in the chain yields relations (untracked manga, or none of
  * the bound services expose relations), the MangaDex API is tried as a
  * last resort for MangaDex-based manga, preserving the pre-rework behavior.
+ *
+ * ### A tracker's answer is final
+ *
+ * [BaseTracker.getRelatedEntries] distinguishes "cannot tell" (null) from "no relations"
+ * (empty). Only the former continues down the chain. A tracker that answered is taken at its
+ * word: falling through to the next one let an unrelated service's relations, or the MangaDex
+ * fallback's, be rendered for a title the bound tracker says is standalone.
  */
 @Inject
 @SingleIn(AppScope::class)
@@ -47,6 +54,17 @@ class TrackerSequelPrequelProvider(
             listOfNotNull(preferredTrackerId, trackPreferences.getPriorityTrackerId()) +
                 trackerManager.trackers.filter { it.isLoggedIn }.map { it.id }
             ).distinct()
+        // KMK --> A tracker's answer ends the search, whether or not it found anything.
+        //
+        // `getRelatedEntries` returns null when the service could not tell (it has no relations
+        // API, or the call failed) and a list - possibly empty - when it answered. Only null
+        // means "ask someone else". Collapsing both into "empty, keep looking" meant a title
+        // MangaBaka reports as unlinked fell through to the next logged-in tracker and finally to
+        // the MangaDex fallback, and whatever they returned was rendered as this title's
+        // relations. That is the reported case: a manga bound to MangaBaka showed a "Source" that
+        // MangaBaka does not list for it at all - the series payload carries
+        // `relationships_v2: []`, so the row came from somewhere else entirely.
+        var answered = false
         for (trackerId in orderedIds) {
             val service = trackerManager.get(trackerId) as? BaseTracker ?: continue
             if (!service.isLoggedIn) continue
@@ -55,9 +73,16 @@ class TrackerSequelPrequelProvider(
                 service.getRelatedEntries(remoteId)
             } catch (_: Exception) {
                 null
-            }.orEmpty()
+            }
+            if (entries == null) continue
+            answered = true
             if (entries.isNotEmpty()) return entries
+            // Authoritative "no relations": stop, rather than letting an unrelated tracker or the
+            // MangaDex fallback answer for a title this one says is standalone.
+            break
         }
+        if (answered) return emptyList()
+
         // KMK --> stubs carry the tracker's own url but no bound track row, so
         // the loop above never matches them. Let a logged-in tracker claim the
         // url directly, making sequel/prequel rows recursive: stubs show their
@@ -70,8 +95,10 @@ class TrackerSequelPrequelProvider(
                 service.getRelatedEntries(remoteId)
             } catch (_: Exception) {
                 null
-            }.orEmpty()
+            }
+            if (entries == null) continue
             if (entries.isNotEmpty()) return entries
+            break
         }
         return try {
             mangaDexFallback.fetch(mangaId, preferredTrackerId)
