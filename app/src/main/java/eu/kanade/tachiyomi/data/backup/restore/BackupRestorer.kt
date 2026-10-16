@@ -17,26 +17,25 @@ import eu.kanade.tachiyomi.data.backup.restore.restorers.ExtensionStoreRestorer
 import eu.kanade.tachiyomi.data.backup.restore.restorers.FeedRestorer
 import eu.kanade.tachiyomi.data.backup.restore.restorers.MangaRestorer
 import eu.kanade.tachiyomi.data.backup.restore.restorers.PreferenceRestorer
+import eu.kanade.tachiyomi.data.backup.restore.restorers.RestorePhase
 import eu.kanade.tachiyomi.data.backup.restore.restorers.SavedSearchRestorer
 import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.util.system.createFileInCacheDir
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.withIndex
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import logcat.LogPriority
-import mihon.core.concurrency.AppDispatchersHolder
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import java.io.File
 import java.text.SimpleDateFormat
+import java.util.BitSet
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
@@ -69,6 +68,24 @@ class BackupRestorer(
     private val errors = CopyOnWriteArrayList<Pair<Date, String>>()
 
     private val lastProgressPost = AtomicLong(0L)
+
+    /**
+     * Entries decoded from the backup but not yet written, and the merged entries held back until
+     * every other entry has been restored.
+     *
+     * Both exist because the restore streams the file instead of decoding it whole. See
+     * [restoreManga].
+     */
+    private val pendingEntries = ArrayList<BackupManga>(MANGA_CHUNK_SIZE)
+    private val mergedEntries = ArrayList<BackupManga>()
+
+    /**
+     * Categories as the backup wrote them, and the backup's category ids mapped onto the ids the
+     * restore gave them. Constant for the whole run, so they are read once here rather than
+     * threaded through every chunk.
+     */
+    private var backupCategories: List<BackupCategory> = emptyList()
+    private var restoredCategoryIds: Map<Long, Long> = emptyMap()
 
     /**
      * Mapping of source ID to source name from backup data
@@ -133,9 +150,12 @@ class BackupRestorer(
         try {
             achievementPrefs?.suppressOrganicForImport = true
             val decodeStart = SystemClock.elapsedRealtime()
-            val backup = BackupDecoder(context).decode(uri)
+            val decoder = BackupDecoder(context)
+            // Metadata only: the entries themselves are streamed one at a time during restoreManga,
+            // so a library-sized backup is never decoded into memory in full. See BackupReader.
+            val (entryCount, backup) = decoder.decodeMetadata(uri)
             logcat(LogPriority.INFO) {
-                "Restore decoded ${backup.backupManga.size} entries in ${SystemClock.elapsedRealtime() - decodeStart}ms"
+                "Restore read metadata for $entryCount entries in ${SystemClock.elapsedRealtime() - decodeStart}ms"
             }
 
             // Store source mapping for error messages
@@ -143,7 +163,7 @@ class BackupRestorer(
             sourceMapping = backupMaps.associate { it.sourceId to it.name }
 
             if (options.libraryEntries) {
-                restoreAmount.addAndGet(backup.backupManga.size)
+                restoreAmount.addAndGet(entryCount)
             }
             if (options.categories) {
                 restoreAmount.incrementAndGet()
@@ -191,7 +211,7 @@ class BackupRestorer(
                 if (options.libraryEntries) {
                     // KMK -->
                     restoreManga(
-                        backup.backupManga,
+                        uri,
                         if (options.categories) backup.backupCategories else emptyList(),
                         restoredCategoryIds,
                     )
@@ -225,8 +245,12 @@ class BackupRestorer(
             try {
                 if (options.libraryEntries) {
                     val graph = mihon.app.di.globalAppGraph
+                    // KMK --> Counted in SQL. Reading the whole libraryView to take its size was a full
+                    // scan plus a LibraryManga per series, right at the end of a restore that had
+                    // just written all of them - and it had already been caught OOMing on a large
+                    // library once, which is why that read had a guard returning empty.
                     val count = try {
-                        graph.mangaRepository.getLibraryManga().size.toLong()
+                        graph.mangaRepository.getLibraryCount()
                     } catch (_: Exception) {
                         -1L
                     }
@@ -290,82 +314,130 @@ class BackupRestorer(
     // SY <--
 
     private fun CoroutineScope.restoreManga(
-        backupMangas: List<BackupManga>,
+        uri: Uri,
         backupCategories: List<BackupCategory>,
         // KMK -->
         restoredCategoryIds: Map<Long, Long> = emptyMap(),
         // KMK <--
     ) = launch {
-        val semaphore = Semaphore(4)
         val mangaStart = SystemClock.elapsedRealtime()
-        val sorted = mangaRestorer.sortByNew(backupMangas)
+        val decoder = BackupDecoder(context)
+        val phaseOf = mangaRestorer.phaseMatcher()
         mangaRestorer.prepare()
+        this@BackupRestorer.backupCategories = backupCategories
+        this@BackupRestorer.restoredCategoryIds = restoredCategoryIds
 
-        sorted
-            // Chunked so the edits [MangaRestorer] buffers are published per chunk
-            // instead of per entry, and so the deferred list stays bounded. Building
-            // one deferred per entry up front allocated the whole library's worth of
-            // coroutines at once.
-            .chunked(MANGA_CHUNK_SIZE)
-            .forEach { chunk ->
-                try {
-                    chunk
-                        .map {
-                            async(AppDispatchersHolder.get().backgroundOps) {
-                                semaphore.withPermit {
-                                    ensureActive()
-
-                                    try {
-                                        mangaRestorer.restore(it, backupCategories, restoredCategoryIds)
-                                    } catch (e: Exception) {
-                                        val sourceName = sourceMapping[it.source] ?: it.source.toString()
-                                        errors.add(Date() to "${it.title} [$sourceName]: ${e.message}")
-                                    }
-
-                                    val progress = restoreProgress.incrementAndGet()
-                                    reportProgress(it.title, progress)
-                                }
-                            }
-                        }
-                        .awaitAll()
-                } finally {
-                    // Also on cancellation: the edits written so far are already in the
-                    // database transaction, so dropping them would leave the restored
-                    // rows without the titles the backup carried.
-                    mangaRestorer.flushPendingEdits()
+        // New entries first, existing ones second, merged ones last - see restorePhaseOf.
+        //
+        // The file is walked twice rather than decoded once and sorted. Sorting meant holding every
+        // entry of a library-sized backup in memory at once - hundreds of megabytes of series,
+        // chapters and history rows living alongside the buffer they were decoded from. Instead the
+        // first pass restores what is new and records *which entries in the file* the database
+        // already holds; the second pass goes back for those, skipping everything else by length.
+        val laterIndices = BitSet()
+        var restoredEntries = 0
+        decoder.decodeEntries(uri)
+            .withIndex()
+            .collect { (index, manga) ->
+                when (phaseOf(manga)) {
+                    RestorePhase.NEW -> restoreEntry(manga)
+                    RestorePhase.EXISTING -> laterIndices.set(index)
+                    // KMK --> Merged entries resolve against the real entries that precede them, so
+                    // they cannot be restored until both passes are done. They are a small minority
+                    // of a library, which is what makes buffering them affordable.
+                    // KMK <--
+                    RestorePhase.MERGED -> mergedEntries += manga
                 }
+                restoredEntries++
             }
+        decoder.decodeEntries(uri) { laterIndices.get(it) }
+            .collect {
+                restoreEntry(it)
+                restoredEntries++
+            }
+        mergedEntries.chunked(MANGA_CHUNK_SIZE)
+            .forEach { restoreEntries(it) }
 
         logcat(LogPriority.INFO) {
-            "Restore wrote ${sorted.size} entries in ${SystemClock.elapsedRealtime() - mangaStart}ms"
+            "Restore wrote $restoredEntries entries in ${SystemClock.elapsedRealtime() - mangaStart}ms"
         }
     }
 
     /**
-     * Posts the progress notification, at most once per [PROGRESS_NOTIFICATION_INTERVAL_MS].
+     * Buffers one entry into the current chunk and restores the chunk once it is full.
      *
-     * A restore posts one notification per entry, so a library-sized backup used to
-     * rebuild and repost the notification tens of thousands of times. Each post is a
-     * binder call that SystemUI renders, which is more expensive than the entry's own
-     * database work once the entries are small. Rate limiting keeps the bar moving
-     * while bounding posts by elapsed time instead of by entry count.
+     * Entries are decoded one at a time out of the backup file, so they are batched as they
+     * arrive rather than being collected first: the peak is one chunk of entries plus whatever
+     * merged entries are held back, not the whole library.
      */
-    private suspend fun reportProgress(title: String, progress: Int) {
-        val now = SystemClock.elapsedRealtime()
-        val previous = lastProgressPost.get()
-        val isLast = progress >= restoreAmount.get()
-        if (!isLast) {
-            if (now - previous < PROGRESS_NOTIFICATION_INTERVAL_MS) return
-            if (!lastProgressPost.compareAndSet(previous, now)) return
-        } else {
-            lastProgressPost.set(now)
-        }
+    private suspend fun restoreEntry(entry: BackupManga) {
+        pendingEntries += entry
+        if (pendingEntries.size >= MANGA_CHUNK_SIZE) restoreEntries(pendingEntries.toList())
+    }
 
-        with(notifier) {
-            showRestoreProgress(title, progress, restoreAmount.get(), isSync)
-                // KMK -->
-                .show(Notifications.ID_RESTORE_PROGRESS)
-            // KMK <--
+    /**
+     * Restores one chunk of entries, falling back to entry by entry if the batch fails.
+     *
+     * The batch is a single transaction, so one entry that cannot be written rolls back the whole
+     * chunk - which is why a failure is retried per entry instead of reported. Each entry then gets
+     * its own transaction and its own error, and the rest of the chunk still lands.
+     */
+    private suspend fun restoreEntries(chunk: List<BackupManga>) {
+        if (chunk.isEmpty()) return
+        try {
+            // Also on cancellation: the edits buffered so far are already written, so dropping them
+            // would leave the restored rows without the titles the backup carried.
+            try {
+                val restoredAsBatch = try {
+                    currentCoroutineContext().ensureActive()
+                    mangaRestorer.restore(chunk, backupCategories, restoredCategoryIds)
+                    true
+                } catch (e: Exception) {
+                    // The edits this chunk buffered describe rows the rolled-back transaction just
+                    // removed, and publishing them would attach a title to a manga that is not
+                    // there. The retry re-buffers them.
+                    mangaRestorer.discardPendingEdits()
+                    logcat(LogPriority.WARN, e) { "Batch restore failed, retrying entry by entry" }
+                    false
+                }
+
+                if (restoredAsBatch) {
+                    restoreProgress.addAndGet(chunk.size)
+                } else {
+                    chunk.forEach { entry ->
+                        currentCoroutineContext().ensureActive()
+                        try {
+                            mangaRestorer.restore(listOf(entry), backupCategories, restoredCategoryIds)
+                        } catch (e: Exception) {
+                            val sourceName = sourceMapping[entry.source] ?: entry.source.toString()
+                            errors.add(Date() to "${entry.title} [$sourceName]: ${e.message}")
+                        }
+                        restoreProgress.incrementAndGet()
+                    }
+                }
+            } finally {
+                mangaRestorer.flushPendingEdits()
+            }
+
+            // One notification per chunk rather than per entry: each post is a round trip to the
+            // system UI, which for an entry this small costs more than the entry's own database
+            // work. The last chunk always posts, so the bar ends at 100%.
+            val progress = restoreProgress.get()
+            val posted = SystemClock.elapsedRealtime()
+            if (
+                progress >= restoreAmount.get() ||
+                posted - lastProgressPost.get() >= PROGRESS_NOTIFICATION_INTERVAL_MS
+            ) {
+                lastProgressPost.set(posted)
+                with(notifier) {
+                    showRestoreProgress(chunk.last().title, progress, restoreAmount.get(), isSync)
+                        // KMK -->
+                        .show(Notifications.ID_RESTORE_PROGRESS)
+                    // KMK <--
+                }
+            }
+        } finally {
+            pendingEntries.clear()
         }
     }
 

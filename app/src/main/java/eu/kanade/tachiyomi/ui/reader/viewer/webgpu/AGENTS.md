@@ -593,6 +593,21 @@ line, for instance, does not appear anywhere in the current tree.
 - **Never drop a spread or an `ImagePage` reference without `cleanup()`** — it owns uploaded
   textures and its tile grid. The library keys tile caches by page identity, so an abandoned
   spread keeps its whole grid resident and only a *destroyed* page sweeps it.
+- **"Backgrounds first, then content" only holds inside `renderPass`.** The continuous draw splits
+  content into two passes and only one of them obeys the ordering. `ImagePage.ImageSingle` pages go
+  through `renderPass` and get the underlay-then-content treatment that fixed the seam line
+  (`webgpuviewer-houri` @ `06d2b1001`). `ImagePage.Render` pages — `ProgressPage`, `TransitionPage`,
+  `ErrorPage` — are drawn **after** that pass, each opening its own pass over the shared screen
+  texture via `renderLoaded`. So they are the one kind of content in continuous mode that can still
+  land on top of a neighbour's last row of real pixels, and they get **no underlay of their own**:
+  `renderLoaded` loads the destination and paints only its own footprint.
+
+  This matters for a long strip precisely because it is *intermittent*: a placeholder exists only
+  while a segment is still decoding, so the symptom appears and disappears as you scroll rather
+  than reproducing on every chapter. Treat "a 1px line at a segment boundary" as this until proven
+  otherwise, and check it against the two other candidates the crop path introduced in v1.24.0
+  (`5e15bcf`/`5c610cb`/`46d1abe`) — with crop-borders on, the crop edge *is* the slot edge, so any
+  edge rounding in `Image.prepareTilesForRender`'s `src` cropping lands on the same seam.
 - **Never reuse a GPU adapter** (above).
 - **Never call `WebGpuMemoryBudget.sample()` from a getter.** `cacheSize` is read by the render
   walk; `sample()` is a binder call. The snapshot exists so hot paths only ever read a volatile

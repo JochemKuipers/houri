@@ -84,6 +84,11 @@ class MangaRepositoryImpl(
         }
     }
 
+    // KMK --> Counted in SQL rather than by measuring the list [getLibraryManga] returns.
+    override suspend fun getLibraryCount(): Long {
+        return handler.awaitOne { libraryViewQueries.libraryCount() }
+    }
+
     override fun getLibraryMangaAsFlow(): Flow<List<LibraryManga>> {
         // KMK --> Re-subscribed when the switch flips: the counts it feeds are only correct for one
         // basis or the other, and a query already in flight cannot change its parameters. Toggling

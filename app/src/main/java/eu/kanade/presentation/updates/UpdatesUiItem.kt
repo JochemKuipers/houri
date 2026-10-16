@@ -51,6 +51,7 @@ import eu.kanade.presentation.manga.components.DotSeparatorText
 import eu.kanade.presentation.manga.components.MangaCover
 import eu.kanade.presentation.manga.components.MangaCoverHide
 import eu.kanade.presentation.manga.components.RatioSwitchToPanorama
+import eu.kanade.presentation.manga.components.composeColor
 import eu.kanade.presentation.manga.components.getSwipeAction
 import eu.kanade.presentation.manga.components.swipeActionThreshold
 import eu.kanade.presentation.util.animateItemFastScroll
@@ -393,7 +394,11 @@ private fun UpdatesUiItem(
                             contentDescription = stringResource(MR.strings.action_filter_bookmarked),
                             modifier = Modifier
                                 .sizeIn(maxHeight = with(LocalDensity.current) { textHeight.toDp() - 2.dp }),
-                            tint = MaterialTheme.colorScheme.primary,
+                            // KMK --> The reason tag, exactly as MangaChapterListItem renders it.
+                            // This icon was hardcoded to the theme's primary, so a bookmark the user
+                            // had given a colour showed no colour here at all.
+                            tint = update.bookmarkColor.composeColor() ?: MaterialTheme.colorScheme.primary,
+                            // KMK <--
                         )
                         Spacer(modifier = Modifier.width(2.dp))
                     }

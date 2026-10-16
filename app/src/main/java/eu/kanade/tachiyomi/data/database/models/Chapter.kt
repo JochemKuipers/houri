@@ -3,6 +3,7 @@
 package eu.kanade.tachiyomi.data.database.models
 
 import eu.kanade.tachiyomi.source.model.SChapter
+import tachiyomi.domain.chapter.model.BookmarkColor
 import java.io.Serializable
 import tachiyomi.domain.chapter.model.Chapter as DomainChapter
 
@@ -25,6 +26,19 @@ interface Chapter : SChapter, Serializable {
     var last_modified: Long
 
     var version: Long
+
+    // KMK -->
+    /**
+     * Why the chapter was bookmarked, as [tachiyomi.domain.chapter.model.BookmarkColor.value].
+     *
+     * Part of this interface rather than only of the domain model because the reader converts its
+     * chapter list through the legacy model on the way to the chapter-list sheet. A field that
+     * only the domain [tachiyomi.domain.chapter.model.Chapter] carried was silently dropped there,
+     * and every bookmark in the reader showed the default tint. Anything a legacy-model round trip
+     * has to preserve belongs here, not only in the domain model.
+     */
+    var bookmark_color: Long
+    // KMK <--
 }
 
 val Chapter.isRecognizedNumber: Boolean
@@ -48,5 +62,8 @@ fun Chapter.toDomainChapter(): DomainChapter? {
         lastModifiedAt = last_modified,
         version = version,
         memo = memo,
+        // KMK -->
+        bookmarkColor = BookmarkColor.fromValue(bookmark_color),
+        // KMK <--
     )
 }

@@ -7,6 +7,7 @@ import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.flow.Flow
 import tachiyomi.core.common.util.lang.toLong
 import tachiyomi.data.DatabaseHandler
+import tachiyomi.domain.chapter.model.BookmarkColor
 import tachiyomi.domain.manga.model.MangaCover
 import tachiyomi.domain.updates.model.UpdatesWithRelations
 import tachiyomi.domain.updates.repository.UpdatesRepository
@@ -79,6 +80,9 @@ class UpdatesRepositoryImpl(
         chapterUrl: String,
         read: Boolean,
         bookmark: Boolean,
+        // KMK --> Positional in the SELECT list, so it sits between `bookmark` and
+        // `last_page_read` exactly as updatesView orders it.
+        bookmarkColor: Long,
         lastPageRead: Long,
         sourceId: Long,
         favorite: Boolean,
@@ -98,6 +102,9 @@ class UpdatesRepositoryImpl(
         chapterUrl = chapterUrl,
         read = read,
         bookmark = bookmark,
+        // KMK -->
+        bookmarkColor = BookmarkColor.fromValue(bookmarkColor),
+        // KMK <--
         lastPageRead = lastPageRead,
         sourceId = sourceId,
         dateFetch = dateFetch,

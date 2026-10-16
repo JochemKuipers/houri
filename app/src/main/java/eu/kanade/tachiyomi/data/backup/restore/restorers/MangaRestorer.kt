@@ -11,6 +11,7 @@ import eu.kanade.tachiyomi.data.backup.models.BackupTracking
 import exh.EXHMigrations
 import exh.source.isMergedSourceId
 import mihon.app.di.globalAppGraph
+import tachiyomi.data.Database
 import tachiyomi.data.DatabaseHandler
 import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.StringListColumnAdapter
@@ -110,62 +111,106 @@ class MangaRestorer(
         setCustomMangaInfo.setAll(batch)
     }
 
-    suspend fun sortByNew(backupMangas: List<BackupManga>): List<BackupManga> {
-        val urlsBySource = handler.awaitList { mangasQueries.getAllMangaSourceAndUrl() }
-            // A set, because the comparator below asks "is this url known?" once per
-            // comparison. Against a list each answer is a scan, which turned sorting a
-            // library-sized backup into a quadratic amount of string comparisons.
-            .groupBy({ it.source }, { it.url })
-            .mapValues { (_, urls) -> urls.toHashSet() }
-
-        return backupMangas.sortedWith(restoreOrderComparator(urlsBySource))
+    /**
+     * Throws away the edits buffered since the last flush.
+     *
+     * The buffer is written in its own transaction, so it survives a rolled-back restore of the
+     * rows it describes. A caller that rolls a batch back and retries entry by entry calls this
+     * first: the retry re-buffers the same edits, and publishing them twice would attach a title
+     * to a manga row that does not exist.
+     */
+    fun discardPendingEdits() {
+        synchronized(pendingEditsLock) { pendingEdits.clear() }
     }
 
     /**
-     * Restore a single manga
+     * Returns which pass of the restore each entry belongs in, as of right now.
+     *
+     * Read once per restore. A restore wants entries the database already has *before* the ones it
+     * does not, so an update lands on the existing row, and merged entries last of all; ordering a
+     * decoded backup to achieve that meant holding every entry in memory to sort it, which is
+     * exactly what the streaming entry pass exists to avoid. The matcher lets the caller order the
+     * file instead.
+     *
+     * `internal` rather than public because [RestorePhase] is: the phase is this app's restore
+     * pipeline's business, not a type anything outside it can act on.
+     */
+    internal suspend fun phaseMatcher(): (BackupManga) -> RestorePhase {
+        val knownUrlsBySource = handler.awaitList { mangasQueries.getAllMangaSourceAndUrl() }
+            .groupBy({ it.source }, { it.url })
+            .mapValues { (_, urls) -> urls.toHashSet() }
+
+        return { restorePhaseOf(it.source, it.url, knownUrlsBySource) }
+    }
+
+    /**
+     * Restores [backupMangas] together, in one transaction: either every one lands or none does.
+     *
+     * ### Why a batch and not one transaction per entry
+     *
+     * Every `handler.await(inTransaction = true)` that is not already inside a transaction acquires
+     * a thread from the database writer pool, opens a real SQLite transaction, and commits it -
+     * and the nested calls inside it join that one, so the count is per *entry*, not per query. A
+     * library of fifteen thousand series was therefore fifteen thousand commits, each with its
+     * thread handoff, against a restore that does milliseconds of actual SQL per entry.
+     *
+     * Batching trades one thing away: a single bad entry now rolls back its whole batch. That is
+     * why the caller retries a failed batch entry by entry, and this is the transaction that
+     * makes both halves atomic.
      */
     suspend fun restore(
-        backupManga: BackupManga,
+        backupMangas: List<BackupManga>,
         backupCategories: List<BackupCategory>,
         // KMK --> backup category id -> restored database id, from CategoriesRestorer
         restoredCategoryIds: Map<Long, Long> = emptyMap(),
         // KMK <--
     ) {
         handler.await(inTransaction = true) {
-            val dbManga = findExistingManga(backupManga)
-            var manga = backupManga.getMangaImpl()
+            backupMangas.forEach { restoreEntry(it, backupCategories, restoredCategoryIds) }
+        }
+    }
+
+    /**
+     * Restore a single manga.
+     */
+    private suspend fun Database.restoreEntry(
+        backupManga: BackupManga,
+        backupCategories: List<BackupCategory>,
+        restoredCategoryIds: Map<Long, Long>,
+    ) {
+        val dbManga = findExistingManga(backupManga)
+        var manga = backupManga.getMangaImpl()
+        // SY -->
+        manga = EXHMigrations.migrateBackupEntry(manga)
+        // SY <--
+        val restoredManga = if (dbManga == null) {
+            restoreNewManga(manga)
+        } else {
+            restoreExistingManga(manga, dbManga)
+        }
+
+        restoreMangaDetails(
+            manga = restoredManga,
+            chapters = backupManga.chapters,
+            categories = backupManga.categories,
+            // KMK -->
+            categoryIds = backupManga.categoryIds,
+            restoredCategoryIds = restoredCategoryIds,
+            // KMK <--
+            backupCategories = backupCategories,
+            history = backupManga.history,
+            tracks = backupManga.tracking,
+            excludedScanlators = backupManga.excludedScanlators,
             // SY -->
-            manga = EXHMigrations.migrateBackupEntry(manga)
+            mergedMangaReferences = backupManga.mergedMangaReferences,
+            flatMetadata = backupManga.flatMetadata,
+            customManga = backupManga.getCustomMangaInfo(),
             // SY <--
-            val restoredManga = if (dbManga == null) {
-                restoreNewManga(manga)
-            } else {
-                restoreExistingManga(manga, dbManga)
-            }
+        )
 
-            restoreMangaDetails(
-                manga = restoredManga,
-                chapters = backupManga.chapters,
-                categories = backupManga.categories,
-                // KMK -->
-                categoryIds = backupManga.categoryIds,
-                restoredCategoryIds = restoredCategoryIds,
-                // KMK <--
-                backupCategories = backupCategories,
-                history = backupManga.history,
-                tracks = backupManga.tracking,
-                excludedScanlators = backupManga.excludedScanlators,
-                // SY -->
-                mergedMangaReferences = backupManga.mergedMangaReferences,
-                flatMetadata = backupManga.flatMetadata,
-                customManga = backupManga.getCustomMangaInfo(),
-                // SY <--
-            )
-
-            if (isSync) {
-                mangasQueries.resetIsSyncing()
-                chaptersQueries.resetIsSyncing()
-            }
+        if (isSync) {
+            mangasQueries.resetIsSyncing()
+            chaptersQueries.resetIsSyncing()
         }
     }
 
@@ -759,22 +804,41 @@ class MangaRestorer(
 }
 
 /**
- * Order a restore applies entries in.
+ * Which pass of a restore an entry belongs to. The passes run in declaration order.
  *
- * Merged entries go last because they are resolved against the real entries that
- * precede them. Entries the database already has go before ones it does not, so an
- * update lands on the existing row instead of the insert creating a duplicate of it.
- * [knownUrlsBySource] must hold sets: a per-comparison lookup against a larger
- * collection is what made sorting a library-sized backup expensive.
+ * This is the ordering policy, expressed as a classification rather than a `Comparator`, because
+ * the restore no longer holds the entries to sort: it streams them out of the backup file one at a
+ * time and walks the file more than once, so "restore these first" has to be answered per entry
+ * instead of by sorting a list that was never materialised.
  */
-internal fun restoreOrderComparator(
+internal enum class RestorePhase {
+    /** Entries the database already has, so an update lands on the existing row. */
+    EXISTING,
+
+    /** Entries it does not, which the restore inserts. */
+    NEW,
+
+    /** Merged entries, which are resolved against the real entries that precede them. */
+    MERGED,
+}
+
+/**
+ * The pass [source]/[url] is restored in.
+ *
+ * [knownUrlsBySource] must hold sets: a per-entry lookup against a larger collection is what made
+ * ordering a library-sized backup expensive, and the lookup now happens once per entry rather than
+ * once per comparison.
+ */
+internal fun restorePhaseOf(
+    source: Long,
+    url: String,
     knownUrlsBySource: Map<Long, Set<String>>,
-): Comparator<BackupManga> =
+): RestorePhase = when {
     // KMK -->
-    compareBy<BackupManga> { isMergedSourceId(it.source) }
-        // KMK <--
-        // Descending: `compareBy` on a Boolean ranks false (unknown) first, which is the
-        // opposite of the order above - it made every unknown entry restore before the known
-        // ones it was supposed to update.
-        .thenByDescending { knownUrlsBySource[it.source]?.contains(it.url) ?: false }
-        .thenByDescending { it.lastModifiedAt }
+    isMergedSourceId(source) -> RestorePhase.MERGED
+    // KMK <--
+    // Known is checked against the entry's *own* source: the same url under two sources is two
+    // different series, so a hit elsewhere in the map means nothing.
+    knownUrlsBySource[source]?.contains(url) == true -> RestorePhase.EXISTING
+    else -> RestorePhase.NEW
+}

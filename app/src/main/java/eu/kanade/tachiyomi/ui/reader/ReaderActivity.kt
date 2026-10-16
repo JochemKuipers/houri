@@ -1053,6 +1053,17 @@ class ReaderActivity : BaseActivity() {
 
     /**
      * Called from the presenter when a manga is ready. Used to instantiate the appropriate viewer.
+     *
+     * KMK --> A viewer provider is allowed to decide from the chapter's *content* - that is the
+     * whole contract NovelViewerProvider implements ("a chapter that came back carrying text is a
+     * text chapter"). Those pages do not exist until the chapter has loaded, which happens after
+     * this is first called, and nothing rebuilt the viewer afterwards. So the text provider always
+     * saw `viewerChapters == null`, declined, and every EPUB fell through to an image viewer.
+     *
+     * Defer instead: build the viewer once the first chapter's pages are known. `setChapters` calls
+     * back in, so this is not a new path - it is the same call, one moment later. The reader already
+     * shows `loadingIndicator` over the empty container for exactly this window, so nothing flashes.
+     * KMK <--
      */
     private fun updateViewer(force: Boolean = false) {
         val mode = viewModel.getMangaReadingMode()
@@ -1061,6 +1072,10 @@ class ReaderActivity : BaseActivity() {
             setOrientation(viewModel.getMangaOrientation())
             return
         }
+        // KMK --> Nothing to select from yet. If the chapter fails to load, onInitError finishes
+        // the activity, so there is no state in which this is never followed by setChapters.
+        if (prevViewer == null && viewModel.state.value.viewerChapters == null) return
+        // KMK <--
         val newViewer = ReadingMode.toViewer(
             mode,
             this,
@@ -1185,6 +1200,12 @@ class ReaderActivity : BaseActivity() {
      */
     @SuppressLint("RestrictedApi")
     private fun setChapters(viewerChapters: ViewerChapters) {
+        // KMK --> Build the viewer before touching loadingIndicator: it is created inside
+        // updateViewer, and a provider that picks itself from the chapter's pages needs them to
+        // exist first. updateViewer is a no-op once a viewer is built for the same reading mode,
+        // so the chapter-change path costs nothing here.
+        updateViewer()
+        // KMK <--
         binding.readerContainer.removeView(loadingIndicator)
         // SY -->
         val state = viewModel.state.value

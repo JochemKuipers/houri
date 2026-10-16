@@ -22,6 +22,16 @@ interface MangaRepository {
 
     suspend fun getLibraryManga(): List<LibraryManga>
 
+    /**
+     * How many series are in the library, without building them.
+     *
+     * [getLibraryManga] runs the full `libraryView` query - chapter counts, category aggregation
+     * and all - and allocates a [LibraryManga] per series. That is the right call to *read* the
+     * library and the wrong one to answer "how many are there", which is what the restore asked
+     * after writing thousands of entries.
+     */
+    suspend fun getLibraryCount(): Long
+
     fun getLibraryMangaAsFlow(): Flow<List<LibraryManga>>
 
     fun getFavoritesBySourceId(sourceId: Long): Flow<List<Manga>>

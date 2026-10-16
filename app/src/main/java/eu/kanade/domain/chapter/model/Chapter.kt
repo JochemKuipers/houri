@@ -45,4 +45,7 @@ fun Chapter.toDbChapter(): DbChapter = ChapterImpl().also {
     // SY -->
     it.last_modified = lastModifiedAt
     // SY <--
+    // KMK --> Preserved through the legacy model, or the reader's chapter list loses the colour.
+    it.bookmark_color = bookmarkColor.value.toLong()
+    // KMK <--
 }

@@ -57,6 +57,19 @@ Modular preferences with automatic UI wiring — full guide:
 ## Backup & restore
 
 Code in `eu.kanade.tachiyomi.data.backup.{create,restore}`:
+- A restore **streams the file**: `BackupDecoder.decodeMetadata` walks the entries by length to
+  count them and hands back everything else, and `decodeEntries(uri, include)` yields one
+  `BackupManga` at a time, skipping rejected ones by length (`BackupReader.kt` walks the protobuf
+  by hand; the wire format is unchanged, so old and new backups are both readable). Never call
+  `decode(uri)` on a restore path — it materialises the whole library, which is the thing the
+  streaming pass exists to avoid. `decode(uri)` is for the integrity check, which needs every
+  entry's trackers.
+- Entry order is a **classification**, not a sort: `restorePhaseOf` returns NEW / EXISTING / MERGED
+  and `BackupRestorer` walks the file twice to realise it. Sorting would mean holding every entry
+  to order it.
+- `MangaRestorer.restore` takes a **list** and opens **one transaction for the chunk**, falling
+  back to entry-by-entry in `BackupRestorer` if the batch throws. One transaction per entry was
+  ~15 000 commits on a large library; see `restore`'s own comment.
 - `PreferenceBackupCreator` snapshots `preferenceStore.getAll()` → typed `BackupPreference`
   list; always drops `__APP_STATE_`, drops `__PRIVATE_` unless user opts in.
 - `PreferenceRestorer` type-switches values back; remaps category IDs; special-cases

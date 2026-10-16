@@ -9,6 +9,10 @@ SELECT
     chapters.url AS chapterUrl,
     chapters.read,
     chapters.bookmark,
+    -- KMK --> Why the chapter was bookmarked. Without it the update list could not tint the
+    -- bookmark, so every coloured bookmark fell back to the theme's primary there while the
+    -- details screen (which reads the chapter directly) showed the colour.
+    chapters.bookmark_color,
     chapters.last_page_read,
     mangas.source,
     mangas.favorite,
@@ -34,6 +38,9 @@ SELECT
     chapters.url AS chapterUrl,
     chapters.read,
     chapters.bookmark,
+    -- KMK --> Same column as the non-merged branch above: both halves of a UNION must agree on
+    -- the column list, or SQLite rejects the view outright.
+    chapters.bookmark_color,
     chapters.last_page_read,
     mangas.source,
     mangas.favorite,
