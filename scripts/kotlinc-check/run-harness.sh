@@ -47,6 +47,22 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
              "$REPO_ROOT/app/src/main/java/eu/kanade/tachiyomi/ui/reader/viewer/novel" \
              -name 'EpubPaths.kt' -o -name 'EpubBook.kt' \
              -o -name 'NovelTypography.kt' -o -name 'NovelTypographyCss.kt' -o -name 'NovelProgress.kt' \
+             -o -name 'NovelDocument.kt' -o -name 'NovelScrollBridge.kt' \
+             -o -name 'NovelNavigation.kt' \
+        2>/dev/null | sort -u
+    )
+    # EpubDoctype carries the XXE defence that EpubXmlReader applies, which DocumentHarness asserts. It
+    # lives in its own file precisely so it can be compiled here directly rather than stubbed: a stub
+    # would be a *copy*, and a test that asserts the copy proves nothing about the thing that runs.
+    SOURCES+=("$REPO_ROOT/core/archive/src/main/kotlin/mihon/core/archive/EpubDoctype.kt")
+    # NovelNavigation models the contents/search results, so it needs the two extension-API models it
+    # is built from. Both are plain data classes: no serialization plugin, no Android, no native.
+    # TextSearchHit deliberately lives in its own file rather than beside TextSearchSource - the
+    # interface imports SChapter, which would drag the serialization plugin into every offline check
+    # that wants to assert on a search hit.
+    while IFS= read -r f; do SOURCES+=("$f"); done < <(
+        find "$REPO_ROOT/source-api/src/commonMain/kotlin/eu/kanade/tachiyomi/source" \
+             -name 'TocEntry.kt' -o -name 'TextSearchHit.kt' \
         2>/dev/null | sort -u
     )
     SOURCES+=("$MAIN")

@@ -29,8 +29,10 @@ replacing it: an image source implements `getPageList(chapter): List<Page>`, a t
 | `TextCapabilities.kt` | What the source actually implements, so hosts hide controls they cannot honour |
 | `TextTocSource.kt` | `getTableOfContents` -> `TocEntry` (nested) |
 | `TextSearchSource.kt` | `searchInChapter` -> `TextSearchHit` |
+| `TextSearchHit.kt` | One match: snippet + where it is, in the source's own plain-text units |
 | `TextAnnotationSource.kt` | Highlights / bookmarks / notes persistence |
 | `TextResourceSource.kt` | Streams a page's images, CSS and fonts |
+| `TextBaseUrlSource.kt` | Optional: the URL each page must be *loaded* at |
 
 **Why `TextPage` is not `Page`.** An image has progressive load states, a progress flow and a retry
 path. Text arrives with the chapter list. Modelling it as `Page` would make every host carry a status
@@ -52,6 +54,20 @@ demand — see `source-epub/EpubResourceReader.kt` for the reserved `.internal` 
 - Return **natural units** (EPUB spine items, one webnovel chapter per page), not pre-paginated
   chunks: hosts re-flow text to the screen, so a fixed character count is cut mid-sentence at most
   font sizes.
+
+**Never add a method to an interface here.** Extensions loaded through a classloader implement
+`TextSource`, `TextResourceSource` and friends; a new abstract member breaks every extension that
+predates it, and R8 cannot see the implementations across the dex boundary to warn you. Add a new
+optional interface instead and have hosts check for it — `TextBaseUrlSource` exists for exactly this
+reason: `TextResourceSource` can open an absolute URL, but only the source knows the absolute URL its
+pages' relative references should resolve against, and that is the difference between a book
+rendering with its own stylesheet and rendering as bare text.
+
+**Adding a field to a model here is safe; adding a parameter without a default is not.** The models
+are data classes with defaults and are covered by `@Serializable`, so a new field is source- and
+format-compatible: an older extension keeps loading, a newer host reads the default. `TextSearchHit`
+gained `documentOffset`/`documentLength` this way, both defaulting to 0, because without them a host
+physically cannot scroll to a hit — the only offset it had was into the snippet.
 
 R8: every class here is covered by `consumer-proguard.pro`. Extension APKs load via classloader, so
 R8 cannot see their implementations across the dex boundary.

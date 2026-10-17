@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material.icons.outlined.FormatListNumbered
+import androidx.compose.material.icons.outlined.List
 import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material3.Icon
@@ -22,6 +24,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import kotlinx.collections.immutable.ImmutableSet
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.i18n.stringResource
 
@@ -45,6 +48,10 @@ fun ReaderBottomBar(
     onClickWebView: (() -> Unit)?,
     onClickBrowser: (() -> Unit)?,
     onClickShare: (() -> Unit)?,
+    // KMK -->
+    onClickContents: (() -> Unit)?,
+    onClickSearch: (() -> Unit)?,
+    // KMK <--
     onClickPageLayout: () -> Unit,
     onClickShiftPage: () -> Unit,
     // SY <--
@@ -188,6 +195,28 @@ fun ReaderBottomBar(
                 // KMK <--
             )
         }
+        // KMK --> Text chapters only. Supplied by the activity only when the open chapter's source can
+        // answer, so an extension without a contents or without search simply has no such button.
+        if (ReaderBottomButton.NovelContents.isIn(enabledButtons) && onClickContents != null) {
+            IconButton(onClick = onClickContents) {
+                Icon(
+                    imageVector = Icons.Outlined.List,
+                    contentDescription = stringResource(KMR.strings.novel_contents),
+                    tint = iconColor,
+                )
+            }
+        }
+
+        if (ReaderBottomButton.NovelSearch.isIn(enabledButtons) && onClickSearch != null) {
+            IconButton(onClick = onClickSearch) {
+                Icon(
+                    imageVector = Icons.Outlined.Search,
+                    contentDescription = stringResource(KMR.strings.novel_search),
+                    tint = iconColor,
+                )
+            }
+        }
+        // KMK <--
         // SY <--
     }
 }

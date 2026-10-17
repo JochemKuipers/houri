@@ -6,6 +6,10 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelProgress
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.preference.SettingKey
@@ -144,6 +148,53 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
         marginTop.set(t.marginTop)
         marginBottom.set(t.marginBottom)
     }
+
+    /**
+     * The whole typography, re-emitted whenever any setting behind it changes.
+     *
+     * The settings are separate preferences rather than one aggregate, so a change to any of them has
+     * to be funnelled into a single emission of the *complete* value. The reader swaps one stylesheet
+     * in the live DOM, and a flow that reported only which field moved would make it re-read and
+     * re-inject sixteen times for one slider drag that touched one of them.
+     *
+     * Each source is flattened to a bare "something moved" signal first. That keeps them sixteen
+     * `Flow<Unit>`s instead of sixteen different types, so `merge` has one type argument to infer
+     * rather than a sixteen-way common supertype to compute — and it leaves the payload read as one
+     * call to [typography] after the merge, so a value read cannot be torn across two settings.
+     */
+    fun changes(): Flow<NovelTypography> {
+        val signals: Array<Flow<Unit>> = arrayOf(
+            fontSize.changes().asSignal(),
+            fontScale.changes().asSignal(),
+            fontFamily.changes().asSignal(),
+            fontColor.changes().asSignal(),
+            backgroundColor.changes().asSignal(),
+            smoothText.changes().asSignal(),
+            lineSpacing.changes().asSignal(),
+            paragraphSpacing.changes().asSignal(),
+            fontSpacing.changes().asSignal(),
+            marginLeft.changes().asSignal(),
+            marginRight.changes().asSignal(),
+            marginTop.changes().asSignal(),
+            marginBottom.changes().asSignal(),
+            justifiedPref.changes().asSignal(),
+            hyphenationPref.changes().asSignal(),
+            verticalWritingPref.changes().asSignal(),
+        )
+        // Spread rather than passed as a List: `merge`'s overload set has no `Iterable` + transform
+        // form, so a List argument silently binds to the single-argument Iterable overload instead and
+        // the call does not compile.
+        return merge(*signals).map { typography() }
+    }
+
+    /**
+     * This preference's changes as a bare signal.
+     *
+     * `drop(1)` removes the synthetic first emission every preference flow makes on collection, so a
+     * subscriber is not handed the value it already had at subscription time — which for a live
+     * stylesheet re-inject would mean re-laying-out the open page for nothing.
+     */
+    private fun <T> Flow<T>.asSignal(): Flow<Unit> = drop(1).map { }
 
     // ------------------------------------------------------------ position
 

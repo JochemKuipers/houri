@@ -777,6 +777,24 @@ class ReaderViewModel(
     }
 
     /**
+     * Called by a viewer that has reached a chapter boundary itself.
+     *
+     * KMK --> The novel viewer has no transition page: a book is a continuous scroll with no place to
+     * draw one, so "the reader reached the end" has to reach the presenter from the viewer. Going
+     * through [loadAdjacent] rather than through `onPageSelected` is deliberate — that path returns
+     * early while `chapter.pages` is still null, which for a chapter that has not been loaded yet is
+     * exactly the case here, so the switch would silently do nothing.
+     *
+     * Reuses the same call the next/previous toolbar buttons make, so the progress dialog, the
+     * history update and the read-timer reset all behave identically whichever way the reader got
+     * there.
+     * KMK <--
+     */
+    fun goToAdjacentChapter(chapter: ReaderChapter) {
+        viewModelScope.launchIO { loadAdjacent(chapter) }
+    }
+
+    /**
      * Called when the user is going to load the prev/next chapter through the toolbar buttons.
      */
     private suspend fun loadAdjacent(chapter: ReaderChapter) {
@@ -1605,6 +1623,18 @@ class ReaderViewModel(
         mutableState.update { it.copy(dialog = Dialog.Settings) }
     }
 
+    // KMK --> Text chapters get a table of contents and an in-chapter search. Both are opt-in by the
+    // chapter: a source that cannot produce one must not put a button on screen that opens nothing, so
+    // the activity only offers these when the loader says it can answer.
+    fun openNovelContentsDialog() {
+        mutableState.update { it.copy(dialog = Dialog.NovelContents) }
+    }
+
+    fun openNovelSearchDialog() {
+        mutableState.update { it.copy(dialog = Dialog.NovelSearch) }
+    }
+    // KMK <--
+
     fun closeDialog() {
         mutableState.update { it.copy(dialog = null) }
     }
@@ -1987,6 +2017,13 @@ class ReaderViewModel(
         // SY -->
         data object ChapterList : Dialog
         // SY <--
+
+        // KMK --> Text-chapter surfaces. Model-free: what they act on is the open chapter, which the
+        // activity reads off the viewer when the sheet opens, so a dialog state that has to be built
+        // per chapter would need invalidating on every chapter change for no benefit.
+        data object NovelContents : Dialog
+        data object NovelSearch : Dialog
+        // KMK <--
 
         data class PageActions(
             val page: ReaderPage,

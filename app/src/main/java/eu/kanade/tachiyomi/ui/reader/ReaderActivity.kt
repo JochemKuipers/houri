@@ -38,6 +38,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +73,8 @@ import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.reader.ChapterListDialog
 import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.MtlTranslationOverlay
+import eu.kanade.presentation.reader.NovelSearchDialog
+import eu.kanade.presentation.reader.NovelTocDialog
 import eu.kanade.presentation.reader.OrientationSelectDialog
 import eu.kanade.presentation.reader.ReaderContentOverlay
 import eu.kanade.presentation.reader.ReaderPageActionsDialog
@@ -97,6 +101,7 @@ import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.AddToLibra
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Error
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Success
 import eu.kanade.tachiyomi.ui.reader.loader.HttpPageLoader
+import eu.kanade.tachiyomi.ui.reader.loader.TextPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
@@ -105,6 +110,10 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
+import eu.kanade.tachiyomi.ui.reader.viewer.isTextChapter
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelSearchScreenModel
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTocScreenModel
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelWebViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerConfig
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.WebGpuViewer
@@ -414,6 +423,10 @@ class ReaderActivity : BaseActivity() {
             )
             // KMK <--
 
+            // KMK --> Bound once for the two text-chapter sheets below. `state` is a delegated property, so a
+            // smart cast on it is not available and each branch would repeat the cast.
+            val novelViewer = state.viewer as? NovelWebViewer
+            // KMK <--
             val onDismissRequest = viewModel::closeDialog
             when (state.dialog) {
                 is ReaderViewModel.Dialog.Loading -> {
@@ -532,6 +545,102 @@ class ReaderActivity : BaseActivity() {
                         // KMK <--
                     )
                 }
+
+                // KMK --> The two text-chapter sheets. A sheet opened against a chapter that cannot answer
+                // (an extension without a contents, or one whose viewer just got rebuilt) is dismissed
+                // rather than left showing an empty list.
+                //
+                // The dismiss is a LaunchedEffect, not a bare call, because this is composable *body*
+                // code: closeDialog() writes reader state, and writing state during composition is the
+                // one thing Compose is documented not to tolerate. It surfaced as the sheet opening and
+                // closing again immediately, or as a recomposition loop, depending on the frame.
+                is ReaderViewModel.Dialog.NovelContents -> {
+                    val chapter = state.currentChapter
+                    val loader = chapter?.pageLoader as? TextPageLoader
+                    val tocSource = loader?.tocSource
+                    val sourceChapter = loader?.sChapter
+                    val pages = chapter?.pages
+                    val viewer = novelViewer
+                    val unavailable = tocSource == null || sourceChapter == null || viewer == null || pages == null
+                    LaunchedEffect(unavailable) { if (unavailable) onDismissRequest() }
+                    if (!unavailable) {
+                        // Keyed on the current document as well, deliberately, and that is the one key here that is
+                        // *not* about load ordering. The sheet is modal, so the reader cannot turn a
+                        // document while it is open and this cannot thrash the model in practice -
+                        // but reading `viewer.currentDocument` outside the key would let the mark
+                        // and the scroll target drift from the document actually on screen, which
+                        // is the precise bug this parameter was added to fix.
+                        val screenModel = remember(loader, sourceChapter, pages, viewer.currentDocument) {
+                            NovelTocScreenModel(
+                                source = tocSource!!,
+                                chapter = sourceChapter!!,
+                                // Only what this chapter loaded: an entry pointing anywhere else is
+                                // shown, but marked untappable, rather than pretending to work.
+                                //
+                                // `pages` is part of the remember key, not just read inside it. The
+                                // contents button is offered as soon as the *loader* exists - deliberately,
+                                // because that is the earliest state that settles anything - and the loader
+                                // routinely exists before the page list does. Keying on the loader alone
+                                // therefore froze the empty set into the model, so every row stayed
+                                // unreachable and the sheet reported itself empty for a book with a perfectly
+                                // good contents.
+                                availableDocuments = pages
+                                    .mapNotNull { it.textPage?.url }
+                                    .toSet(),
+                                // Which entry the reader is actually inside, so the sheet can mark it
+                                // and open scrolled to it. Read off the viewer rather than the stored
+                                // position: that follows the reader as they move, and a long book
+                                // should not open its contents pinned to the last place they stopped.
+                                currentDocument = viewer.currentDocument,
+                            )
+                        }
+                        // Owns a scope; see the matching note on the search sheet below.
+                        DisposableEffect(screenModel) {
+                            onDispose { screenModel.dispose() }
+                        }
+                        NovelTocDialog(
+                            onDismissRequest = onDismissRequest,
+                            screenModel = screenModel,
+                            onClickEntry = { entry ->
+                                viewer!!.jumpTo(entry.document, entry.fragment)
+                                onDismissRequest()
+                                setMenuVisibility(false)
+                            },
+                        )
+                    }
+                }
+
+                is ReaderViewModel.Dialog.NovelSearch -> {
+                    val loader = state.currentChapter?.pageLoader as? TextPageLoader
+                    val searchSource = loader?.searchSource
+                    val sourceChapter = loader?.sChapter
+                    val pages = state.currentChapter?.pages
+                    val viewer = novelViewer
+                    val unavailable = searchSource == null || sourceChapter == null || viewer == null || pages == null
+                    LaunchedEffect(unavailable) { if (unavailable) onDismissRequest() }
+                    if (!unavailable) {
+                        val screenModel = remember(loader, sourceChapter) {
+                            NovelSearchScreenModel(source = searchSource!!, chapter = sourceChapter!!)
+                        }
+                        // The model owns a coroutine scope (see `NovelSearchScreenModel.job`) and
+                        // nothing else would ever cancel it: Voyager's `ScreenModelStore` is only
+                        // disposed by the navigator, and this model was never handed to one. Without
+                        // this the debounce collector, the `SChapter` and the source outlive the sheet.
+                        DisposableEffect(screenModel) {
+                            onDispose { screenModel.dispose() }
+                        }
+                        NovelSearchDialog(
+                            onDismissRequest = onDismissRequest,
+                            screenModel = screenModel,
+                            onClickResult = { result ->
+                                viewer!!.jumpToFraction(result.pageIndex, result.fraction)
+                                onDismissRequest()
+                                setMenuVisibility(false)
+                            },
+                        )
+                    }
+                }
+                // KMK <--
 
                 ReaderViewModel.Dialog.AutoScrollHelp -> AlertDialog(
                     onDismissRequest = onDismissRequest,
@@ -825,6 +934,23 @@ class ReaderActivity : BaseActivity() {
                 (viewModel.state.value.viewer as? WebGpuViewer)?.isDualPageMode() == true,
             // KMK <--
             onClickChapterList = viewModel::openChapterListDialog,
+            // KMK --> Only offered when the open chapter's source can actually answer *and* the
+            // chapter's pages are in. A button that opens an empty sheet reads as a bug in the reader
+            // rather than in the book. Read through the chapter, not the viewer: a viewer can be
+            // rebuilt while the chapter stays the same.
+            //
+            // The page list is part of the condition, not just the loader. The loader exists before
+            // the first page is read - that is the whole reason viewer selection can wait on it - so
+            // gating on the loader alone puts the button on screen while the chapter is still loading,
+            // and the sheet then opens onto a chapter with nothing in it.
+            onClickContents = viewModel::openNovelContentsDialog.takeIf {
+                val chapter = state.currentChapter
+                (chapter?.pageLoader as? TextPageLoader)?.tocSource != null && chapter.pages != null
+            },
+            onClickSearch = viewModel::openNovelSearchDialog.takeIf {
+                val chapter = state.currentChapter
+                (chapter?.pageLoader as? TextPageLoader)?.searchSource != null && chapter.pages != null
+            },
             onClickPageLayout = {
                 if (readerPreferences.pageLayout().get() == PagerConfig.PageLayout.AUTOMATIC) {
                     (viewModel.state.value.viewer as? PagerViewer)?.config?.let { config ->
@@ -1072,9 +1198,24 @@ class ReaderActivity : BaseActivity() {
             setOrientation(viewModel.getMangaOrientation())
             return
         }
-        // KMK --> Nothing to select from yet. If the chapter fails to load, onInitError finishes
-        // the activity, so there is no state in which this is never followed by setChapters.
-        if (prevViewer == null && viewModel.state.value.viewerChapters == null) return
+        // KMK --> Nothing to select from yet, and "nothing" must mean *no loader*, not "no pages".
+        //
+        // Viewer providers may decide from the chapter's content rather than from a source id, so
+        // building before the chapter is loaded hands every one of them nothing to decide on and they
+        // decline - the text reader included, which is how an EPUB ends up in the pager. The loader is
+        // the earliest state that settles it: ChapterLoader assigns it before it reads a single page,
+        // and it exists in the same update that publishes viewerChapters.
+        //
+        // If the chapter fails to load, onInitError finishes the activity, so there is no state in
+        // which this is never followed by setChapters.
+        if (prevViewer == null && viewModel.state.value.currentChapter?.pageLoader == null) {
+            logcat {
+                "ReaderActivity.updateViewer: DEFERRED - no page loader yet " +
+                    "(chapter=${viewModel.state.value.currentChapter?.chapter?.url ?: "none"}, " +
+                    "viewerChapters=${viewModel.state.value.viewerChapters != null})"
+            }
+            return
+        }
         // KMK <--
         val newViewer = ReadingMode.toViewer(
             mode,
@@ -1083,6 +1224,16 @@ class ReaderActivity : BaseActivity() {
             seedColor = seedColorStatic()?.toArgb(),
             // KMK <--
         )
+
+        // KMK --> Which renderer a chapter actually got. A wrong choice here is invisible from the
+        // UI - the reader opens, the app bar looks right, and the page is blank - so the one line that
+        // makes it diagnosable is this one.
+        logcat {
+            "ReaderActivity.updateViewer: built ${newViewer::class.simpleName} " +
+                "mode=$mode chapter=${viewModel.state.value.currentChapter?.chapter?.url} " +
+                "source=${viewModel.state.value.currentChapter?.chapter?.manga_id} " +
+                "(text=${isTextChapter()})"
+        }
 
         if (window.sharedElementEnterTransition is MaterialContainerTransform) {
             // Wait until transition is complete to avoid crash on API 26

@@ -5,6 +5,15 @@ package org.xmlpull.v1
 import java.io.InputStream
 import java.io.Reader
 
+/**
+ * Real xmlpull v1 declares no feature constants for external entity resolution - those live on
+ * individual implementations, not the interface. `EpubXmlReader.requireEntitySafeParser` relies on
+ * that absence and fails with this type, so the stub has to be faithful on both counts: adding a
+ * FEATURE_EXTERNAL_* constant here would make the offline check accept code that does not compile
+ * against the real interface.
+ */
+class XmlPullParserException(message: String?) : Exception(message)
+
 interface XmlPullParser {
     var inputEncoding: String?
     val eventType: Int

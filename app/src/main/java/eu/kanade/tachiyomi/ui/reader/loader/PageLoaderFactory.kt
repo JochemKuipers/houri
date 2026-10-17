@@ -9,9 +9,11 @@ import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.source.text.TextSource
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import logcat.LogPriority
 import mihon.core.archive.archiveReader
 import mihon.core.archive.epubReader
 import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MergedMangaReference
 import tachiyomi.domain.source.model.StubSource
@@ -55,12 +57,37 @@ object PageLoaderRegistry {
     }
 
     fun create(request: PageLoaderRequest): PageLoader {
+        // KMK --> One line per loader decision, because "a book opens as pictures" is otherwise
+        // indistinguishable from "the reader ignored the book". The provider that claims a chapter
+        // decides which half of the app it gets, and nothing about that choice is visible from the UI:
+        // an EPUB served as images by EpubPageLoader looks exactly like a working comic reader.
+        logcat {
+            "Reader: choosing a page loader for '${request.chapter.chapter.name}' " +
+                "(chapter url=${request.chapter.chapter.url}) from " +
+                "source=${request.source::class.java.simpleName}#${request.source.id} " +
+                "lang=${request.source.lang} isTextSource=${request.source is TextSource}"
+        }
         for (provider in providers.sortedBy { it.order }) {
             val loader = runCatching { provider.create(request) }.getOrNull()
-            if (loader != null) return loader
+            logcat {
+                "Reader:   ${provider::class.java.simpleName}(order=${provider.order}) " +
+                    "-> ${loader?.let { it::class.java.simpleName } ?: "declined"}"
+            }
+            if (loader != null) {
+                logcat {
+                    "Reader: loader chosen = ${loader::class.java.simpleName} for " +
+                        "source#${request.source.id} (${request.source.name})"
+                }
+                return loader
+            }
+        }
+        logcat(LogPriority.ERROR) {
+            "Reader: NO page loader provider claimed chapter url=${request.chapter.chapter.url} " +
+                "from source#${request.source.id}"
         }
         error(request.context.stringResource(MR.strings.loader_not_implemented_error))
     }
+    // KMK <--
 }
 
 // KMK --> Text sources (EPUB, web novel) are consulted first: they are a distinct contract with no

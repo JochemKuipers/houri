@@ -13,4 +13,8 @@
         <item quantity="one">%1$d duplicate</item>
         <item quantity="other">%1$d duplicates</item>
     </plurals>
+    <plurals name="novel_search_result_count">
+        <item quantity="one">%1$d match</item>
+        <item quantity="other">%1$d matches</item>
+    </plurals>
 </resources>

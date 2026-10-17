@@ -56,10 +56,21 @@ The reader's preferences are layered on as an injected stylesheet; the document 
 
 | File | Concern |
 |------|---------|
-| `NovelWebViewer.kt` | The WebView, resource interception, and the `ViewerProvider` that selects it |
+| `NovelWebViewer.kt` | The WebView, taps and keys, document/chapter turning, and the `ViewerProvider` that selects it |
+| `NovelDocument.kt` | Turns one spine item's XHTML into a document the engine can be handed |
+| `NovelScrollBridge.kt` | `window.KmkReader` — how the host measures and scrolls the document, and `quoteForJs` |
+| `NovelNavigation.kt` | Contents rows and search results: the pure mapping from source models to renderable ones |
+| `NovelReaderScreenModels.kt` | `NovelTocScreenModel` + `NovelSearchScreenModel` |
 | `NovelTypography.kt` | The settings value. No Android imports, so it is unit-testable |
-| `NovelTypographyCss.kt` | Turns that value into a stylesheet; `applyTo` is idempotent |
+| `NovelTypographyCss.kt` | Turns that value into a stylesheet; `styleTag` escapes `</` |
 | `NovelProgress.kt` | Reading position and percentage progress |
+
+The two sheets themselves are in `presentation/reader/NovelReaderDialogs.kt`, beside the rest of the
+reader's dialogs.
+
+Typography settings *and* per-chapter reading positions both live in `NovelTypographyPreferences`
+(`reader/setting/`), not here — the viewer reads them through it and subscribes to `changes()` for
+the live re-apply. A separate store for either would be a second answer to the same question.
 
 **Tri-state preferences.** `justified`, `hyphenation` and `verticalWriting` are `Boolean?` where
 `null` means *follow the publisher*, stored as the string `"follow"`. They are nullable on purpose: a
@@ -74,14 +85,100 @@ simply omitted when null.
 specificity grounds those win over a host rule and the user's font size silently does nothing. This is
 the single most common complaint about EPUB readers.
 
+**The base URL is per document, and it is the highest-consequence detail in the folder.** It comes
+from `TextPage.baseHref` through `TextBaseUrlSource`, which for an EPUB is the *directory* the spine
+item sits in — not the archive root. With the root as the base, a document at `OEBPS/Text/ch1.xhtml`
+resolves `../styles/main.css` to `styles/main.css` instead of `OEBPS/styles/main.css`: every
+stylesheet, illustration and embedded font 404s and the book renders as bare text wearing only the
+reader's own styling. Nothing errors, which is exactly why it presents as "the reader shows nothing"
+rather than "a file is missing".
+
+**Injected at two points, for two reasons.** `NovelDocument` puts `<base>` and the charset at the
+*top* of the head and the reader's stylesheet at the *end*. The base has to precede every element
+with a relative URL — including the publisher's own `<link>`, which the preload scanner may have
+resolved already — and a charset declaration is only honoured near the top of a document. The
+stylesheet has to be last because `!important` against `!important` is decided by source order. A
+publisher's own `<base>` is stripped first: the first one in a document wins, so theirs would
+silently outrank ours.
+
+**The bridge is a `<script>`, and its result is JSON.** `evaluateJavascript` hands back the *JSON
+encoding* of the script's return value, so a script returning `NaN` arrives as the five characters
+`null`. `NovelScrollBridge.number` has to read that as "no movement", or every tap near a page edge
+turns the document instead of doing nothing.
+
+**A missing resource answers 404, not null.** `shouldInterceptRequest` returning null hands the URL
+back to the platform, which then waits on a scheme nothing handles — so one missing plate holds the
+document's layout hostage. A 404 shows a broken image and gets out of the way.
+
 **Progress is a character offset, not a page index.** A page index in a reflowable document means
 something different on every device and at every font size; `NovelProgress.Position`
 (`documentIndex:characterOffset:characterLength`) is stable across all of them. Chapters are weighted
 by character length so a book with 200 one-paragraph interstitial files does not read as 2% done.
+Persisted per chapter in a `__PRIVATE_` preference, not a column: it is a property of how a document
+happens to lay out today, not of the chapter, and losing it costs one lost position.
 
-**Viewer selection is by content, not by source id.** `NovelViewerProvider` picks itself when the
-loaded chapter's pages carry `textPage`. An extension therefore gets this reader the moment it
-implements `TextSource`, with no change here.
+**The viewer subscribes to `NovelTypographyPreferences.changes()` itself.** Read once at construction
+so the first document is never painted unstyled, then observed for the rest of its life — otherwise the
+settings screen re-lays-out a book nobody reopens and the reader concludes the setting does nothing.
+The job is cancelled in `destroy()`, because the activity's scope outlives a viewer that a
+reading-mode switch has already torn down.
+
+## Contents and search
+
+`TextTocSource` and `TextSearchSource` are implemented by the EPUB source and had no UI at all. The
+two sheets close that, and both are offered from the bottom bar **only when the open chapter's
+loader can answer** (`TextPageLoader.tocSource` / `.searchSource`) — a button that opens an empty
+sheet reads as a bug in the reader rather than in the book.
+
+**A jump is a reload plus a position.** `jumpTo`/`jumpToFraction` call `showDocument` and only then
+set what to scroll to, because `showDocument` clears the pending position and the engine cannot answer
+`onPageFinished` before the call returns. Every position is applied in `onPageFinished`: an anchor
+measured against a document that has not laid out resolves to the top of an empty page.
+
+**A contents entry for another chapter is shown, not dropped.** A whole-book contents points at files
+the open chapter never loaded. Those rows render disabled (`NovelTocEntry.reachable`) so the structure
+of the book stays visible; silently doing nothing on tap reads as a broken button.
+
+**A search hit carries a document offset *and* a document length, in the source's plain text.** The
+host holds markup, the source searched plain text, and dividing one by the other lands tens of
+percent of a page out — so the ratio crosses over and only the ratio. `toSearchResults` keeps hits
+whose source reported no length (an extension predating the field) at the top of their document
+rather than dropping them. See `TextSearchHit` for the whole argument.
+
+**Contents fragment ids are untrusted.** They come out of the book's own TOC and end up inside a
+script, so they go through `NovelScrollBridge.quoteForJs` — including `</` and U+2028/U+2029, which a
+JS parser treats as script terminators and Kotlin does not. `DocumentHarness` asserts the
+break-out cases.
+
+**Viewer selection is by loader, and it never falls back.** `NovelViewerProvider` claims a chapter
+whose loader is a `TextPageLoader` — which is exactly what `PageLoaderRegistry` picks for a
+`TextSource` and nothing else. An extension therefore gets this reader the moment it implements
+`TextSource`, with no change here.
+
+Two rules make the fall-through impossible, and both were learned the hard way:
+
+- **Decide from the loader, not from the page content.** `page.textPage` was the original signal and
+  it is wrong twice over: it needs the page list to exist, and while it does not it reports null —
+  indistinguishable from "not a text chapter", which is precisely how an EPUB reached the pager. The
+  loader is assigned by `ChapterLoader` before a single page is read, and lands in the same state
+  update that publishes `viewerChapters`, so it is available exactly as early as anything could be.
+- **`ViewerRegistry` asks `declinesTextChapters`, so an image viewer is never even offered a text
+  chapter.** A `null` from a provider means "not my kind of chapter", not "not this instance of it". If
+  no provider claims a text chapter, `create` throws rather than handing an EPUB to a pager that can
+  only render it blank.
+
+`ReaderActivity.updateViewer` guards on `currentChapter?.pageLoader == null` — not on pages. A viewer
+that can decide from chapter content would otherwise be consulted before there was anything to decide
+on and decline, and nothing would rebuild it later. `ReaderActivity.setChapters` calls back in.
+
+**The chosen renderer is logged.** `updateViewer` logs which viewer it built and whether the chapter
+was text. A wrong choice is invisible from the UI — the reader opens, the app bar looks right, the
+page is blank — so that line is what makes the next report diagnosable instead of a guessing game.
+
+**The novel viewer turns chapters itself.** It has no transition page to draw the way the pager and
+webtoon viewers do, so reaching a chapter boundary goes through `ReaderViewModel.goToAdjacentChapter`,
+which reuses the same `loadAdjacent` path the toolbar buttons use. Not `onPageSelected`: that returns
+early while `chapter.pages` is null, which is exactly the case for a chapter not yet loaded.
 
 Resources (images, CSS, fonts) are streamed by the `TextPageLoader`'s `resourceSource` over the
 reserved `epub-archive://book.internal/` scheme — see `source-epub/AGENTS.md`.
@@ -124,3 +221,13 @@ Strip and continuous reading use separate image processors (split 2026-08-31):
   force it, and it cannot then be unforced.
 - Do not re-run `loadDataWithBaseURL` to apply a typography change — it drops the scroll position on
   every slider drag. Swap the stylesheet in the live DOM (`liveTypographyJs`).
+- Do not load a novel document at `EpubResourceReader.BASE_URL`. That is the archive root and is only
+  right for a spine item that already sits there; take the base from the page.
+- Do not let a viewer provider return null for a chapter it is the only renderer for. That is
+  not a fallback, it is handing the reader to something that cannot display the content.
+- Do not add a method to `TextSource` / `TextResourceSource` / `TextPage`. Extensions implement them
+  across a classloader boundary, so a new abstract method breaks every one that predates it — add a
+  separate optional interface instead, as `TextBaseUrlSource` does.
+- Do not wrap a `suspend` call in `runCatching`. Its block is not a suspend lambda; it does not
+  compile. Use `try`/`catch`.
+- Do not interpolate an id, fragment or path from a book into a script without `quoteForJs`.

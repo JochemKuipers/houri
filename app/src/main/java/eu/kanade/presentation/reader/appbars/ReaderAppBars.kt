@@ -80,6 +80,11 @@ fun ReaderAppBars(
     cropEnabled: Boolean,
     onClickCropBorder: () -> Unit,
     onClickSettings: () -> Unit,
+    // KMK --> Null for a chapter whose source cannot answer. The bottom bar draws a button only for a
+    // callback it was given, so an extension without a contents or without search simply shows none.
+    onClickContents: (() -> Unit)? = null,
+    onClickSearch: (() -> Unit)? = null,
+    // KMK <--
     // SY -->
     isExhToolsVisible: Boolean,
     onSetExhUtilsVisibility: (Boolean) -> Unit,
@@ -281,6 +286,10 @@ fun ReaderAppBars(
                     onClickWebView = onOpenInWebView,
                     onClickBrowser = onOpenInBrowser,
                     onClickShare = onShare,
+                    // KMK -->
+                    onClickContents = onClickContents,
+                    onClickSearch = onClickSearch,
+                    // KMK <--
                     onClickPageLayout = onClickPageLayout,
                     onClickShiftPage = onClickShiftPage,
                     // SY <--

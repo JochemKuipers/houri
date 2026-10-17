@@ -26,6 +26,11 @@
 #   scripts/kotlinc-check/check.sh <file-or-dir>...
 #   scripts/kotlinc-check/check.sh core/archive/src/main/kotlin/mihon/core/archive/Epub*.kt
 #
+# SIBLING TOOLS IN THIS DIRECTORY
+#   run-harness.sh    asserts pure logic against real project sources
+#   check_imports.py  catches a used-but-unimported project symbol — the one class of
+#                     mistake nothing here can see without a full Gradle build
+#
 #   Compiles with stubs for dependencies that are not in the local Gradle cache
 #   (jsoup, libarchive, android.util.Xml, org.xmlpull). Add a stub under
 #   stubs/ when a new external class is needed — keep stubs minimal and

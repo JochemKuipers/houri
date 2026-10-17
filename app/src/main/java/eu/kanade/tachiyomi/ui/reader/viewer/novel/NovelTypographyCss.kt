@@ -94,33 +94,16 @@ object NovelTypographyCss {
     }
 
     /**
-     * The same stylesheet wrapped for direct delivery to the renderer.
+     * The same stylesheet wrapped for delivery to the renderer, which is [NovelDocument]'s job to place.
      *
-     * Kept separate from [stylesheet] so a caller that injects into an existing document (rather
-     * than building a new one) gets markup rather than a bare rule list.
+     * The rules are escaped for a `<style>` element on the way in. A closing tag inside a stylesheet ends
+     * it in the HTML parser, before any CSS is read, so a font family containing `</style>` would silently
+     * truncate every rule after it — including the base font size, which is the one thing the reader is
+     * certain to emit. `<\/style>` is not a closing tag to the parser and is the same string to a CSS
+     * parser, where `\/` is an escaped solidus.
      */
     fun styleTag(type: NovelTypography): String =
-        "<style id=\"kmk-typography\">${stylesheet(type)}</style>"
-
-    /**
-     * Injects [stylesheet] into [document], replacing any previously injected copy.
-     *
-     * Idempotent because the reader re-applies typography when the user changes a setting without
-     * reloading the document — without the replace, a second toggle leaves both stylesheets in the
-     * DOM and the older one can win.
-     */
-    fun applyTo(document: String, type: NovelTypography): String {
-        val tag = styleTag(type)
-        val withoutOld = EXISTING_STYLE.replace(document, "")
-        if (tag.isEmpty()) return withoutOld
-        // Append at the very end of <head> so the reader's rules come last and win on equal
-        // specificity. A fragment with no head still receives the stylesheet, at the end.
-        return if (HEAD_CLOSE.containsMatchIn(withoutOld)) {
-            HEAD_CLOSE.replaceFirst(withoutOld, tag + "</head>")
-        } else {
-            withoutOld + tag
-        }
-    }
+        "<style id=\"kmk-typography\">${stylesheet(type).replace("</", "<\\/")}</style>"
 
     private fun elementsRule(t: NovelTypography): String = buildString {
         append("body, p, div, span, li, td, th, blockquote, dd, dt, section, article, h1, h2, h3, h4, h5, h6 {")
@@ -180,7 +163,4 @@ object NovelTypographyCss {
         "fantasy",
         "system-ui",
     )
-
-    private val EXISTING_STYLE = Regex("""<style id="kmk-typography">.*?</style>""", RegexOption.DOT_MATCHES_ALL)
-    private val HEAD_CLOSE = Regex("</head>", RegexOption.IGNORE_CASE)
 }

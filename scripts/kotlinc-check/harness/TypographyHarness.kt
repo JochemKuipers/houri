@@ -103,20 +103,15 @@ fun main() {
     contains("generic unquoted", NovelTypographyCss.stylesheet(NovelTypography(fontFamily = "serif")), "font-family: serif !important")
     contains("spaced name quoted", NovelTypographyCss.stylesheet(NovelTypography(fontFamily = "Noto Serif JP")), "\"Noto Serif JP\"")
 
-    // ---------------- applyTo ----------------
-    val doc = "<html><head><title>t</title><style>p{color:red}</style></head><body><p>hi</p></body></html>"
-    val applied = NovelTypographyCss.applyTo(doc, t)
-    contains("applyTo injects", applied, "kmk-typography")
-    contains("applyTo keeps body", applied, "<p>hi</p>")
-    check("applyTo in head", applied.indexOf("kmk-typography") < applied.indexOf("</head>"), true)
-    check("applyTo idempotent", NovelTypographyCss.applyTo(applied, t).count { it == '<' }, applied.count { it == '<' })
-    // Defaults still inject (so "off" can override a publisher), but emit no structural rule.
-    val reverted = NovelTypographyCss.applyTo(applied, NovelTypography.DEFAULT)
-    containsTrue("applyTo always injects", reverted, "kmk-typography")
-    check("defaults emit no justify", reverted.contains("text-align"), false)
-    check("defaults emit no writing-mode", reverted.contains("writing-mode"), false)
-    val noHead = "<p>fragment</p>"
-    contains("applyTo without head", NovelTypographyCss.applyTo(noHead, t), "kmk-typography")
+    // ---------------- style tag ----------------
+    val tag = NovelTypographyCss.styleTag(t)
+    containsTrue("styleTag injects", tag, "kmk-typography")
+    containsTrue("styleTag carries the rules", tag, "font-family")
+    // A font family is free text the user typed. A closing tag in it would end the <style> element in
+    // the HTML parser and silently drop every rule after it, base font size included.
+    val hostile = NovelTypographyCss.styleTag(NovelTypography(fontFamily = "Evil</style><p>"))
+    check("closing tag escaped", hostile.contains("</style><p>"), false)
+    checkTrue("escaped form present", hostile.contains("""<\/style>"""))
 
     // ---------------- percentage progress ----------------
     val lens = listOf(1000, 2000, 1000)   // total 4000

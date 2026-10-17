@@ -81,8 +81,20 @@ internal object EpubTocParser {
      *
      * Depth is bounded at [MAX_TOC_DEPTH]: a malformed or generated file can nest without end, and
      * the reader thread is not the place to discover that with a `StackOverflowError`.
+     *
+     * Total node count is bounded too, by [budget], shared across the whole recursion rather than
+     * reset per subtree. Depth alone does not bound the work: a flat contents with a million `<li>`s in
+     * it nests exactly one level and still allocates a million nodes, and the reader turns every one of
+     * them into a row. The cap is far above a real book — a 500-chapter novel with a detailed contents
+     * is a couple of thousand — and hitting it truncates the list rather than failing the book,
+     * because a long contents is still a usable one.
      */
-    private fun parseOrderedList(xml: EpubXmlReader, baseDir: String, depth: Int = 0): List<EpubTocNode> {
+    private fun parseOrderedList(
+        xml: EpubXmlReader,
+        baseDir: String,
+        depth: Int = 0,
+        budget: TocBudget = TocBudget(),
+    ): List<EpubTocNode> {
         if (depth >= MAX_TOC_DEPTH) return emptyList()
 
         val nodes = mutableListOf<EpubTocNode>()
@@ -92,7 +104,8 @@ internal object EpubTocParser {
             if (event == XmlPullParser.END_TAG && xml.matches(EpubXmlReader.NS_XHTML, "ol")) break
 
             if (event == XmlPullParser.START_TAG && xml.matches(EpubXmlReader.NS_XHTML, "li")) {
-                val node = parseListItem(xml, baseDir, depth) ?: continue
+                if (!budget.take()) return nodes
+                val node = parseListItem(xml, baseDir, depth, budget) ?: continue
                 nodes += node
                 event = xml.next()
                 continue
@@ -102,7 +115,12 @@ internal object EpubTocParser {
         return nodes
     }
 
-    private fun parseListItem(xml: EpubXmlReader, baseDir: String, depth: Int): EpubTocNode? {
+    private fun parseListItem(
+        xml: EpubXmlReader,
+        baseDir: String,
+        depth: Int,
+        budget: TocBudget,
+    ): EpubTocNode? {
         var label: String? = null
         var href: String? = null
         var fragment: String? = null
@@ -128,7 +146,7 @@ internal object EpubTocParser {
                     }
 
                     xml.matches(EpubXmlReader.NS_XHTML, "ol") -> {
-                        children = parseOrderedList(xml, baseDir, depth + 1).toMutableList()
+                        children = parseOrderedList(xml, baseDir, depth + 1, budget).toMutableList()
                         event = xml.next()
                         continue
                     }
@@ -163,13 +181,24 @@ internal object EpubTocParser {
 
         while (xml.next() != XmlPullParser.END_DOCUMENT) {
             if (xml.matches(EpubXmlReader.NS_NCX, "navMap")) {
-                return parseNavPoints(xml, baseDir, depth = 0)
+                return parseNavPoints(xml, baseDir, depth = 0, budget = TocBudget())
             }
         }
         return emptyList()
     }
 
-    private fun parseNavPoints(xml: EpubXmlReader, baseDir: String, depth: Int): List<EpubTocNode> {
+    /**
+     * Reads `<navPoint>` siblings.
+     *
+     * Bounded by depth and by a node budget for the same reasons as the EPUB 3 path above; see
+     * [parseOrderedList].
+     */
+    private fun parseNavPoints(
+        xml: EpubXmlReader,
+        baseDir: String,
+        depth: Int,
+        budget: TocBudget,
+    ): List<EpubTocNode> {
         if (depth >= MAX_TOC_DEPTH) return emptyList()
 
         val nodes = mutableListOf<EpubTocNode>()
@@ -179,7 +208,8 @@ internal object EpubTocParser {
             if (event == XmlPullParser.END_TAG && xml.matches(EpubXmlReader.NS_NCX, "navMap")) break
 
             if (event == XmlPullParser.START_TAG && xml.matches(EpubXmlReader.NS_NCX, "navPoint")) {
-                parseNavPoint(xml, baseDir, depth)?.let(nodes::add)
+                if (!budget.take()) return nodes
+                parseNavPoint(xml, baseDir, depth, budget)?.let(nodes::add)
                 event = xml.next()
                 continue
             }
@@ -188,7 +218,12 @@ internal object EpubTocParser {
         return nodes
     }
 
-    private fun parseNavPoint(xml: EpubXmlReader, baseDir: String, depth: Int): EpubTocNode? {
+    private fun parseNavPoint(
+        xml: EpubXmlReader,
+        baseDir: String,
+        depth: Int,
+        budget: TocBudget,
+    ): EpubTocNode? {
         var label: String? = null
         var href: String? = null
         var fragment: String? = null
@@ -217,7 +252,9 @@ internal object EpubTocParser {
                     }
 
                     xml.matches(EpubXmlReader.NS_NCX, "navPoint") -> {
-                        parseNavPoint(xml, baseDir, depth + 1)?.let(children::add)
+                        if (budget.take()) {
+                            parseNavPoint(xml, baseDir, depth + 1, budget)?.let(children::add)
+                        }
                         event = xml.next()
                         continue
                     }
@@ -254,4 +291,28 @@ internal object EpubTocParser {
 
     /** Guards against a generated or corrupt TOC nesting forever. */
     private const val MAX_TOC_DEPTH = 32
+
+    /**
+     * Guards against a generated TOC declaring an unbounded number of entries.
+     *
+     * Depth alone does not bound this: a flat `<navMap>` with a million `<navPoint>`s nests one level
+     * and still allocates a million nodes, each of which the reader turns into a row. The cap is orders
+     * of magnitude above a real contents and truncates rather than fails — a very long contents is
+     * still a usable one, and refusing to open the book over it would be worse.
+     */
+    private const val MAX_TOC_NODES = 50_000
+
+    /**
+     * A node allowance shared by one whole table of contents.
+     *
+     * Shared rather than per-call so that the limit is on the document, not on each subtree: a
+     * thousand siblings each with a thousand children is a million nodes, and a per-subtree budget
+     * would wave all of them through.
+     */
+    private class TocBudget(private val limit: Int = MAX_TOC_NODES) {
+        private var spent = 0
+
+        /** True if a node may still be built. False once the contents has spent its allowance. */
+        fun take(): Boolean = spent++ < limit
+    }
 }

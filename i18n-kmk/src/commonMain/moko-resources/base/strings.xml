@@ -711,4 +711,12 @@
     <string name="novel_follow_publisher">Follow book</string>
     <string name="novel_error_drm_protected">This book is DRM-protected and cannot be read</string>
     <string name="novel_error_chapter_not_found">Chapter not found</string>
+    <!-- KMK: reader contents + in-chapter search -->
+    <string name="novel_contents">Contents</string>
+    <string name="novel_contents_no_reachable">No section of this chapter is listed</string>
+    <string name="novel_contents_empty">This book has no table of contents</string>
+    <string name="novel_search">Search in chapter</string>
+    <string name="novel_search_hint">Search this chapter</string>
+    <string name="novel_search_idle">Type to search this chapter</string>
+    <string name="novel_search_no_results">Nothing in this chapter matches that</string>
 </resources>

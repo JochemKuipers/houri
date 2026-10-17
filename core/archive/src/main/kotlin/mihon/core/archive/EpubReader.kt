@@ -73,14 +73,19 @@ class EpubReader(private val reader: ArchiveReader) : Closeable by reader {
     fun getPackageHref(): String = opfPath
 
     /**
-     * Returns the package document as a Jsoup tree.
+     * Returns the package document as a Jsoup tree, or null when it cannot be opened.
      *
      * Retained for the image-based local source. New code should read [metadata] instead: this
      * exposes namespace prefixes as literal tag names, so every selector against it has to hardcode
      * `dc:`.
+     *
+     * Nullable rather than `!!`-and-hope: the ref comes out of `container.xml`, and a book pointing
+     * it at a file the archive does not contain is malformed rather than exceptional — but it used
+     * to take the reader down with a `NullPointerException` instead of showing a book with no
+     * metadata.
      */
-    fun getPackageDocument(ref: String): Document =
-        getInputStream(ref)!!.use { Jsoup.parse(it, null, "", Parser.xmlParser()) }
+    fun getPackageDocument(ref: String): Document? =
+        getInputStream(ref)?.use { Jsoup.parse(it, null, "", Parser.xmlParser()) }
 
     /**
      * Returns the path of all the images found in the epub file.
@@ -88,6 +93,11 @@ class EpubReader(private val reader: ArchiveReader) : Closeable by reader {
      * Per-page, not per-document: the original walked the spine and collected `img` and `image`
      * references from each page's markup. That is the right answer for "render this EPUB as a
      * comic", where each illustration is a page. [textDocuments] is the right answer for reading it.
+     *
+     * Capped at [MAX_IMAGES]. Both inputs to the count are attacker-controlled — a document may
+     * name any number of `img` elements and the spine is unbounded — and the caller turns the result
+     * straight into pages, so a book declaring a million of them must not be able to allocate a
+     * million of them here first.
      */
     fun getImagesFromPages(): List<String> {
         val result = mutableListOf<String>()
@@ -103,6 +113,7 @@ class EpubReader(private val reader: ArchiveReader) : Closeable by reader {
                     "image" -> element.attr("xlink:href").ifEmpty { element.attr("href") }
                     else -> continue
                 }.takeIf { it.isNotBlank() }?.let { result += EpubPaths.resolve(pageDir, it) }
+                if (result.size >= MAX_IMAGES) return result
             }
         }
 
@@ -116,35 +127,73 @@ class EpubReader(private val reader: ArchiveReader) : Closeable by reader {
      * Tries the path as given, then its percent-decoded and percent-encoded spellings, because
      * producers disagree about whether the name stored in the zip matches the `href` in the
      * manifest byte for byte. Without that fallback roughly half the library 404s on its own images.
+     *
+     * All three spellings go to [ArchiveReader.getInputStreamAny] together, so a reference that
+     * needs the fallback costs one walk of the archive instead of up to three.
      */
     fun getInputStream(entryName: String): InputStream? {
-        for (candidate in EpubPaths.lookupCandidates(entryName)) {
-            reader.getInputStream(candidate)?.let { return it }
-        }
-        return null
+        // A control character is never a real file name, and NUL in particular truncates the C
+        // string libarchive hands the name back through — so it would silently resolve to whatever
+        // precedes it. Refused outright rather than sanitised: there is no legitimate spelling of it.
+        if (entryName.any { it.code < 0x20 || it.code == 0x7F }) return null
+        return reader.getInputStreamAny(*EpubPaths.lookupCandidates(entryName).toTypedArray())
     }
 
     /**
      * True when [path] names an entry that exists.
      *
-     * Cheaper than opening the entry, which is why the image and cover paths probe first.
+     * Answered from the archive's entry index, so it costs nothing rather than the open-and-discard
+     * this used to do — which is what lets the image and cover paths probe freely.
      */
     fun contains(path: String): Boolean =
-        EpubPaths.lookupCandidates(path).any { candidate ->
-            reader.getInputStream(candidate)?.use { true } ?: false
-        }
+        EpubPaths.lookupCandidates(path).any { it in reader }
 
     /**
-     * Reads an entry as text, or null when it does not exist.
+     * Reads an entry as text, or null when it does not exist or is over [MAX_DOCUMENT_BYTES].
      *
      * Charset comes from the XML declaration when there is one, because EPUB content files may be
      * UTF-16 or a legacy encoding; defaulting to UTF-8 renders mojibake for those. The whole entry
      * is read once and decoded afterwards — sniffing has to inspect the same bytes that are then
      * decoded, so the prolog cannot be consumed separately.
+     *
+     * Null for an oversized entry rather than a truncated string: half a document is not a document,
+     * and the callers treat null as "skip this file", so one hostile file costs one page instead of
+     * the whole book.
      */
-    fun readText(path: String): String? = getInputStream(path)?.use { stream ->
-        val bytes = stream.readBytes()
-        String(bytes, charsetOf(bytes))
+    fun readText(path: String): String? {
+        val bytes = readBytes(path) ?: return null
+        return String(bytes, charsetOf(bytes))
+    }
+
+    /**
+     * Reads an entry into memory, or null when it is missing or larger than [maxBytes].
+     *
+     * The cap is the reason this exists. A zip entry's declared size is attacker-controlled and its
+     * compression ratio is unbounded, so `readBytes()` on an arbitrary entry is an out-of-memory
+     * primitive handed to anyone who can get a file into the library — which is anyone who can send
+     * the user a book.
+     */
+    fun readBytes(path: String, maxBytes: Long = MAX_DOCUMENT_BYTES): ByteArray? =
+        getInputStream(path)?.use { it.readAtMost(maxBytes) }
+
+    /**
+     * Copies at most [limit] bytes out of this stream, or returns null when there are more.
+     *
+     * Refuses rather than truncating, so a caller never mistakes a clipped file for a whole one.
+     */
+    private fun InputStream.readAtMost(limit: Long): ByteArray? {
+        if (limit <= 0) return null
+        val out = java.io.ByteArrayOutputStream(minOf(limit, COPY_BUFFER_BYTES.toLong()).toInt())
+        val buffer = ByteArray(COPY_BUFFER_BYTES)
+        var total = 0L
+        while (true) {
+            val read = read(buffer)
+            if (read < 0) break
+            total += read
+            if (total > limit) return null
+            out.write(buffer, 0, read)
+        }
+        return out.toByteArray()
     }
 
     /**
@@ -221,6 +270,21 @@ class EpubReader(private val reader: ArchiveReader) : Closeable by reader {
             "EPUB/content.opf",
             "content.opf",
         )
+
+        /** Copy buffer for the bounded read. Large enough that the loop is not the bottleneck. */
+        const val COPY_BUFFER_BYTES = 16 * 1024
+
+        /**
+         * Ceiling on any single entry read fully into memory.
+         *
+         * Comfortably above a real chapter — the largest text document in a commercial light novel
+         * is well under a megabyte — and far below the heap a low-end device gives away before the
+         * app is killed. A zip entry claiming more than this is not a document.
+         */
+        const val MAX_DOCUMENT_BYTES = 32L * 1024 * 1024
+
+        /** Ceiling on the illustration list [getImagesFromPages] will build. */
+        const val MAX_IMAGES = 20_000
     }
 }
 

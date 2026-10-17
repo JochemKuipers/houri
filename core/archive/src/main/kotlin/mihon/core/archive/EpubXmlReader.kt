@@ -25,13 +25,14 @@ import java.io.InputStream
  */
 internal class EpubXmlReader private constructor(private val parser: XmlPullParser) {
 
-    constructor(input: InputStream) : this(
-        Xml.newPullParser().apply {
-            setInput(input, null)
-            setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
-            setFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
-        },
-    )
+    /**
+     * Builds the parser for an EPUB structural document.
+     *
+     * A companion function rather than inline constructor code because it has to run *before* `this`
+     * exists: the secondary constructor delegates to the primary one, so anything reaching an instance
+     * member from in here is "access before initialisation". See [checkedParser].
+     */
+    constructor(input: InputStream) : this(checkedParser(input))
 
     /** Advances to the next event and returns it. */
     fun next(): Int = parser.next()
@@ -86,11 +87,25 @@ internal class EpubXmlReader private constructor(private val parser: XmlPullPars
         return out.toString()
     }
 
+    /**
+     * Appends the current element's content, abandoning the element once [MAX_TEXT_CHARS] is
+     * reached.
+     *
+     * Bounded because both callers are exposed to hostile input: a book's TOC can nest a label
+     * containing anything, and a `dc:description` is unbounded markup re-serialised into a
+     * `StringBuilder` before anybody decides whether it is worth showing. The parser is left
+     * mid-subtree, which is safe — every caller's loop terminates on `END_DOCUMENT`.
+     */
     private fun appendTextContentTo(out: StringBuilder) {
         val startDepth = parser.depth
-        while (true) {
+        while (out.length < MAX_TEXT_CHARS) {
             when (parser.next()) {
-                XmlPullParser.TEXT, XmlPullParser.CDSECT -> out.append(parser.text.orEmpty())
+                XmlPullParser.TEXT, XmlPullParser.CDSECT -> {
+                    out.append(parser.text.orEmpty())
+                    // Truncate rather than abandon: a single text node can itself be enormous, and a
+                    // 40 MB `dc:description` should cost a truncated description, not the whole parse.
+                    if (out.length > MAX_TEXT_CHARS) out.setLength(MAX_TEXT_CHARS)
+                }
                 XmlPullParser.START_TAG -> {
                     out.append('<').append(parser.name)
                     for (i in 0 until parser.attributeCount) {
@@ -116,6 +131,29 @@ internal class EpubXmlReader private constructor(private val parser: XmlPullPars
     }
 
     companion object {
+        /**
+         * The platform parser, over an input with any doctype removed by [EpubDoctype.strip].
+         *
+         * `FEATURE_PROCESS_DOCDECL = false` is the parser-level half of the same XXE defence; see
+         * [EpubDoctype] for why the input-level half is the one that carries the guarantee, and for
+         * why asserting things about the parser implementation was the wrong way round.
+         */
+        private fun checkedParser(input: InputStream): XmlPullParser =
+            Xml.newPullParser().apply {
+                setInput(EpubDoctype.strip(input), null)
+                setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, true)
+                setFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
+            }
+
+        /**
+         * Ceiling on one [textContent] result.
+         *
+         * A real TOC label is under a kilobyte and a real `dc:description` under a few. This is two
+         * orders of magnitude above both, so nothing legitimate is affected, and it is low enough
+         * that a book cannot make the parse allocate its way into a low-memory kill.
+         */
+        const val MAX_TEXT_CHARS = 256 * 1024
+
         const val NS_CONTAINER = "urn:oasis:names:tc:opendocument:xmlns:container"
         const val NS_OPF = "http://www.idpf.org/2007/opf"
         const val NS_DC = "http://purl.org/dc/elements/1.1/"
