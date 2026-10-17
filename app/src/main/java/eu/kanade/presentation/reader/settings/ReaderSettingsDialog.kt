@@ -9,16 +9,45 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.DialogWindowProvider
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
+import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
 
+/**
+ * One tab of the reader's settings.
+ *
+ * Modelled as a value rather than as an index so the tab that appears and disappears cannot silently
+ * shift the page that goes with it. The colour tab is the one that dims the dialog window and hides
+ * the reader's own chrome so its images are judged against a neutral field, and a tab indexed by
+ * position had that applied to whichever tab happened to land third.
+ */
+private enum class SettingsTab {
+    ReadingMode,
+    General,
+    Book,
+    ColorFilter,
+}
+
+/**
+ * The reader's settings, as tabs.
+ *
+ * The book tab and the colour tab are each offered only for a chapter they can act on, decided by the
+ * same state the renderer was chosen from: a chapter served as text has no pages to colour-filter, and
+ * one served as pages has no typography. A tab that opened an empty sheet reads as a bug in the reader
+ * rather than in the book.
+ */
 @Composable
 fun ReaderSettingsDialog(
     onDismissRequest: () -> Unit,
@@ -26,12 +55,25 @@ fun ReaderSettingsDialog(
     onHideMenus: () -> Unit,
     screenModel: ReaderSettingsScreenModel,
 ) {
-    val tabTitles = persistentListOf(
-        stringResource(MR.strings.pref_category_reading_mode),
-        stringResource(MR.strings.pref_category_general),
-        stringResource(MR.strings.custom_filter),
-    )
-    val pagerState = rememberPagerState { tabTitles.size }
+    val tabs = persistentListOf(
+        SettingsTab.ReadingMode to stringResource(MR.strings.pref_category_reading_mode),
+        SettingsTab.General to stringResource(MR.strings.pref_category_general),
+    ).let { base ->
+        val isTextChapter = screenModel.isTextChapterFlow.collectAsState().value
+        val hasPages = screenModel.hasPagesFlow.collectAsState().value
+        buildList {
+            addAll(base)
+            if (isTextChapter) {
+                add(SettingsTab.Book to stringResource(KMR.strings.novel_reader_typography))
+            }
+            if (hasPages) {
+                add(SettingsTab.ColorFilter to stringResource(MR.strings.custom_filter))
+            }
+        }
+    }
+
+    val pagerState = rememberPagerState { tabs.size }
+    val tabTitles: ImmutableList<String> = remember(tabs) { tabs.map { it.second }.toImmutableList() }
 
     BoxWithConstraints {
         TabbedDialog(
@@ -44,9 +86,10 @@ fun ReaderSettingsDialog(
             pagerState = pagerState,
         ) { page ->
             val window = (LocalView.current.parent as? DialogWindowProvider)?.window
+            val tab = tabs.getOrNull(page)?.first
 
-            LaunchedEffect(pagerState.currentPage) {
-                if (pagerState.currentPage == 2) {
+            LaunchedEffect(tab) {
+                if (tab == SettingsTab.ColorFilter) {
                     window?.setDimAmount(0f)
                     onHideMenus()
                 } else {
@@ -60,10 +103,14 @@ fun ReaderSettingsDialog(
                     .padding(vertical = TabbedDialogPaddings.Vertical)
                     .verticalScroll(rememberScrollState()),
             ) {
-                when (page) {
-                    0 -> ReadingModePage(screenModel)
-                    1 -> GeneralPage(screenModel)
-                    2 -> ColorFilterPage(screenModel)
+                when (tab) {
+                    SettingsTab.ReadingMode -> ReadingModePage(screenModel)
+                    SettingsTab.General -> GeneralPage(screenModel)
+                    // KMK -->
+                    SettingsTab.Book -> NovelTypographyPage()
+                    // KMK <--
+                    SettingsTab.ColorFilter -> ColorFilterPage(screenModel)
+                    null -> Unit
                 }
             }
         }

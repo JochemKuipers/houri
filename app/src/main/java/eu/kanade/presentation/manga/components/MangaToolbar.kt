@@ -77,6 +77,10 @@ fun MangaToolbar(
     onPaletteScreenClick: () -> Unit,
     onStartRereadingClick: (() -> Unit)?,
     onStopRereadingClick: (() -> Unit)?,
+    // KMK --> Render-as-comic escape hatch, for when detection guessed wrong about an `.epub`
+    // in the local library. Null everywhere else: there is nothing to decide for a comic
+    // from an extension.
+    onToggleEntryTypeClick: (() -> Unit)?,
     // KMK <--
     modifier: Modifier = Modifier,
 ) {
@@ -268,6 +272,14 @@ fun MangaToolbar(
                             AppBar.OverflowAction(
                                 title = stringResource(KMR.strings.action_start_rereading),
                                 onClick = onStartRereadingClick,
+                            ),
+                        )
+                    }
+                    if (onToggleEntryTypeClick != null) {
+                        add(
+                            AppBar.OverflowAction(
+                                title = stringResource(KMR.strings.entry_type_render_as_comic),
+                                onClick = onToggleEntryTypeClick,
                             ),
                         )
                     }

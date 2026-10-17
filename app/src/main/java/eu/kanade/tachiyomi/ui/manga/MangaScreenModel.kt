@@ -58,6 +58,7 @@ import eu.kanade.tachiyomi.data.track.mdlist.MdList
 import eu.kanade.tachiyomi.source.PagePreviewSource
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.getNameForMangaInfo
+import eu.kanade.tachiyomi.source.model.EntryType
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.MetadataSource
 import eu.kanade.tachiyomi.source.online.ResolvableSource
@@ -152,6 +153,7 @@ import tachiyomi.domain.manga.interactor.GetSequelPrequel
 import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.manga.interactor.SetCustomMangaInfo
 import tachiyomi.domain.manga.interactor.SetMangaChapterFlags
+import tachiyomi.domain.manga.interactor.SetMangaEntryType
 import tachiyomi.domain.manga.interactor.UpdateMergedSettings
 import tachiyomi.domain.manga.model.CustomMangaInfo
 import tachiyomi.domain.manga.model.Manga
@@ -163,7 +165,9 @@ import tachiyomi.domain.manga.model.MergedMangaReference
 import tachiyomi.domain.manga.model.SEQUEL_PREQUEL_STUB_MEMO_KEY
 import tachiyomi.domain.manga.model.SequelPrequelEntry
 import tachiyomi.domain.manga.model.asMangaCover
+import tachiyomi.domain.manga.model.entryType
 import tachiyomi.domain.manga.model.isSequelPrequelStub
+import tachiyomi.domain.manga.model.withEntryType
 import tachiyomi.domain.manga.repository.MangaRepository
 import tachiyomi.domain.source.model.StubSource
 import tachiyomi.domain.source.service.SourceManager
@@ -237,6 +241,9 @@ class MangaScreenModel(
     private val getTracks: GetTracks = globalAppGraph.getTracks,
     private val addTracks: AddTracks = globalAppGraph.addTracks,
     private val setMangaCategories: SetMangaCategories = globalAppGraph.setMangaCategories,
+    // KMK --> Persists the entry's content type, so a detection heuristic can never quietly
+    // overrule what the reader decided on a later library refresh.
+    private val setMangaEntryType: SetMangaEntryType = globalAppGraph.setMangaEntryType,
     private val mangaRepository: MangaRepository = globalAppGraph.mangaRepository,
     private val filterChaptersForDownload: FilterChaptersForDownload = globalAppGraph.filterChaptersForDownload,
     private val updateMangaFromRemote: UpdateMangaFromRemote = globalAppGraph.updateMangaFromRemote,
@@ -2016,6 +2023,27 @@ class MangaScreenModel(
 
     fun showStopRereadDialog() {
         updateSuccessState { it.copy(dialog = Dialog.ConfirmStopReread) }
+    }
+
+    /**
+     * Forces this entry to be read as a comic, or hands it back to detection.
+     *
+     * The escape hatch for a heuristic that guessed wrong, and the reason the override is reachable
+     * from the info screen *before* opening the book: an art book that detects as a novel is
+     * otherwise only discoverable by trying to read it.
+     *
+     * Idempotent in effect and free of side effects beyond the one bit, so pressing it twice costs
+     * nothing and returns the entry to exactly where it started.
+     */
+    fun toggleEntryType() {
+        val manga = state.value as? State.Success ?: return
+        screenModelScope.launch {
+            val current = manga.manga.entryType()
+            setMangaEntryType(manga.manga.id, EntryType.COMIC)
+            updateSuccessState { current ->
+                current.copy(manga = current.manga.withEntryType(EntryType.COMIC))
+            }
+        }
     }
     // KMK <--
 

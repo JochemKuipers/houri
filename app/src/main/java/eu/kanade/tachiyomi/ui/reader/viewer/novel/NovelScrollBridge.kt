@@ -25,6 +25,19 @@ package eu.kanade.tachiyomi.ui.reader.viewer.novel
 object NovelScrollBridge {
 
     /**
+     * How close to a document's end, in pixels, counts as being at it.
+     *
+     * Two rather than zero because a browser rounds a fractional scroll position and a document that
+     * is one pixel short of its end is at its end as far as a reader is concerned. Sub-pixel
+     * accuracy here would be a strict improvement nobody could perceive, and an exact-zero test can
+     * report "not yet" forever on a document whose height settles a fraction short.
+     *
+     * Declared before [BRIDGE_SCRIPT_BODY] because an object's properties initialise in declaration
+     * order and the script below interpolates this one.
+     */
+    private const val EDGE_TOLERANCE = 2
+
+    /**
      * The bridge itself.
      *
      * `maxScroll` is the whole scrollable range, recomputed on every call: a document reflows while
@@ -76,6 +89,17 @@ object NovelScrollBridge {
               // scroll is clamped, and a caller that cannot tell "moved" from "did not move" turns
               // the document every time the reader taps past the last screen.
               return self.top() - before;
+            },
+            // Which way this document has run out of room. See EDGE for the codes: the host used to
+            // infer this from a scroll that did not move, which cannot tell the top from the bottom
+            // and cannot tell "at the end" from "has not laid out yet".
+            edge: function () {
+              var max = self.maxScroll();
+              if (max <= 0) return 3;
+              var t = self.top();
+              if (t <= ${EDGE_TOLERANCE}) return 1;
+              if (t >= max - ${EDGE_TOLERANCE}) return 2;
+              return 0;
             }
           };
           window.KmkReader = self;
@@ -94,6 +118,43 @@ object NovelScrollBridge {
 
     const val SCROLL_BACK_BY_VIEWPORT: String =
         "(function(){var r=window.KmkReader;if(!r)return 0;return r.scrollViewport(-1);})()"
+
+    /**
+     * Which way this document has run out of room, if either.
+     *
+     * `window.KmkReader` grew an `edge()` alongside the scroll helpers because the host was
+     * inferring this from *movement*, and movement is ambiguous in two directions at once:
+     *
+     *  - a scroll that did not move is not only "at the end", it is also "the document has not laid
+     *    out yet" and "the bridge is not installed". Reading all three as "turn the document" makes
+     *    the reader skip a page on every tap of a freshly-loaded document, and skip backwards the
+     *    same way.
+     *  - and the same test cannot tell the *top* from the *bottom*, so a tap that failed for either
+     *    reason turned forward, which is how reaching the end of a document came to require the
+     *    page navigator instead of the reader's own gesture.
+     *
+     * The document is the only thing that knows, so it answers directly. Returns a code rather than
+     * an object because [number] is the parser this folder already has, and because a small integer
+     * survives the JSON round trip without the escaping rules a string of untrusted text would need.
+     *
+     * | Code | Meaning |
+     * |---|---|
+     * | `-3` | no bridge — the host has no opinion and must not turn |
+     * | `1` | at the very top; only a backward turn has anywhere to go |
+     * | `0` | room in both directions |
+     * | `2` | at the very bottom; only a forward turn has anywhere to go |
+     * | `3` | the whole document is one screen, so either turn is the only turn there is |
+     *
+     * The two-pixel tolerances are the same idea as the smallest scroll step: a document that is
+     * one pixel short of its end is at its end as far as a reader is concerned, and a browser that
+     * rounds a fractional scroll position must not be able to answer "not yet" forever.
+     */
+    const val EDGE: String =
+        "(function(){var r=window.KmkReader;if(!r)return -3;return r.edge();})()"
+
+    /** [EDGE] narrowed to "is there nowhere left to go forward", for a caller that only turns forward. */
+    const val AT_END: String =
+        "(function(){var r=window.KmkReader;if(!r)return 0;var e=r.edge();return (e===2||e===3)?1:0;})()"
 
     /** Restores a previously reported fraction. Ignored until the document has laid out. */
     const val SET_FRACTION: String =

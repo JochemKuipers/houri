@@ -123,6 +123,7 @@ import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.screens.LoadingScreen
+import tachiyomi.source.local.isLocal
 
 class MangaScreen(
     private val mangaId: Long,
@@ -503,6 +504,11 @@ class MangaScreen(
             onPaletteScreenClick = { navigator.push(PaletteScreen(successState.seedColor?.toArgb())) },
             onStartRereadingClick = screenModel::showStartRereadDialog.takeIf { successState.manga.favorite },
             onStopRereadingClick = screenModel::showStopRereadDialog.takeIf { successState.manga.favorite },
+            // KMK --> The escape hatch for a detection heuristic that guessed wrong. Only offered
+            // where the question exists: an `.epub` in a local library, in the library already.
+            onToggleEntryTypeClick = screenModel::toggleEntryType.takeIf {
+                successState.manga.favorite && successState.manga.isLocal()
+            },
             hazeState = hazeState,
             // KMK --> Integrated metadata translation actions come from the model-owned controller.
             onMangaInfoEnabledChange = screenModel::setMangaInfoEnabled,

@@ -208,6 +208,7 @@ import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.manga.interactor.ResetViewerFlags
 import tachiyomi.domain.manga.interactor.SetCustomMangaInfo
 import tachiyomi.domain.manga.interactor.SetMangaChapterFlags
+import tachiyomi.domain.manga.interactor.SetMangaEntryType
 import tachiyomi.domain.manga.interactor.UpdateMangaNotes
 import tachiyomi.domain.manga.interactor.UpdateMergedSettings
 import tachiyomi.domain.manga.repository.MangaRepository
@@ -357,6 +358,9 @@ interface AppGraph : ViewModelGraph {
     val getTracks: GetTracks
     val getCustomMangaInfo: GetCustomMangaInfo
     val setCustomMangaInfo: SetCustomMangaInfo
+    // KMK --> Persists a library entry's content type, so a detection heuristic can never
+    // quietly overrule what the reader chose on a later library refresh.
+    val setMangaEntryType: SetMangaEntryType
     val insertFlatMetadata: InsertFlatMetadata
     val getFlatMetadataById: GetFlatMetadataById
     val getExtensionStores: GetExtensionStores

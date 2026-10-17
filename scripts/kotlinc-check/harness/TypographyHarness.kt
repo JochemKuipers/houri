@@ -113,6 +113,60 @@ fun main() {
     check("closing tag escaped", hostile.contains("</style><p>"), false)
     checkTrue("escaped form present", hostile.contains("""<\/style>"""))
 
+    // ---------------- a background implies a text colour ----------------
+    // The reported bug: any background other than white made the page unreadable, because the sheet
+    // honoured a reader-chosen background and left the text in the publisher's own colour.
+    val darkBg = NovelTypography(backgroundColor = "#000000")
+    check("black background gets white text", darkBg.effectiveFontColor, "#ffffff")
+    val darkBgCss = NovelTypographyCss.stylesheet(darkBg)
+    contains("dark background emits a colour", darkBgCss, "color: #ffffff !important")
+    // Re-asserted on the text-bearing elements too, because a publisher rule on `p` outranks a rule on
+    // `body` — so a colour that only reached `body` would still lose to the book's own stylesheet.
+    check(
+        "colour is re-asserted on text elements",
+        darkBgCss.contains("blockquote, dd, dt, section, article") && darkBgCss.contains("color: #ffffff !important; }"),
+        true,
+    )
+    contains("headings inherit the colour choice", darkBgCss, "h1, h2, h3, h4, h5, h6 { color: #ffffff !important; }")
+
+    check("white background gets black text", NovelTypography(backgroundColor = "#ffffff").effectiveFontColor, "#000000")
+    check("cream background gets black text", NovelTypography(backgroundColor = "#f5f2e8").effectiveFontColor, "#000000")
+    check("sepia background gets white text", NovelTypography(backgroundColor = "#1a1614").effectiveFontColor, "#ffffff")
+
+    // Mid-greys are where a naive brightness sum picks differently from contrast, which is the whole
+    // reason this is WCAG luminance rather than an average. The crossover sits near luminance 0.179,
+    // so #808080 is just above it (5.3:1 against black, 3.9:1 against white -> black) and #717171 just
+    // below (4.3:1 against black, 4.9:1 against white -> white). An average would call both "mid" and
+    // pick the same answer for each, and be wrong on one of them.
+    check("mid grey background gets black text", NovelTypography(backgroundColor = "#808080").effectiveFontColor, "#000000")
+    check("darker mid grey gets white text", NovelTypography(backgroundColor = "#717171").effectiveFontColor, "#ffffff")
+    check("3-digit hex is understood", NovelTypography(backgroundColor = "#000").effectiveFontColor, "#ffffff")
+
+    // An explicit font colour always wins: the reader chose it, and the whole point is that a derived
+    // one never overrides a decision.
+    check(
+        "explicit font colour wins over the derived one",
+        NovelTypography(fontColor = "#ff00ff", backgroundColor = "#000000").effectiveFontColor,
+        "#ff00ff",
+    )
+
+    // Neither chosen means the book's own palette, which is what the tri-state rules protect.
+    check("no colours chosen leaves the publisher's", NovelTypography().effectiveFontColor, null)
+    check(
+        "no colours emits no colour rule",
+        NovelTypographyCss.stylesheet(NovelTypography()).contains("color:"),
+        false,
+    )
+    check("only a background still emits no colour rule on headings", darkBgCss.contains("h1, h2, h3"), true)
+
+    // An unreadable background is not something a reader can recover from, so an unparseable value
+    // must leave the publisher's colour alone rather than pick one.
+    check("garbage background yields no colour", NovelTypography(backgroundColor = "chartreuse").effectiveFontColor, null)
+    check("empty hex yields no colour", NovelTypography(backgroundColor = "#12").effectiveFontColor, null)
+    check("non-hex letters yield no colour", NovelTypography(backgroundColor = "#gggggg").effectiveFontColor, null)
+    check("contrastingForeground agrees", NovelTypography.contrastingForeground("#202124"), "#ffffff")
+    check("contrastingForeground on nothing", NovelTypography.contrastingForeground("nope"), null)
+
     // ---------------- percentage progress ----------------
     val lens = listOf(1000, 2000, 1000)   // total 4000
     val p0 = NovelProgress.Position(0, 500, 1000)

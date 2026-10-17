@@ -214,6 +214,56 @@ class EpubReader(private val reader: ArchiveReader) : Closeable by reader {
      */
     fun readDocument(item: EpubSpineItem): String? = readText(item.href)
 
+    /**
+     * Whether this book reads as prose or as a strip of illustrations.
+     *
+     * Decides whether an `.epub` in a manga library is a comic or a novel, which nothing upstream
+     * knows and which every heuristic will occasionally get wrong — so the answer is a hint the host
+     * makes overridable, never a verdict. See
+     * `docs/superpowers/specs/2026-10-17-library-entry-types-design.md`.
+     *
+     * ### What it counts
+     *
+     * Both signals, because either alone is misleading:
+     *
+     * - **characters of prose** vs **image references**, accumulated across the readable spine. A
+     *   novel has orders of magnitude more text than pictures; an art book is nearly all `<img>`.
+     * - **a table of contents with real entries.** Publishers build one for prose and rarely bother
+     *   for a plate sequence, and it is cheap to read since the TOC is already parsed for the reader.
+     *
+     * Text weight wins because it is the more reliable of the two: an art book can carry a title page
+     * and captions, so it is never *zero* prose, while a novel can carry three illustrations in five
+     * hundred documents and still be overwhelmingly prose. The TOC corroborates but cannot decide —
+     * plenty of real books ship none.
+     *
+     * Bounded by [PROSE_SCAN_DOCUMENTS] and [PROSE_SAMPLE_CHARS] so that asking this of a hostile
+     * file costs a fixed amount rather than a whole spine read. Sampling the first documents is the
+     * right shape for the question: a book's character is established by its opening, and a
+     * pathological book cannot make this expensive.
+     */
+    fun readsAsProse(): Boolean {
+        val documents = textDocuments()
+        if (documents.isEmpty()) return false
+
+        var prose = 0
+        var images = 0
+        for (item in documents.take(PROSE_SCAN_DOCUMENTS)) {
+            val markup = readText(item.href) ?: continue
+            images += IMG_TAG.findAll(markup).count()
+            prose += markup
+                .replace(SCRIPT_OR_STYLE, " ")
+                .replace(TAG, " ")
+                .replace(WHITESPACE, " ")
+                .count { !it.isWhitespace() }
+            if (prose > PROSE_SAMPLE_CHARS) break
+        }
+
+        // More text than references by a wide margin is prose. The threshold is deliberately far from
+        // 1:1, because the interesting cases are mixed (an illustrated novel has both in every
+        // chapter) and only an art book approaches parity.
+        return prose > images * PROSE_TEXT_PER_IMAGE && (prose > PROSE_MIN_CHARS || toc.isNotEmpty())
+    }
+
     /** Best-effort encoding detection from the XML prolog, falling back to UTF-8. */
     private fun charsetOf(bytes: ByteArray): java.nio.charset.Charset {
         val prolog = String(bytes, 0, minOf(bytes.size, 1024), Charsets.ISO_8859_1)
@@ -285,6 +335,44 @@ class EpubReader(private val reader: ArchiveReader) : Closeable by reader {
 
         /** Ceiling on the illustration list [getImagesFromPages] will build. */
         const val MAX_IMAGES = 20_000
+
+        /**
+         * Documents [readsAsProse] looks at before it has enough to decide.
+         *
+         * A book's character is established by its opening. Twenty is well past the point where more
+         * documents change the answer, and it bounds the cost of asking this of a hostile spine that
+         * declares fifty thousand items.
+         */
+        const val PROSE_SCAN_DOCUMENTS = 20
+
+        /**
+         * Non-whitespace characters [readsAsProse] accumulates before it stops reading.
+         *
+         * A detection pass should be near-invisible next to opening the book, and no real book needs
+         * a megabyte of its own text to be recognised as prose.
+         */
+        const val PROSE_SAMPLE_CHARS = 1_000_000
+
+        /**
+         * How many characters of prose one image reference is worth in [readsAsProse].
+         *
+         * An art book approaches 1:1 and must fall below this to be called a comic; an illustrated
+         * novel sits far above it even when every chapter opens with a full-page plate.
+         */
+        const val PROSE_TEXT_PER_IMAGE = 8
+
+        /**
+         * Prose characters below which a book is only prose if it has a table of contents.
+         *
+         * Catches the degenerate near-empty cases — a title page, a copyright leaf — that would
+         * otherwise be called a novel on the strength of a handful of characters.
+         */
+        const val PROSE_MIN_CHARS = 500
+
+        val IMG_TAG = Regex("(?i)<img\\b[^>]*>")
+        val SCRIPT_OR_STYLE = Regex("(?is)<(script|style)[^>]*>.*?</\\1>")
+        val TAG = Regex("(?s)<[^>]*>")
+        val WHITESPACE = Regex("[ \\t\\r\\n\\u00A0]+")
     }
 }
 

@@ -516,34 +516,50 @@ class ReaderActivity : BaseActivity() {
                 }
 
                 is ReaderViewModel.Dialog.ChapterList -> {
-                    var chapters by remember {
-                        mutableStateOf(viewModel.getChapters().toImmutableList())
+                    // KMK --> A book is one library chapter, so the chapter list has nothing to say about
+                    // how to get from one section of it to another: for a five-hundred-document novel it
+                    // is a single row, and for a folder of novels it is a list of *other books*. The
+                    // book's own table of contents is its real chapter list, so a text chapter is
+                    // navigated with that instead — through the same control the reader already reaches
+                    // for, rather than a second button that only some chapters have.
+                    if (showNovelContentsSheet(
+                            chapter = state.currentChapter,
+                            viewer = novelViewer,
+                            onDismissRequest = onDismissRequest,
+                            setMenuVisibility = ::setMenuVisibility,
+                        )
+                    ) {
+                        // Rendered by the sheet above.
+                    } else {
+                        var chapters by remember {
+                            mutableStateOf(viewModel.getChapters().toImmutableList())
+                        }
+                        ChapterListDialog(
+                            onDismissRequest = onDismissRequest,
+                            screenModel = settingsScreenModel,
+                            chapters = chapters,
+                            onClickChapter = {
+                                viewModel.loadNewChapterFromDialog(it)
+                                onDismissRequest()
+                            },
+                            onBookmark = { chapter ->
+                                viewModel.toggleBookmark(chapter.id, !chapter.bookmark)
+                                chapters = chapters.map {
+                                    if (it.chapter.id == chapter.id) {
+                                        it.copy(chapter = chapter.copy(bookmark = !chapter.bookmark))
+                                    } else {
+                                        it
+                                    }
+                                }.toImmutableList()
+                            },
+                            state.dateRelativeTime,
+                            // KMK -->
+                            onDownloadAction = { chapter, action ->
+                                viewModel.handleDownloadAction(chapter, action)
+                            },
+                            // KMK <--
+                        )
                     }
-                    ChapterListDialog(
-                        onDismissRequest = onDismissRequest,
-                        screenModel = settingsScreenModel,
-                        chapters = chapters,
-                        onClickChapter = {
-                            viewModel.loadNewChapterFromDialog(it)
-                            onDismissRequest()
-                        },
-                        onBookmark = { chapter ->
-                            viewModel.toggleBookmark(chapter.id, !chapter.bookmark)
-                            chapters = chapters.map {
-                                if (it.chapter.id == chapter.id) {
-                                    it.copy(chapter = chapter.copy(bookmark = !chapter.bookmark))
-                                } else {
-                                    it
-                                }
-                            }.toImmutableList()
-                        },
-                        state.dateRelativeTime,
-                        // KMK -->
-                        onDownloadAction = { chapter, action ->
-                            viewModel.handleDownloadAction(chapter, action)
-                        },
-                        // KMK <--
-                    )
                 }
 
                 // KMK --> The two text-chapter sheets. A sheet opened against a chapter that cannot answer
@@ -555,59 +571,15 @@ class ReaderActivity : BaseActivity() {
                 // one thing Compose is documented not to tolerate. It surfaced as the sheet opening and
                 // closing again immediately, or as a recomposition loop, depending on the frame.
                 is ReaderViewModel.Dialog.NovelContents -> {
-                    val chapter = state.currentChapter
-                    val loader = chapter?.pageLoader as? TextPageLoader
-                    val tocSource = loader?.tocSource
-                    val sourceChapter = loader?.sChapter
-                    val pages = chapter?.pages
-                    val viewer = novelViewer
-                    val unavailable = tocSource == null || sourceChapter == null || viewer == null || pages == null
-                    LaunchedEffect(unavailable) { if (unavailable) onDismissRequest() }
-                    if (!unavailable) {
-                        // Keyed on the current document as well, deliberately, and that is the one key here that is
-                        // *not* about load ordering. The sheet is modal, so the reader cannot turn a
-                        // document while it is open and this cannot thrash the model in practice -
-                        // but reading `viewer.currentDocument` outside the key would let the mark
-                        // and the scroll target drift from the document actually on screen, which
-                        // is the precise bug this parameter was added to fix.
-                        val screenModel = remember(loader, sourceChapter, pages, viewer.currentDocument) {
-                            NovelTocScreenModel(
-                                source = tocSource!!,
-                                chapter = sourceChapter!!,
-                                // Only what this chapter loaded: an entry pointing anywhere else is
-                                // shown, but marked untappable, rather than pretending to work.
-                                //
-                                // `pages` is part of the remember key, not just read inside it. The
-                                // contents button is offered as soon as the *loader* exists - deliberately,
-                                // because that is the earliest state that settles anything - and the loader
-                                // routinely exists before the page list does. Keying on the loader alone
-                                // therefore froze the empty set into the model, so every row stayed
-                                // unreachable and the sheet reported itself empty for a book with a perfectly
-                                // good contents.
-                                availableDocuments = pages
-                                    .mapNotNull { it.textPage?.url }
-                                    .toSet(),
-                                // Which entry the reader is actually inside, so the sheet can mark it
-                                // and open scrolled to it. Read off the viewer rather than the stored
-                                // position: that follows the reader as they move, and a long book
-                                // should not open its contents pinned to the last place they stopped.
-                                currentDocument = viewer.currentDocument,
-                            )
-                        }
-                        // Owns a scope; see the matching note on the search sheet below.
-                        DisposableEffect(screenModel) {
-                            onDispose { screenModel.dispose() }
-                        }
-                        NovelTocDialog(
-                            onDismissRequest = onDismissRequest,
-                            screenModel = screenModel,
-                            onClickEntry = { entry ->
-                                viewer!!.jumpTo(entry.document, entry.fragment)
-                                onDismissRequest()
-                                setMenuVisibility(false)
-                            },
-                        )
-                    }
+                    showNovelContentsSheet(
+                        chapter = state.currentChapter,
+                        viewer = novelViewer,
+                        onDismissRequest = onDismissRequest,
+                        setMenuVisibility = ::setMenuVisibility,
+                        // Nothing else can answer this dialog, so a chapter that cannot is closed
+                        // rather than left showing an empty sheet.
+                        dismissWhenUnavailable = true,
+                    )
                 }
 
                 is ReaderViewModel.Dialog.NovelSearch -> {
@@ -797,6 +769,82 @@ class ReaderActivity : BaseActivity() {
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         val handled = viewModel.state.value.viewer?.handleGenericMotionEvent(event) ?: false
         return handled || super.dispatchGenericMotionEvent(event)
+    }
+
+    /**
+     * Renders the book's contents sheet, and reports whether it did.
+     *
+     * One implementation for two callers, deliberately. The contents button and the chapter selector
+     * both end up here, and the wiring that makes the sheet correct is most of its body: the loader's
+     * optional source, the set of documents this chapter actually loaded, the document the reader is
+     * currently inside, and a scope that has to be cancelled. Duplicating that for a second caller
+     * means one of the two copies silently drifts, and the drift is invisible — a sheet that renders
+     * a correct contents list with no row marked, or every row untappable.
+     *
+     * [dismissWhenUnavailable] is what separates the two callers. The contents button has nothing else
+     * to fall back to, so a chapter that cannot answer has to close the sheet rather than leave an
+     * empty one. The chapter selector does have a fallback — the library's own chapter list — so a book
+     * whose source has no contents shows that instead, which is a list of other books rather than a
+     * dead button.
+     */
+    @Composable
+    private fun showNovelContentsSheet(
+        chapter: ReaderChapter?,
+        viewer: NovelWebViewer?,
+        onDismissRequest: () -> Unit,
+        setMenuVisibility: (Boolean) -> Unit,
+        dismissWhenUnavailable: Boolean = false,
+    ): Boolean {
+        val loader = chapter?.pageLoader as? TextPageLoader
+        val tocSource = loader?.tocSource
+        val sourceChapter = loader?.sChapter
+        val pages = chapter?.pages
+        val unavailable = tocSource == null || sourceChapter == null || viewer == null || pages == null
+
+        LaunchedEffect(unavailable) {
+            if (unavailable && dismissWhenUnavailable) onDismissRequest()
+        }
+        if (unavailable) return false
+
+        // Keyed on the current document as well, deliberately, and that is the one key here that is
+        // *not* about load ordering. The sheet is modal, so the reader cannot turn a document while it
+        // is open and this cannot thrash the model in practice - but reading `viewer.currentDocument`
+        // outside the key would let the mark and the scroll target drift from the document actually on
+        // screen, which is the precise bug this parameter was added to fix.
+        val screenModel = remember(loader, sourceChapter, pages, viewer.currentDocument) {
+            NovelTocScreenModel(
+                source = tocSource!!,
+                chapter = sourceChapter!!,
+                // Only what this chapter loaded: an entry pointing anywhere else is shown, but marked
+                // untappable, rather than pretending to work.
+                //
+                // `pages` is part of the remember key, not just read inside it. A sheet is offered as
+                // soon as the *loader* exists - deliberately, because that is the earliest state that
+                // settles anything - and the loader routinely exists before the page list does. Keying
+                // on the loader alone therefore froze the empty set into the model, so every row stayed
+                // unreachable and the sheet reported itself empty for a book with a perfectly good
+                // contents.
+                availableDocuments = pages!!.mapNotNull { it.textPage?.url }.toSet(),
+                // Which entry the reader is actually inside, so the sheet can mark it and open scrolled
+                // to it. Read off the viewer rather than the stored position: that follows the reader as
+                // they move, and a long book should not open its contents pinned to where they stopped.
+                currentDocument = viewer.currentDocument,
+            )
+        }
+        // Owns a scope; see the matching note on the search sheet below.
+        DisposableEffect(screenModel) {
+            onDispose { screenModel.dispose() }
+        }
+        NovelTocDialog(
+            onDismissRequest = onDismissRequest,
+            screenModel = screenModel,
+            onClickEntry = { entry ->
+                viewer!!.jumpTo(entry.document, entry.fragment)
+                onDismissRequest()
+                setMenuVisibility(false)
+            },
+        )
+        return true
     }
 
     @Composable

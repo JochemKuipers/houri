@@ -32,6 +32,17 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
 
     // ------------------------------------------------------------ typography
 
+    /**
+     * Whether a book's inline illustrations are drawn.
+     *
+     * Not part of [NovelTypography]: that value is a stylesheet, and this is not expressible as one.
+     * A rule that hides images cannot also stop the renderer fetching them, so a CSS-only version
+     * would leave every plate downloaded and decoded — which is the cost the setting exists to avoid.
+     * It has to reach the markup instead.
+     */
+    val showImages: Preference<Boolean>
+        get() = store.getBoolean(NovelTypographySettingKeys.SHOW_IMAGES.key, NovelTypographySettingKeys.SHOW_IMAGES.default)
+
     val fontSize: Preference<Int>
         get() = store.getInt(NovelTypographySettingKeys.FONT_SIZE.key, NovelTypographySettingKeys.FONT_SIZE.default)
 

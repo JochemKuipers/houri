@@ -31,7 +31,9 @@ import eu.kanade.tachiyomi.ui.reader.viewer.ViewerProvider
 import exh.log.xLogE
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import logcat.LogPriority
 import mihon.app.di.globalAppGraph
+import mihon.core.archive.EpubArchiveUrls
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.source.epub.EpubResourceReader
 import java.io.ByteArrayInputStream
@@ -79,9 +81,10 @@ import kotlin.math.abs
  * // KMK <--
  */
 @SuppressLint("SetJavaScriptEnabled")
-class NovelWebViewer(
+internal class NovelWebViewer(
     private val activity: ReaderActivity,
     private val resources: TextResourceSource?,
+    private val loader: TextPageLoader?,
     private val readerPrefs: ReaderPreferences,
     private val novelPrefs: NovelTypographyPreferences,
 ) : Viewer {
@@ -94,13 +97,39 @@ class NovelWebViewer(
     private var currentPage: ReaderPage? = null
 
     /**
-     * Character length of each document in the current chapter, for [NovelProgress.chapterPercent]
-     * and for turning a scroll fraction back into a stored offset.
+     * The document asked for but perhaps not yet read.
      *
-     * Empty when the loader cannot report them, which has to read as "unknown" rather than "zero": a
-     * progress bar pinned at 0% for the whole book is worse than one that counts documents.
+     * Separate from [currentPage] because the two answer different questions while a document is in
+     * flight: `currentPage` is what is on the screen, and it is what a long press and the reading
+     * position belong to. Navigation needs the one the reader is heading for, or a second tap while
+     * the first is still loading would resolve its neighbour against the document they just left and
+     * send them back.
      */
-    private var documentLengths: List<Int> = emptyList()
+    private var pendingPage: ReaderPage? = null
+
+    /**
+     * Monotonic id of the newest [showDocument] request.
+     *
+     * A document's markup may arrive after the reader has turned past it. The id is how the stale
+     * read recognises itself: only the newest request is allowed to render, so the reader's place is
+     * decided by their last press rather than by whichever read happened to finish last.
+     */
+    private var documentRequest = 0
+
+    /** The in-flight document read, cancelled by the next [showDocument]. */
+    private var documentLoadJob: Job? = null
+
+    /**
+     * Character length of each document, for [NovelProgress.chapterPercent] and for turning a scroll
+     * fraction back into a stored offset.
+     *
+     * Read from the loader on every use rather than cached at chapter open, because the loader fills
+     * these in as documents are read and a snapshot taken before the first one would weight every
+     * chapter by nothing at all. A document that has not been read has no length yet and contributes
+     * zero, which is the "unknown, do not divide by it" case the progress code already handles.
+     */
+    private fun documentLengths(): List<Int> =
+        (chapters?.currChapter?.pageLoader as? TextPageLoader)?.documentLengths().orEmpty()
 
     /** Scroll fraction to restore once the document now loading has laid out. */
     private var pendingRestoreFraction: Float? = null
@@ -258,9 +287,6 @@ class NovelWebViewer(
 
     override fun setChapters(chapters: ViewerChapters) {
         this.chapters = chapters
-        this.documentLengths = (chapters.currChapter.pageLoader as? TextPageLoader)
-            ?.documentLengths()
-            .orEmpty()
 
         val pages = chapters.currChapter.pages ?: return
         if (pages.isEmpty()) return
@@ -286,6 +312,9 @@ class NovelWebViewer(
     override fun destroy() {
         typographyJob?.cancel()
         typographyJob = null
+        // A read in flight must not outlive the viewer: it would finish against a destroyed WebView.
+        documentLoadJob?.cancel()
+        documentLoadJob = null
         webView.stopLoading()
         webView.webViewClient = WebViewClient()
         webView.destroy()
@@ -341,7 +370,41 @@ class NovelWebViewer(
 
     // ---------------------------------------------------------------- documents
 
+    /**
+     * Shows [page], reading its markup first if the source did not hand it over with the page list.
+     *
+     * Split in two because they are not the same moment. A source that answers
+     * [eu.kanade.tachiyomi.source.text.TextIncrementalSource] has already given the reader the shape
+     * of the book and nothing else, so the markup has to be fetched before there is anything to
+     * render; a source that does not has it in hand already and this is one hop.
+     *
+     * The request token is what keeps the two honest. Turns are the reader pressing faster than a
+     * document can be read, so without it a slow read for the document they passed finishes last and
+     * puts them back where they left — the one failure mode a reading position cannot recover from,
+     * because the position was saved for where they were, not where they went.
+     */
     private fun showDocument(page: ReaderPage) {
+        val textPage = page.textPage ?: return
+        val request = ++documentRequest
+        pendingPage = page
+
+        if (textPage.text.isNotEmpty()) {
+            renderDocument(page)
+            return
+        }
+
+        val loader = loader ?: return
+        documentLoadJob?.cancel()
+        documentLoadJob = activity.lifecycleScope.launch {
+            loader.ensureText(page)
+            // A newer turn won while this document was being read; its own request will render.
+            if (request != documentRequest) return@launch
+            renderDocument(page)
+        }
+    }
+
+    /** Hands a document to the engine. Every measurement the reader asks for happens after this. */
+    private fun renderDocument(page: ReaderPage) {
         val textPage = page.textPage ?: return
         currentPage = page
 
@@ -450,7 +513,28 @@ class NovelWebViewer(
      * move?" on the line after the call always got "no" and turned the document on every tap, however far
      * down the page the reader actually was.
      *
-     * Everything reached from that callback runs on the UI thread and only ever starts another load,
+     * ### Why a scroll that did not move is not on its own a reason to turn
+     *
+     * It used to be, and the same test had to mean both "at the end" and "at the beginning", which it
+     * cannot: a tap that failed for either reason turned *forward*. The reported symptom was that
+     * reaching the end of a document needed the page navigator, because the document could not tell
+     * the host which end had been reached.
+     *
+     * So the host asks, once, with [NovelScrollBridge.EDGE], and acts on the answer:
+     *
+     * | Where the document is | Backward tap | Forward tap |
+     * |---|---|---|
+     * | at the top | previous document | scroll |
+     * | in the middle | scroll | scroll |
+     * | at the bottom | scroll | next document |
+     * | one screen tall | previous document | next document |
+     * | no bridge | nothing | nothing |
+     *
+     * "No bridge" deliberately does nothing. The bridge is installed by the document itself, so its
+     * absence means the document has not parsed yet — and turning on that reading is what skipped a
+     * document on the first tap of a freshly-opened book.
+     *
+     * Everything reached from these callbacks runs on the UI thread and only ever starts another load,
      * which is what makes it safe to call from here.
      */
     private fun step(volumeForward: Boolean) {
@@ -461,25 +545,40 @@ class NovelWebViewer(
         }
 
         webView.evaluateJavascript(script) { raw ->
-            // No movement means the engine clamped at an edge of this document, which is the cue to turn
-            // the document rather than tap into the same last screen for ever.
-            if (abs(NovelScrollBridge.number(raw)) <= MIN_MOVEMENT_PX) {
-                if (volumeForward) advanceDocument() else retreatDocument()
+            if (abs(NovelScrollBridge.number(raw)) > MIN_MOVEMENT_PX) return@evaluateJavascript
+            turnAtEdge(volumeForward)
+        }
+    }
+
+    /**
+     * Asks the document which way it has run out of room and turns, if it has.
+     *
+     * A second round trip rather than a second column in the first script's result, because the first
+     * script's whole job is to move the document and its answer has to be read before the move is
+     * judged; asking again afterwards is the only ordering that cannot see a stale position.
+     */
+    private fun turnAtEdge(volumeForward: Boolean) {
+        webView.evaluateJavascript(NovelScrollBridge.EDGE) { raw ->
+            when (NovelScrollBridge.number(raw).toInt()) {
+                // Nowhere left to go this way.
+                EDGE_AT_TOP -> retreatDocument()
+                EDGE_AT_BOTTOM -> advanceDocument()
+                // A document that fits on one screen has no "middle"; either tap leaves it.
+                EDGE_WHOLE_DOCUMENT -> if (volumeForward) advanceDocument() else retreatDocument()
+                // In the middle of the document, or no bridge to ask. Neither is a reason to turn.
+                else -> Unit
             }
         }
     }
 
     /** Next document, or next chapter. */
     private fun advanceDocument() {
-        val chapters = chapters ?: return
-        val page = currentPage ?: return
-        val pages = chapters.currChapter.pages ?: return
-
-        pages.getOrNull(pages.indexOf(page) + 1)?.let {
+        neighbour(1)?.let {
             showDocument(it)
             return
         }
 
+        val chapters = chapters ?: return
         val nextChapter = chapters.nextChapter ?: run {
             // Past the last document of the last chapter. There is nowhere to go, so offer the menu —
             // that is where "next chapter" and the chapter list live — instead of swallowing the tap.
@@ -495,18 +594,37 @@ class NovelWebViewer(
 
     /** Previous document, or previous chapter. */
     private fun retreatDocument() {
-        val chapters = chapters ?: return
-        val page = currentPage ?: return
-        val pages = chapters.currChapter.pages ?: return
-
-        pages.getOrNull(pages.indexOf(page) - 1)?.let {
+        neighbour(-1)?.let {
             showDocument(it)
             return
         }
 
+        val chapters = chapters ?: return
         val previousChapter = chapters.prevChapter ?: return
         activity.requestPreloadChapter(previousChapter)
         activity.viewModel.goToAdjacentChapter(previousChapter)
+    }
+
+    /**
+     * The document [offset] places from the one the reader is on, or null when there is none.
+     *
+     * Through [ReaderChapter.positionOf], which is by identity rather than by equality and returns `-1`
+     * for a page the list no longer contains. The `-1` is the point: a chapter swap that has landed
+     * while this viewer is still holding the old page used to compute `-1 + 1`, which is zero, and a
+     * forward tap from there opened the *first* document of the book. Reading "no such neighbour" as
+     * "the end of the chapter" sends the tap to the chapter boundary, which is where the reader was
+     * actually trying to go.
+     *
+     * The page asked for rather than the page on screen, so a second tap during a read resolves its
+     * neighbour against where the reader is heading and cannot send them back.
+     */
+    private fun neighbour(offset: Int): ReaderPage? {
+        val chapter = chapters?.currChapter ?: return null
+        val pages = chapter.pages ?: return null
+        val page = pendingPage ?: currentPage ?: return null
+        val at = chapter.positionOf(page)
+        if (at < 0) return null
+        return pages.getOrNull(at + offset)
     }
 
     // ---------------------------------------------------------------- resources
@@ -528,14 +646,26 @@ class NovelWebViewer(
             val url = request.url.toString()
             if (!EpubResourceReader.isArchiveUrl(url)) return null
 
+            val path = EpubResourceReader.archivePathOf(url)
+            if (path == null) {
+                logcat { "NovelViewer: archive url with no path, refused: $url" }
+                return notFound()
+            }
+
             val stream = runCatching { resources?.openResource(url) }
                 .onFailure { xLogE("Failed to open archive resource: $url", it) }
                 .getOrNull()
-                ?: return notFound()
+            if (stream == null) {
+                // The single most useful line in the whole EPUB path. "Images are not displayed" has
+                // no other explanation available from the UI — the document still asks for the plate
+                // by name and nothing anywhere says it was refused — so every refusal names the file.
+                logcat(LogPriority.WARN) {
+                    "NovelViewer: archive resource not found: $path (chapter=${chapters?.currChapter?.chapter?.url})"
+                }
+                return notFound()
+            }
 
-            val mime = runCatching { resources?.contentTypeFor(url) }.getOrNull()
-                ?: EpubResourceReader.contentTypeForPath(url)
-                ?: "application/octet-stream"
+            val mime = resolveMimeType(url, path)
 
             // Text responses must declare an encoding or the engine guesses and mangles CJK. Binary ones
             // must not: declaring UTF-8 over a font or an image truncates the body at the first byte
@@ -545,8 +675,27 @@ class NovelWebViewer(
             } else {
                 null
             }
+            logcat { "NovelViewer: serving $path as $mime" }
             return WebResourceResponse(mime, encoding, stream)
         }
+
+        /**
+         * The content type to serve [path] under, never null and never a lie.
+         *
+         * Three answers in order of authority: the source, which knows its own archive; the shared
+         * extension table; and finally `application/octet-stream`. The last one is a last resort
+         * rather than a guess because a renderer asked for an octet stream declines to decode it
+         * exactly as it declines to decode a wrongly-typed image — so the only thing it buys is that
+         * the request fails fast instead of being sniffed.
+         *
+         * The middle step is fed the **archive path**, not the URL. The URL is what the old code
+         * passed, so a query string or fragment survived into the extension lookup and a `.jpg?v=2`
+         * stopped being a JPEG — which is a plate that silently never draws.
+         */
+        private fun resolveMimeType(url: String, path: String): String =
+            runCatching { resources?.contentTypeFor(url) }.getOrNull()
+                ?: EpubArchiveUrls.contentTypeForPath(path)
+                ?: OCTET_STREAM
 
         override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
             val url = request.url.toString()
@@ -693,7 +842,7 @@ class NovelWebViewer(
      */
     private fun savePosition() {
         val page = currentPage ?: return
-        val length = documentLengths.getOrNull(page.index) ?: return
+        val length = documentLengths().getOrNull(page.index) ?: return
         webView.evaluateJavascript(NovelScrollBridge.FRACTION) { raw ->
             val fraction = NovelScrollBridge.number(raw).toFloat().coerceIn(0f, 1f)
             if (abs(fraction - lastSavedFraction) < SAVE_THRESHOLD) return@evaluateJavascript
@@ -738,6 +887,21 @@ class NovelWebViewer(
 
         /** How far the reader must travel before the position is written again. */
         const val SAVE_THRESHOLD = 0.02f
+
+        /** Last resort for a resource no extension table and no signature could classify. */
+        const val OCTET_STREAM = "application/octet-stream"
+
+        /**
+         * Answers of [NovelScrollBridge.EDGE], named so the turn logic reads as a table rather than
+         * as magic numbers.
+         */
+        const val EDGE_AT_TOP = 1
+
+        /** Room in both directions: a scroll, not a turn. Also the "no bridge" answer. */
+        const val EDGE_MIDDLE = 0
+
+        const val EDGE_AT_BOTTOM = 2
+        const val EDGE_WHOLE_DOCUMENT = 3
     }
 }
 
@@ -811,6 +975,7 @@ object NovelViewerProvider : ViewerProvider {
         return NovelWebViewer(
             activity = activity,
             resources = resources,
+            loader = loader,
             readerPrefs = globalAppGraph.readerPreferences,
             novelPrefs = globalAppGraph.novelTypographyPreferences,
         ).apply {

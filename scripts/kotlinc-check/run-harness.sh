@@ -51,10 +51,23 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
              -o -name 'NovelNavigation.kt' \
         2>/dev/null | sort -u
     )
-    # EpubDoctype carries the XXE defence that EpubXmlReader applies, which DocumentHarness asserts. It
-    # lives in its own file precisely so it can be compiled here directly rather than stubbed: a stub
-    # would be a *copy*, and a test that asserts the copy proves nothing about the thing that runs.
+    # EpubDoctype carries the XXE defence that EpubXmlReader applies, and EpubArchiveUrls is the URL
+    # space two libraries now share. Both live in their own files precisely so they can be compiled
+    # here directly rather than stubbed: a stub would be a *copy*, and a test that asserts the copy
+    # proves nothing about the thing that runs.
     SOURCES+=("$REPO_ROOT/core/archive/src/main/kotlin/mihon/core/archive/EpubDoctype.kt")
+    SOURCES+=("$REPO_ROOT/core/archive/src/main/kotlin/mihon/core/archive/EpubArchiveUrls.kt")
+    # EpubMimeSniff is the second half of the resource-type answer: the extension table covers what a
+    # publisher named correctly, and this covers the rest. Compiled directly, same reasoning as above.
+    SOURCES+=("$REPO_ROOT/core/archive/src/main/kotlin/mihon/core/archive/EpubMimeSniff.kt")
+    # EpubMarkup is the pure half of the book pipeline: text stripping, image stripping and the search
+    # that runs over them. Deliberately its own file with no archive dependency, so it can be compiled
+    # here directly. EpubTextSource cannot be - it needs EpubReader, and therefore the whole archive
+    # chain - which is exactly why these transforms were split out of it.
+    SOURCES+=("$REPO_ROOT/core/archive/src/main/kotlin/mihon/core/archive/EpubMarkup.kt")
+    # Only TextSearchHit: it is a plain data class with no serialization plugin and no SChapter, which
+    # is what lets an offline check assert on a hit at all.
+    SOURCES+=("$REPO_ROOT/source-api/src/commonMain/kotlin/eu/kanade/tachiyomi/source/text/TextSearchHit.kt")
     # NovelNavigation models the contents/search results, so it needs the two extension-API models it
     # is built from. Both are plain data classes: no serialization plugin, no Android, no native.
     # TextSearchHit deliberately lives in its own file rather than beside TextSearchSource - the

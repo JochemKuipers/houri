@@ -3,6 +3,7 @@ package eu.kanade.tachiyomi.ui.reader.setting
 import cafe.adriel.voyager.core.model.ScreenModel
 import eu.kanade.presentation.util.ioCoroutineScope
 import eu.kanade.tachiyomi.ui.reader.ReaderViewModel
+import eu.kanade.tachiyomi.ui.reader.loader.TextPageLoader
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -26,4 +27,43 @@ class ReaderSettingsScreenModel(
         .map { it.manga }
         .distinctUntilChanged()
         .stateIn(ioCoroutineScope, SharingStarted.Lazily, null)
+
+    // KMK -->
+    /**
+     * Whether the chapter on screen is served as text, and so has a book's settings to offer.
+     *
+     * Decided from the loader rather than from the pages for the same reason the renderer is: the
+     * loader is assigned before a single page is read, so a tab offered on it appears at the same
+     * moment as the renderer that makes those settings meaningful, and disappears with it. A chapter
+     * that has not loaded yet reports false, which is the honest answer — there is nothing to adjust.
+     */
+    val isTextChapterFlow: StateFlow<Boolean> = readerState
+        .map { it.currentChapter?.pageLoader is TextPageLoader }
+        .distinctUntilChanged()
+        .stateIn(ioCoroutineScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), false)
+
+    /**
+     * Whether the chapter on screen has pages to colour-filter.
+     *
+     * A text chapter has none: there is no bitmap, and a filter applied to one would be a setting that
+     * silently does nothing. Distinct from [isTextChapterFlow] on purpose — the two are read
+     * independently rather than as one flag, so a chapter that is somehow both does not end up with
+     * neither tab.
+     */
+    val hasPagesFlow: StateFlow<Boolean> = readerState
+        .map { it.currentChapter?.pages?.isNotEmpty() == true }
+        .distinctUntilChanged()
+        .stateIn(ioCoroutineScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), false)
+    // KMK <--
+
+    private companion object {
+        /**
+         * How long the tab flags outlive a subscriber.
+         *
+         * The reader's settings dialog is opened from a menu that is itself transient, so a share of a
+         * second is generous; long enough that rebuilding the model for a rotation does not flicker the
+         * tabs, short enough that a closed reader is not kept alive by a boolean.
+         */
+        const val STOP_TIMEOUT_MS = 5_000L
+    }
 }

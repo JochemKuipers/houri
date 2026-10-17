@@ -41,6 +41,7 @@ import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Refresh
@@ -269,6 +270,10 @@ fun MangaActionRow(
     rereadCount: Int,
     isRereading: Boolean,
     onRereadClicked: (() -> Unit)?,
+    // KMK --> Only non-null when the entry is an `.epub` in a local library, i.e. when the question
+    // has an answer. A comic from an extension gets no such button, because there is nothing to
+    // decide for it.
+    onToggleEntryTypeClicked: (() -> Unit)?,
     // KMK <--
     modifier: Modifier = Modifier,
 ) {
@@ -356,6 +361,19 @@ fun MangaActionRow(
             color = if (trackingCount == 0) defaultActionButtonColor else MaterialTheme.colorScheme.primary,
             onClick = onTrackingClicked,
         )
+        // KMK --> Render this as a comic instead. Offered *before* the reader has been asked which it is:
+        // detection is a heuristic and art-book imports are exactly the case it is likeliest to get
+        // wrong, so the override has to be reachable without first opening the book and seeing the
+        // wrong thing.
+        if (onToggleEntryTypeClicked != null) {
+            MangaActionButton(
+                title = stringResource(KMR.strings.entry_type_render_as_comic),
+                icon = Icons.Outlined.MenuBook,
+                color = defaultActionButtonColor,
+                onClick = onToggleEntryTypeClicked,
+            )
+        }
+        // KMK <--
         if (onRereadClicked != null && (isRereading || rereadCount > 0)) {
             MangaActionButton(
                 title = if (isRereading) {

@@ -243,6 +243,9 @@ fun MangaScreen(
     onPaletteScreenClick: () -> Unit,
     onStartRereadingClick: (() -> Unit)?,
     onStopRereadingClick: (() -> Unit)?,
+    // KMK --> Render-as-comic escape hatch. Null unless the entry is an `.epub` in a local
+    // library; there is nothing to decide for a comic from an extension.
+    onToggleEntryTypeClick: (() -> Unit)?,
     hazeState: HazeState,
     // KMK --> Manga-details metadata translation actions (spec 2026-09-23).
     onMangaInfoEnabledChange: (Boolean) -> Unit,
@@ -328,6 +331,7 @@ fun MangaScreen(
             onPaletteScreenClick = onPaletteScreenClick,
             onStartRereadingClick = onStartRereadingClick,
             onStopRereadingClick = onStopRereadingClick,
+            onToggleEntryTypeClick = onToggleEntryTypeClick,
             hazeState = hazeState,
             onBlacklistClicked = onBlacklistClicked,
             onBookmarkColorClicked = { pendingBookmarkColorTargets = it },
@@ -411,6 +415,8 @@ fun MangaScreen(
             onMangaInfoRefresh = onMangaInfoRefresh,
             onMangaInfoRetry = onMangaInfoRetry,
             onMangaInfoReset = onMangaInfoReset,
+            // KMK -->
+            onToggleEntryTypeClick = onToggleEntryTypeClick,
             // KMK <--
         )
     }
@@ -512,6 +518,9 @@ private fun MangaScreenSmallImpl(
     onPaletteScreenClick: () -> Unit,
     onStartRereadingClick: (() -> Unit)?,
     onStopRereadingClick: (() -> Unit)?,
+    // KMK --> Render-as-comic escape hatch. Null unless the entry is an `.epub` in a local
+    // library; there is nothing to decide for a comic from an extension.
+    onToggleEntryTypeClick: (() -> Unit)?,
     hazeState: HazeState,
     onMangaInfoEnabledChange: (Boolean) -> Unit,
     onMangaInfoShowTranslatedChange: (Boolean) -> Unit,
@@ -619,6 +628,7 @@ private fun MangaScreenSmallImpl(
                 onPaletteScreenClick = onPaletteScreenClick,
                 onStartRereadingClick = onStartRereadingClick?.takeIf { !state.manga.rereading },
                 onStopRereadingClick = onStopRereadingClick?.takeIf { state.manga.rereading },
+                onToggleEntryTypeClick = onToggleEntryTypeClick,
                 // KMK <--
             )
         },
@@ -789,6 +799,7 @@ private fun MangaScreenSmallImpl(
                             // did nothing because the reread was already running.
                             // KMK <--
                             onRereadClicked = if (state.manga.rereading) onStopRereadingClick else onStartRereadingClick,
+                            onToggleEntryTypeClicked = onToggleEntryTypeClick,
                             // KMK <--
                         )
                     }
@@ -1110,6 +1121,9 @@ private fun MangaScreenLargeImpl(
     onPaletteScreenClick: () -> Unit,
     onStartRereadingClick: (() -> Unit)?,
     onStopRereadingClick: (() -> Unit)?,
+    // KMK --> Render-as-comic escape hatch. Null unless the entry is an `.epub` in a local
+    // library; there is nothing to decide for a comic from an extension.
+    onToggleEntryTypeClick: (() -> Unit)?,
     hazeState: HazeState,
     onMangaInfoEnabledChange: (Boolean) -> Unit,
     onMangaInfoShowTranslatedChange: (Boolean) -> Unit,
@@ -1208,6 +1222,7 @@ private fun MangaScreenLargeImpl(
                 onPaletteScreenClick = onPaletteScreenClick,
                 onStartRereadingClick = onStartRereadingClick?.takeIf { !state.manga.rereading },
                 onStopRereadingClick = onStopRereadingClick?.takeIf { state.manga.rereading },
+                onToggleEntryTypeClick = onToggleEntryTypeClick,
                 // KMK <--
             )
         },
@@ -1373,6 +1388,7 @@ private fun MangaScreenLargeImpl(
                             // did nothing because the reread was already running.
                             // KMK <--
                             onRereadClicked = if (state.manga.rereading) onStopRereadingClick else onStartRereadingClick,
+                            onToggleEntryTypeClicked = onToggleEntryTypeClick,
                             // KMK <--
                         )
                         // KMK --> Tablet layout: off-device toggle available on nomtl as well.

@@ -4,7 +4,13 @@
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelDocument
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelScrollBridge
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
+import mihon.core.archive.EpubArchiveUrls
 import mihon.core.archive.EpubDoctype
+import mihon.core.archive.EpubMimeSniff
+import mihon.core.archive.MAX_SEARCH_HITS
+import mihon.core.archive.indexesOf
+import mihon.core.archive.plainTextOf
+import mihon.core.archive.stripImages
 import java.io.ByteArrayInputStream
 
 private var failures = 0
@@ -41,6 +47,7 @@ private val REAL_SPINE_ITEM = """
     </html>
 """.trimIndent()
 
+/** The document sits in `OEBPS/Text`, so `../style/main.css` has to resolve to `OEBPS/style/main.css`. */
 private const val BASE = "epub-archive://book.internal/OEBPS/Text/"
 
 fun main() {
@@ -281,6 +288,192 @@ fun main() {
     // half-removed and the rest left to the parser.
     val tricky = "<!DOCTYPE r PUBLIC \"a>b\" \"http://evil/x.dtd\"><r/>"
     absent("quoted > does not end the match early", stripped(tricky), "evil")
+
+    // ---------------- markup transforms ----------------
+// Pure heuristics over a book's own markup, and the part most likely to be quietly wrong: each is a
+// guess with no other way to tell it guessed badly.
+    check("text keeps its words", plainTextOf("<p>hello <b>there</b></p>"), " hello there ")
+    absent("script contents are not prose", plainTextOf("<p>a</p><script>var x = 1;</script>"), "var x")
+    absent("style contents are not prose", plainTextOf("<style>body{color:red}</style><p>a</p>"), "color:red")
+    absent("head contents are not prose", plainTextOf("<head><title>t</title></head><p>a</p>"), "<title>")
+    check("whitespace collapsed", plainTextOf("<p>a</p>\n\n<p>b</p>"), " a b ")
+
+    // Images are removed, not broken: a broken image still occupies a line and leaves a gap.
+    absent("img removed", stripImages("""<p>a<img src="x.png"/>b</p>"""), "img")
+    check("text either side survives", stripImages("""<p>a<img src="x.png"/>b</p>"""), "<p>ab</p>")
+    absent("uppercase IMG removed", stripImages("""<p><IMG SRC="x.png"/></p>"""), "IMG")
+    absent("attributes removed with it", stripImages("""<img alt="caption" src="a.png"/>"""), "caption")
+    absent("empty figure removed", stripImages("<figure><img src='a.png'/></figure>"), "figure")
+    absent("empty picture removed", stripImages("<picture><img src='a.png'/></picture>"), "picture")
+    absent("css image url removed", stripImages("""<div style="background:url(a.png)">x</div>"""), "a.png")
+    check("a figure with a caption is left alone", stripImages("<figure><p>caption</p></figure>"), "<figure><p>caption</p></figure>")
+
+    // Offsets travel in stripped units, so the strip and the offset have to agree.
+    val plain = plainTextOf("<p>The quick brown fox</p><img src='x.png'/><p>jumps over</p>")
+    val hit = plain.indexesOf("brown", plain.length).single()
+    check("offset points at the match in the stripped text", plain.substring(hit.documentOffset, hit.documentOffset + 5), "brown")
+    check("length is the stripped length", hit.documentLength, plain.length)
+    check("case-insensitive", plain.indexesOf("BROWN", plain.length).size, 1)
+    check("no match is empty, not an error", plain.indexesOf("zebra", plain.length).size, 0)
+    check("empty text searches to nothing", "".indexesOf("a", 0).size, 0)
+    check("needle longer than the text", "ab".indexesOf("abcdef", 2).size, 0)
+    check("hit count is capped", "x".repeat(MAX_SEARCH_HITS + 50).indexesOf("x", MAX_SEARCH_HITS + 50).size, MAX_SEARCH_HITS)
+    checkTrue("offset is inside the snippet", hit.matchOffset >= 0 && hit.matchOffset < hit.snippet.length)
+
+// ---------------- identifying a resource from its bytes ----------------
+    // The extension table answers for a book that named its files properly. This is for the ones that
+    // did not, and it exists because the fallback the table's own comment promised ("the host falls
+    // back to sniffing") never existed: an unknown extension became application/octet-stream, which a
+    // renderer declines to decode, so the plate silently never arrived.
+    fun sniff(vararg bytes: Int) = EpubMimeSniff.of(ByteArray(bytes.size) { bytes[it].toByte() })
+
+    check("png", sniff(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0), "image/png")
+    check("jpeg", sniff(0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0), "image/jpeg")
+    check("gif", sniff(0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0, 0, 0, 0, 0, 0), "image/gif")
+    check("bmp", sniff(0x42, 0x4D, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0), "image/bmp")
+    check("avif", sniff(0x66, 0x74, 0x79, 0x70, 0x61, 0x76, 0x69, 0x66, 0, 0, 0, 0), "image/avif")
+    check(
+        "webp, whose type sits past a variable-length field",
+        sniff(0x52, 0x49, 0x46, 0x46, 0x1A, 0, 0, 0, 0x57, 0x45, 0x42, 0x50),
+        "image/webp",
+    )
+    check(
+        "webp with a different chunk length is still webp",
+        sniff(0x52, 0x49, 0x46, 0x46, 0xFF.toByte().toInt(), 0xFF.toByte().toInt(), 0, 0, 0x57, 0x45, 0x42, 0x50),
+        "image/webp",
+    )
+    // A RIFF that is not WebP — a WAV, which is the other thing a book might carry — must not be
+    // served as an image. The wildcard skips the length, never the brand.
+    check(
+        "a riff that is not webp is not an image",
+        sniff(0x52, 0x49, 0x46, 0x46, 0x1A, 0, 0, 0, 0x57, 0x41, 0x56, 0x45),
+        null,
+    )
+
+    // Two containers that agree everywhere except one brand byte, and one that is a bare two-byte
+    // prefix. Ordered longest-first, so none of them reads as another.
+    check(
+        "jp2 container",
+        sniff(0x00, 0x00, 0x00, 0x0C, 0x6A, 0x50, 0x20, 0x20, 0x0D, 0x0A, 0x87, 0x0A),
+        "image/jp2",
+    )
+    check(
+        "jxl container is not jp2",
+        sniff(0x00, 0x00, 0x00, 0x0C, 0x4A, 0x58, 0x4C, 0x20, 0x0D, 0x0A, 0x87, 0x0A),
+        "image/jxl",
+    )
+    check("jxl naked codestream", sniff(0xFF, 0x0A, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), "image/jxl")
+
+    // A font served as an octet stream is a book that silently loses its publisher's typography,
+    // which reads as "this reader ignores the book's styling" rather than as one missing file.
+    check("woff2", sniff(0x77, 0x4F, 0x46, 0x32, 0, 0, 0, 0, 0, 0, 0, 0), "font/woff2")
+    check("opentype", sniff(0x4F, 0x54, 0x54, 0x4F, 0, 0, 0, 0, 0, 0, 0, 0), "font/otf")
+
+    // A stylesheet that is not recognised must answer null rather than a guess: a caller that gets
+    // null falls back to its own last resort, and one that gets a wrong type never gets to.
+    check("xml is not a guessable type", sniff(0x3C, 0x3F, 0x78, 0x6D, 0x6C, 0, 0, 0, 0, 0, 0, 0), null)
+    check("random bytes", sniff(0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C), null)
+    check("too short to tell", sniff(0xFF, 0xD8), null)
+    check("empty", EpubMimeSniff.of(ByteArray(0)), null)
+
+    // The stream form has to leave the stream where it found it. Handing the renderer a stream already
+    // advanced by a sniff is a resource that decodes as garbage — indistinguishable from the bug this
+    // exists to fix.
+    val peekable = ByteArrayInputStream(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 9, 9, 9, 9))
+    check("stream sniff", EpubMimeSniff.ofStream(peekable), "image/png")
+    check(
+        "stream is rewound",
+        peekable.readBytes().take(4).toByteArray().toList(),
+        listOf<Byte>(0x89.toByte(), 0x50, 0x4E, 0x47),
+    )
+    // A stream that does not support mark is the normal case for an archive entry, so the buffering
+    // path has to produce the same answer and leave the same bytes.
+    val unmarkable = object : java.io.InputStream() {
+        private val delegate = ByteArrayInputStream(
+            byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 7, 7, 7, 7, 7, 7, 7, 7, 7),
+        )
+        override fun read(): Int = delegate.read()
+        override fun read(b: ByteArray, off: Int, len: Int): Int = delegate.read(b, off, len)
+    }
+    check("stream sniff without mark support", EpubMimeSniff.ofStream(unmarkable), "image/jpeg")
+
+// ---------------- the shared archive URL space ----------------
+    // Two libraries serve books now and both resolve references through this, so a disagreement
+    // between them is not detectable by reading either one. It has to be asserted.
+    check("root document base url", EpubArchiveUrls.documentBaseUrl(null), EpubArchiveUrls.BASE_URL)
+    check("blank href falls back to root", EpubArchiveUrls.documentBaseUrl("   "), EpubArchiveUrls.BASE_URL)
+    check("fragment stripped", EpubArchiveUrls.documentBaseUrl("OEBPS/a.xhtml#top"), "epub-archive://book.internal/OEBPS/")
+    check("query stripped", EpubArchiveUrls.documentBaseUrl("OEBPS/a.xhtml?x=1"), "epub-archive://book.internal/OEBPS/")
+
+    // The single most consequential line in the EPUB path: a spine item must load at the directory
+    // that *contains* it, or every relative reference in the book 404s and it renders as bare text.
+    // The file name is not part of it — a document at `OEBPS/chapter1.xhtml` sits in `OEBPS/`, so
+    // `../style/main.css` resolves to `style/main.css` at the root, which is what the publisher meant
+    // by writing it. Appending the file name would resolve that one reference up into the book.
+    check(
+        "document base url is the document's directory",
+        EpubArchiveUrls.documentBaseUrl("OEBPS/chapter1.xhtml"),
+        "epub-archive://book.internal/OEBPS/",
+    )
+    check(
+        "a document nested deeper keeps every level",
+        EpubArchiveUrls.documentBaseUrl("OEBPS/Text/chapter1.xhtml"),
+        "epub-archive://book.internal/OEBPS/Text/",
+    )
+    check(
+        "a document at the root needs no directory",
+        EpubArchiveUrls.documentBaseUrl("chapter1.xhtml"),
+        EpubArchiveUrls.BASE_URL,
+    )
+    check(
+        "a trailing slash is not treated as the file",
+        EpubArchiveUrls.documentBaseUrl("OEBPS/chapter1/"),
+        "epub-archive://book.internal/OEBPS/",
+    )
+
+    // A `..` in a producer's href must not walk the base URL off the reserved host. Note what the
+    // invariant actually is: traversal clamps *within* the host, it does not reset to the root. What
+    // matters is that the host is unchanged and the path is normalised, because a base URL pointing
+    // somewhere the renderer will not be served leaves every relative reference unresolvable.
+    val escaped = EpubArchiveUrls.documentBaseUrl("OEBPS/../../etc/passwd")
+    checkTrue("traversal stays on the reserved host", escaped.startsWith(EpubArchiveUrls.BASE_URL))
+    check("traversal is normalised, not preserved", escaped, "epub-archive://book.internal/etc/")
+
+    val climbedToRoot = EpubArchiveUrls.documentBaseUrl("a/b/../../../x.xhtml")
+    checkTrue("climbing past the root clamps", climbedToRoot.startsWith(EpubArchiveUrls.BASE_URL))
+
+    checkTrue("archive url recognised", EpubArchiveUrls.isArchiveUrl("epub-archive://book.internal/OEBPS/a.png"))
+    checkTrue("external url refused", EpubArchiveUrls.isArchiveUrl("https://example.com/a.png").not())
+
+    check("archive path extracted", EpubArchiveUrls.archivePathOf("epub-archive://book.internal/OEBPS/a.png"), "OEBPS/a.png")
+    check("archive path percent-decoded", EpubArchiveUrls.archivePathOf("epub-archive://book.internal/OEBPS/My%20a.png"), "OEBPS/My a.png")
+    check("fragment dropped", EpubArchiveUrls.archivePathOf("epub-archive://book.internal/OEBPS/a.xhtml#s1"), "OEBPS/a.xhtml")
+    check("traversal normalised", EpubArchiveUrls.archivePathOf("epub-archive://book.internal/OEBPS/../a.png"), "a.png")
+    check("external url has no archive path", EpubArchiveUrls.archivePathOf("https://example.com/a.png"), null)
+    check("garbage has no archive path", EpubArchiveUrls.archivePathOf("epub-archive://book.internal/"), null)
+
+    // Content types are load-bearing for the renderer, not conventional: a stylesheet served as
+    // text/plain is ignored and the book loses its own appearance with no error anywhere.
+    check("xhtml is html to the engine", EpubArchiveUrls.contentTypeForPath("OEBPS/a.xhtml"), "text/html")
+    check("svg keeps its own type", EpubArchiveUrls.contentTypeForPath("a.svg"), "image/svg+xml")
+    check("css", EpubArchiveUrls.contentTypeForPath("main.css"), "text/css")
+    check("woff2", EpubArchiveUrls.contentTypeForPath("f.woff2"), "font/woff2")
+
+    // The extensions a real archive uses that the original table had no row for. Each of these fell
+    // through to a null type, and a null type became application/octet-stream, which a renderer will
+    // not decode — so each was an illustration that never appeared.
+    check("avif", EpubArchiveUrls.contentTypeForPath("plate.avif"), "image/avif")
+    check("jfif", EpubArchiveUrls.contentTypeForPath("plate.jfif"), "image/jpeg")
+    check("apng", EpubArchiveUrls.contentTypeForPath("plate.apng"), "image/png")
+    check("tiff", EpubArchiveUrls.contentTypeForPath("plate.tif"), "image/tiff")
+    check("jpeg 2000", EpubArchiveUrls.contentTypeForPath("plate.jp2"), "image/jp2")
+    check("jxl", EpubArchiveUrls.contentTypeForPath("plate.jxl"), "image/jxl")
+
+    // A query string is not part of the extension, and the old fallback handed this function the
+    // whole URL rather than the archive path — so `plate.jpg?v=2` stopped being a JPEG.
+    check("query string is not part of the extension", EpubArchiveUrls.contentTypeForPath("a.jpg?v=2"), "image/jpeg")
+    check("unknown is null not a guess", EpubArchiveUrls.contentTypeForPath("a.bin"), null)
+    check("no extension is null", EpubArchiveUrls.contentTypeForPath("plate"), null)
 
     println(if (failures == 0) "\nALL PASS" else "\n$failures FAILURES")
     if (failures > 0) kotlin.system.exitProcess(1)

@@ -30,6 +30,16 @@ object NovelTypographySettingKeys {
     val BACKGROUND_COLOR = SettingKey("pref_novel_background_color", "")
 
     val SMOOTH_TEXT = SettingKey("pref_novel_smooth_text", true)
+
+    /**
+     * Whether a book's inline illustrations are drawn.
+     *
+     * Default on, which is also what the reader did before the setting existed — the markup asked for
+     * them and the renderer fetched them. The switch exists for the case where that is not what
+     * someone wants: decoding every plate of a long illustrated novel is the slowest part of turning
+     * the page, and a text-only reading of the same book is a legitimate way to read it.
+     */
+    val SHOW_IMAGES = SettingKey("pref_novel_show_images", true)
     val JUSTIFIED = SettingKey("pref_novel_justified", NOVEL_FOLLOW_PUBLISHER)
     val HYPHENATION = SettingKey("pref_novel_hyphenation", NOVEL_FOLLOW_PUBLISHER)
     val VERTICAL_WRITING = SettingKey("pref_novel_vertical_writing", NOVEL_FOLLOW_PUBLISHER)
@@ -56,6 +66,7 @@ object NovelTypographySettingKeys {
         FONT_COLOR,
         BACKGROUND_COLOR,
         SMOOTH_TEXT,
+        SHOW_IMAGES,
         JUSTIFIED,
         HYPHENATION,
         VERTICAL_WRITING,

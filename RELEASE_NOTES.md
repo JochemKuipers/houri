@@ -9,6 +9,22 @@ files moved. See .github/scripts/release_notes.py.
 -->
 
 ### New
+- **Books can live in the manga library.** An `.epub` you drop into an ordinary library folder used to
+  open as a strip of illustrations and nothing else, because the reader asked the file's format and
+  never asked what the entry *was*. Entries now carry a content type, and one that is a novel opens as
+  a book — your own stylesheet, your own fonts, your illustrations inline — in the same library as
+  everything else.
+  - **Nothing is taken away.** A folder whose chapters are art rather than prose still opens as a
+    comic, because that is what those files are for and some readers depend on it.
+  - **The guess is wrong sometimes, and it is easy to overrule.** Detection reads the book's spine and
+    is a heuristic; a book it calls a comic, or an art book it calls a novel, is one tap from being
+    fixed in the manga's info screen. What you choose there sticks — a later library update will not
+    quietly undo it.
+  - **Extensions can say what their entries are**, through a new optional interface. Nothing existing
+    changed shape, so every extension you have installed keeps working untouched.
+- **Illustrations in a book can be turned off.** Reading a heavily illustrated novel, decoding every
+  plate is the slowest part of turning the page. Default is on, which is how it already behaved.
+
 - **Books have a contents list and a chapter search.** Both were implemented on the EPUB side and had
   no way to reach them. The bottom bar now carries a **Contents** and a **Search** button while you are
   reading a book, and they hide themselves again for a chapter that cannot answer — an extension with
@@ -21,6 +37,18 @@ files moved. See .github/scripts/release_notes.py.
     every match — the snippet is the only way to tell two hits of the same word apart, and it is
     selectable so you can copy a passage out. Tapping a result jumps to it. Matching is
     case-insensitive.
+
+- **A book's reading appearance is adjustable at last.** Font size and scale, family, text and page
+  colours, line and paragraph spacing, letter spacing, margins, justification, hyphenation, vertical
+  writing and inline illustrations were all stored settings with no way to reach them — they now
+  live in a **Reading appearance** tab in the reader's settings, offered exactly when the open
+  chapter is a book. Colours are a fixed palette, and picking a page colour also picks a text colour
+  that stays readable on it, so a dark page can never again mean invisible text.
+- **The chapter selector now knows what a book's chapters are.** A book is one library chapter, so
+  the selector offered a single row — or, for a folder of novels, a list of *other books*. While
+  reading a book it now lists the volume's own sections from its table of contents, and tapping one
+  jumps there. Books whose source has no table of contents get the old list back rather than a
+  dead button.
 
 ### Improve
 - **The book reader can be navigated at all.** Taps, swipes and volume keys did nothing in an EPUB, so
@@ -47,6 +75,10 @@ files moved. See .github/scripts/release_notes.py.
 - **Searching a chapter is no longer re-read from scratch on every keystroke.** The search followed
   typing, and each pause re-read and re-parsed the whole book from disk, so typing a word meant reading
   the chapter several times over. It is now prepared once and reused.
+- **Long novels open as fast as short ones.** Opening a book read every file it contained before the
+  first screen could appear, so a five-hundred-file novel took visibly longer to open than a short
+  one — the longer the book, the longer the wait. The section you open on is read first now and the
+  rest as you turn, so a novel opens on its first page almost immediately however long it is.
 
 ### Fix
 - **Reading many books no longer slows down or runs out of memory.** Each book you opened kept its file
@@ -100,3 +132,15 @@ files moved. See .github/scripts/release_notes.py.
 - **A contents list that lists nothing from this chapter says so.** A book-wide contents whose entries
   all point at other chapters was reported as a book with no contents at all, rather than as one whose
   contents are somewhere else.
+- **A non-white page no longer hides the text.** Setting a page colour left the book's own text
+  colour standing, so a dark page meant dark text on it — unreadable, and with nothing in the
+  settings to suggest why. Choosing a page colour now also chooses a text colour that contrasts
+  with it, unless you picked a text colour yourself.
+- **Illustrations, stylesheets and embedded fonts render again.** A book's file without a
+  conventional extension — a cover named by a query string, a WebP, an image stored as `.bin` — was
+  handed to the renderer with a type it refuses to decode, so it silently did not appear while the
+  page around it did. Files are now identified by their contents when their name does not say.
+- **Reaching the end of a page now turns it.** The reader decided a tap should turn by asking "did
+  the page move?", and a page with nowhere left to scroll answers "no" — so the last screen of a
+  section could only be left with the chapter buttons. The reader now asks *which* end the
+  document ran out of room at, and turns that way.

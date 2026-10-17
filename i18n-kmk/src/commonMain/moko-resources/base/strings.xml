@@ -709,10 +709,24 @@
     <string name="pref_novel_margin_top">Top margin</string>
     <string name="pref_novel_margin_bottom">Bottom margin</string>
     <string name="novel_follow_publisher">Follow book</string>
+    <!-- KMK: the reader's own colour palette. Names rather than swatches, because a swatch needs a
+         label anyway and a named chip is the one the reader can still read in a dark reader dialog. -->
+    <string name="novel_color_white">White</string>
+    <string name="novel_color_light_grey">Light grey</string>
+    <string name="novel_color_dark_grey">Dark grey</string>
+    <string name="novel_color_black">Black</string>
+    <string name="novel_color_cream">Cream</string>
+    <string name="novel_color_paper">Paper</string>
+    <string name="novel_color_sepia">Sepia</string>
     <string name="novel_error_drm_protected">This book is DRM-protected and cannot be read</string>
     <string name="novel_error_chapter_not_found">Chapter not found</string>
     <!-- KMK: reader contents + in-chapter search -->
     <string name="novel_contents">Contents</string>
+    <!-- KMK: library entry types - a book in the manga library, and the escape hatch when the
+         reader guesses wrong about which one it is. -->
+    <string name="entry_type_render_as_comic">Render as comic</string>
+    <string name="entry_type_render_as_book">Render as book</string>
+    <string name="novel_show_images">Show illustrations</string>
     <string name="novel_contents_no_reachable">No section of this chapter is listed</string>
     <string name="novel_contents_empty">This book has no table of contents</string>
     <string name="novel_search">Search in chapter</string>

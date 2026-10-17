@@ -21,6 +21,15 @@ package eu.kanade.tachiyomi.ui.reader.viewer.novel
  * Publishers scope text in wildly different ways, so several selectors are targeted at once rather
  * than betting on one. `!important` plus a group selector covers `body`, unclassed elements and the
  * common container classes without needing to know the book's class names.
+ *
+ * ### A background implies a text colour
+ *
+ * The colour written into the rules is [NovelTypography.effectiveFontColor], not its `fontColor`
+ * field. Emitting each independently is what made every background except white unreadable: the
+ * sheet honoured a reader-chosen background and left the text in the publisher's own colour, so a
+ * dark plate came out as black on black. Deriving the foreground from the background is the fix, and
+ * it is deliberately the only colour logic here — the alternative, guessing a "best" text colour for
+ * every book, is what turned a missing rule into a wrong one.
  */
 object NovelTypographyCss {
 
@@ -38,12 +47,15 @@ object NovelTypographyCss {
      */
     fun stylesheet(type: NovelTypography): String {
         val t = type.sanitized()
+        // Not `t.fontColor`: a background the reader chose forces a text colour even when they did
+        // not choose one, or the page is the publisher's black text on the reader's black plate.
+        val textColor = t.effectiveFontColor
 
         return buildString {
             appendLine("/* komikku reader typography */")
             appendLine(":root {")
             appendLine("  --kmk-font-size: ${fmt(t.effectiveFontSizePt)}pt;")
-            t.fontColor?.let { appendLine("  --kmk-text: $it;") }
+            textColor?.let { appendLine("  --kmk-text: $it;") }
             t.backgroundColor?.let { appendLine("  --kmk-bg: $it;") }
             appendLine("  --kmk-line: ${fmt(t.lineSpacing)};")
             appendLine("  --kmk-para: ${fmt(t.paragraphSpacing)}em;")
@@ -57,7 +69,7 @@ object NovelTypographyCss {
             t.fontFamily.takeIf { it.isNotBlank() }?.let {
                 appendLine("  font-family: ${quoteFamily(it)} !important;")
             }
-            t.fontColor?.let { appendLine("  color: $it !important;") }
+            textColor?.let { appendLine("  color: $it !important;") }
             t.backgroundColor?.let { appendLine("  background-color: $it !important;") }
             appendLine("  line-height: var(--kmk-line) !important;")
             appendLine("  letter-spacing: var(--kmk-tracking) !important;")
@@ -72,7 +84,7 @@ object NovelTypographyCss {
 
             // Re-asserted on the text-bearing elements because a publisher rule on `p` or a class
             // outranks a rule on `body` regardless of where it appears in the document.
-            appendLine(elementsRule(t))
+            appendLine(elementsRule(t, textColor))
 
             appendLine("p, div, blockquote, li, dd, section, article {")
             appendLine("  margin-top: 0 !important;")
@@ -83,7 +95,7 @@ object NovelTypographyCss {
             appendLine("p + p { text-indent: 1em !important; }")
 
             // Headings keep the publisher's scale but inherit the colour choice.
-            t.fontColor?.let { appendLine("h1, h2, h3, h4, h5, h6 { color: $it !important; }") }
+            textColor?.let { appendLine("h1, h2, h3, h4, h5, h6 { color: $it !important; }") }
 
             // An image must never bleed into the margin box once the user has set one.
             if (t.marginLeft > 0f || t.marginRight > 0f) {
@@ -105,12 +117,12 @@ object NovelTypographyCss {
     fun styleTag(type: NovelTypography): String =
         "<style id=\"kmk-typography\">${stylesheet(type).replace("</", "<\\/")}</style>"
 
-    private fun elementsRule(t: NovelTypography): String = buildString {
+    private fun elementsRule(t: NovelTypography, textColor: String?): String = buildString {
         append("body, p, div, span, li, td, th, blockquote, dd, dt, section, article, h1, h2, h3, h4, h5, h6 {")
         append(" font-size: var(--kmk-font-size) !important;")
         append(" line-height: var(--kmk-line) !important;")
         if (t.fontSpacing != 0f) append(" letter-spacing: var(--kmk-tracking) !important;")
-        t.fontColor?.let { append(" color: $it !important;") }
+        textColor?.let { append(" color: $it !important;") }
         append(" }")
     }
 

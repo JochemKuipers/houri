@@ -4,12 +4,24 @@ import android.content.Context
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.UnmeteredSource
+import eu.kanade.tachiyomi.source.model.EntryType
+import eu.kanade.tachiyomi.source.model.EntryTypeSource
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.model.MangasPage
+import eu.kanade.tachiyomi.source.model.MixedContentSource
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
+import eu.kanade.tachiyomi.source.text.EpubArchiveSource
+import eu.kanade.tachiyomi.source.text.TextBaseUrlSource
+import eu.kanade.tachiyomi.source.text.TextCapabilities
+import eu.kanade.tachiyomi.source.text.TextIncrementalSource
+import eu.kanade.tachiyomi.source.text.TextPage
+import eu.kanade.tachiyomi.source.text.TextResourceSource
+import eu.kanade.tachiyomi.source.text.TextSource
+import eu.kanade.tachiyomi.source.text.TextTocSource
+import eu.kanade.tachiyomi.source.text.TocEntry
 import eu.kanade.tachiyomi.util.lang.compareToCaseInsensitiveNaturalOrder
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -57,10 +69,78 @@ class LocalSource(
     // SY -->
     private val allowHiddenFiles: () -> Boolean,
     // SY <--
-) : Source, UnmeteredSource {
+) : Source,
+    UnmeteredSource,
+    TextSource,
+    TextTocSource,
+    TextIncrementalSource,
+    TextResourceSource,
+    TextBaseUrlSource,
+    EpubArchiveSource,
+    MixedContentSource,
+    EntryTypeSource {
 
     private val json: Json by injectLazy()
     private val xml: XML by injectLazy()
+
+    /**
+     * The book half of this source.
+     *
+     * Constructed lazily because it owns the archive leases and nothing should open one until a book
+     * is actually read — which, for most users of the manga library, is never.
+     */
+    private val books: LocalEpubTextAdapter by lazy { LocalEpubTextAdapter(context, fileSystem) }
+
+    override val textCapabilities: TextCapabilities = TextCapabilities.EPUB
+
+    // ---------------------------------------------------------------- the book half
+    //
+    // Declared here and not on the adapter because `TextSource` extends `Source`: the host needs one
+    // object that is both a source and text-capable, and it must also be a `MixedContentSource` so the
+    // loader knows the source-level answer is not the whole story. Splitting it across two objects
+    // would make that impossible to express.
+
+    override suspend fun getTextPageList(chapter: SChapter): List<TextPage> = books.textPages(chapter)
+
+    override suspend fun getTableOfContents(chapter: SChapter): List<TocEntry> = books.tableOfContents(chapter)
+
+    // Documents are read one at a time, so opening a novel is bounded by the document being opened
+    // rather than by the length of the book. Declared here for the same reason as the rest of this
+    // section: the host asks one object, and that object is the source.
+    override suspend fun getTextPageIndex(chapter: SChapter): List<TextPage> =
+        books.textPageIndex(chapter)
+
+    override suspend fun getTextPageText(chapter: SChapter, page: TextPage): String? =
+        books.textPageText(chapter, page)
+
+    override fun baseUrlFor(page: TextPage): String = books.baseUrlFor(page)
+
+    override fun openResource(absoluteUrl: String): InputStream? = books.openResource(absoluteUrl)
+
+    override fun contentTypeFor(absoluteUrl: String): String? = books.contentTypeFor(absoluteUrl)
+
+    override fun releaseResourceReader(chapterUrl: String) = books.releaseResourceReader(chapterUrl)
+
+    override fun releaseAllResourceReaders() = books.releaseAllResourceReaders()
+
+    /**
+     * Whether [manga] is a novel, asked before anyone has said.
+     *
+     * Answers BOOK only for a folder whose chapters are *all* EPUB: a mixed folder is a comic with a
+     * stray file in it, and calling that a book would hand the reader a prose view of something that
+     * is mostly pictures.
+     */
+    override fun entryTypeOf(manga: SManga): EntryType? = books.entryTypeOf(manga)
+
+    /**
+     * Reads the spine to decide.
+     *
+     * The last word, and the only signal that actually looks at the content: a title page and a
+     * copyright leaf cannot be told from prose by shape, nor from an art book's plates — only by how
+     * much text there is across the whole book.
+     */
+    override fun detectBookEntry(manga: SManga, chapter: SChapter): Boolean =
+        books.detectBookEntry(chapter)
 
     @Suppress("PrivatePropertyName")
     private val PopularFilters = FilterList(OrderBy.Popular(context))

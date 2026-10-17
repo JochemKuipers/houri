@@ -2,12 +2,15 @@ package tachiyomi.domain.manga.model
 
 import android.annotation.SuppressLint
 import androidx.compose.runtime.Immutable
+import eu.kanade.tachiyomi.source.model.EntryType
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import mihon.core.common.extensions.EMPTY
 import tachiyomi.core.common.preference.TriState
@@ -368,6 +371,57 @@ object SequelPrequelSettingKeys {
     const val KEY = "pref_sequel_prequel_enabled"
     const val DEFAULT_ENABLED = false
 }
+
+// KMK --> What the reader renders this entry as, and whether a human decided it.
+//
+// `isLightNovel` is stored as a single bit and has two readers with two different questions:
+// `Manga.isLightNovel()` asks provenance (E-Hentai light-novel content), while the reader asks
+// content type (comic or book). They share a column because adding a second one for a
+// two-valued fact would mean two things that can disagree — see
+// `docs/superpowers/specs/2026-10-17-library-entry-types-design.md`.
+//
+// The second bit distinguishes "detected as a book" from "the user told us this is a book". It
+// matters only in that direction: a detection heuristic may never overrule an explicit choice,
+// because a user cannot correct a decision they cannot see was made.
+
+/**
+ * What the reader should render this entry as, or null when nobody has decided yet.
+ *
+ * Null means detection, not COMIC. Treating "unset" as COMIC would make every entry that predates
+ * this feature a comic forever, which is the current behaviour but is not the same as an answer.
+ */
+fun Manga.entryType(): EntryType? =
+    if (isLightNovel) EntryType.BOOK else null
+
+/** True when [isLightNovel] reflects the user's choice rather than detection. */
+fun Manga.hasExplicitEntryType(): Boolean =
+    memo[EXPLICIT_ENTRY_TYPE_MEMO_KEY]?.jsonPrimitive?.booleanOrNull == true
+
+/**
+ * This entry with [type] set explicitly.
+ *
+ * Records the explicit bit alongside the type, because the two travel together: a value that later
+ * becomes indistinguishable from a detected one would let a stale detection quietly override it on
+ * the next library refresh.
+ */
+fun Manga.withEntryType(type: EntryType?): Manga {
+    // JsonObject is a Map at runtime but not a subtype of one, so the copy is expressed as a builder
+    // rather than as `memo + key` — which does not typecheck and, where it compiles on another
+    // kotlinx version, silently drops the other keys.
+    val updated = buildJsonObject {
+        memo.forEach { (key, value) -> put(key, value) }
+        if (type != null) put(EXPLICIT_ENTRY_TYPE_MEMO_KEY, JsonPrimitive(true))
+    }
+    return copy(
+        isLightNovel = type == EntryType.BOOK,
+        memo = updated,
+    )
+}
+
+// KMK -->
+
+// KMK --> memo key recording that the entry type was chosen by a human, not detected.
+const val EXPLICIT_ENTRY_TYPE_MEMO_KEY = "kmk.entryTypeExplicit"
 
 // KMK --> memo key marking a tracker sequel/prequel stub: tracker metadata,
 // no readable chapters, so the details screen skips its chapter refresh.

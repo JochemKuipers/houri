@@ -106,6 +106,12 @@ encoding* of the script's return value, so a script returning `NaN` arrives as t
 `null`. `NovelScrollBridge.number` has to read that as "no movement", or every tap near a page edge
 turns the document instead of doing nothing.
 
+**Turning asks which edge the document ran out at, not whether it moved.** "No movement" is ambiguous
+twice over: a scroll with nowhere left to go answers it, and so does a scroll that simply did nothing.
+`window.KmkReader.edge()` returns `0` middle, `1` top, `2` bottom, `3` whole-document-fits, and `step`
+turns only on the edge it actually ran out at — so a tap that did nothing still does nothing, and the
+last screen of a section still turns.
+
 **A missing resource answers 404, not null.** `shouldInterceptRequest` returning null hands the URL
 back to the platform, which then waits on a scheme nothing handles — so one missing plate holds the
 document's layout hostage. A 404 shows a broken image and gets out of the way.
@@ -123,6 +129,18 @@ settings screen re-lays-out a book nobody reopens and the reader concludes the s
 The job is cancelled in `destroy()`, because the activity's scope outlives a viewer that a
 reading-mode switch has already torn down.
 
+**A book loads a document at a time.** `TextIncrementalSource` — optional, like every interface an
+extension may or may not implement — splits the eager `getTextPageList` into `getTextPageIndex` (the
+spine, no text read) and `getTextPageText` (one document). `TextPageLoader.ensureText` reads a page's
+markup the first time the viewer shows it, and `showDocument` carries a monotonic request token so a
+stale read cannot displace a newer tap.
+
+The settings UI for all of the above is the **Reading appearance** tab in `ReaderSettingsDialog`
+(`NovelTypographySettingsPage`), offered only while the open chapter is text — the same signal that
+chose the renderer. Its rows are hand-built from `presentation-core`'s `SettingsItems` rather than the
+settings framework: the values are floats the stylesheet reads as page fractions, and tri-states,
+which the framework's int-slider and switch helpers cannot express.
+
 ## Contents and search
 
 `TextTocSource` and `TextSearchSource` are implemented by the EPUB source and had no UI at all. The
@@ -138,6 +156,14 @@ measured against a document that has not laid out resolves to the top of an empt
 **A contents entry for another chapter is shown, not dropped.** A whole-book contents points at files
 the open chapter never loaded. Those rows render disabled (`NovelTocEntry.reachable`) so the structure
 of the book stays visible; silently doing nothing on tap reads as a broken button.
+
+**The chapter selector is the contents list, for a book.** A book is one library chapter, so
+`Dialog.ChapterList` renders the ToC sheet for a text chapter instead of the library's chapter list —
+for a novel that list was a single row, and for a folder of novels a list of *other books*. Both
+entries to the sheet go through one `showNovelContentsSheet` in `ReaderActivity`, because the wiring —
+which documents this chapter loaded, which the reader is inside, the model's scope — is most of its
+body and a second copy would drift. A chapter whose source cannot answer falls back to the library
+list rather than to a dead button.
 
 **A search hit carries a document offset *and* a document length, in the source's plain text.** The
 host holds markup, the source searched plain text, and dividing one by the other lands tens of

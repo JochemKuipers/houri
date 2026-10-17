@@ -40,6 +40,19 @@ fun Source.isMdBasedSource() = id in mangaDexSourceIds
 // KMK -->
 fun Manga.isEhBasedManga() = source in eHentaiSourceIds
 
+/**
+ * Whether this entry is E-Hentai light-novel content.
+ *
+ * Deliberately **provenance**, not content type: it answers "did this come from a light-novel
+ * source", which is what the E-Hentai sync and metadata paths care about. It is *not* the reader's
+ * question.
+ *
+ * The reader asks whether an entry is a book — see
+ * `docs/superpowers/specs/2026-10-17-library-entry-types-design.md` — and answers it from the same
+ * column read raw, plus detection. The two meanings are kept apart here on purpose: an art book
+ * imported as EPUB from a light-novel source is still an art book, and letting provenance decide its
+ * renderer would break exactly the case `source-epub/AGENTS.md` records as relied upon.
+ */
 fun Manga.isLightNovel() = isLightNovel || source in lnSourceIds
 // KMK <--
 

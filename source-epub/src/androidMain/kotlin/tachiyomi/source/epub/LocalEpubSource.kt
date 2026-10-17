@@ -8,8 +8,10 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
+import eu.kanade.tachiyomi.source.text.EpubArchiveSource
 import eu.kanade.tachiyomi.source.text.TextBaseUrlSource
 import eu.kanade.tachiyomi.source.text.TextCapabilities
+import eu.kanade.tachiyomi.source.text.TextIncrementalSource
 import eu.kanade.tachiyomi.source.text.TextPage
 import eu.kanade.tachiyomi.source.text.TextResourceSource
 import eu.kanade.tachiyomi.source.text.TextSearchHit
@@ -24,8 +26,9 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.supervisorScope
 import logcat.LogPriority
 import mihon.core.archive.EpubReader
-import mihon.core.archive.EpubTocNode
+import mihon.core.archive.EpubTextSource
 import mihon.core.archive.epubReader
+import mihon.core.archive.indexesOf
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.storage.extension
 import tachiyomi.core.common.storage.nameWithoutExtension
@@ -71,6 +74,7 @@ class LocalEpubSource(
     TextSource,
     TextTocSource,
     TextSearchSource,
+    TextIncrementalSource,
     TextResourceSource,
     TextBaseUrlSource,
     EpubArchiveSource {
@@ -86,6 +90,21 @@ class LocalEpubSource(
      */
     private val resourceReader = EpubResourceReader { chapter ->
         resolveChapterFile(chapter)?.epubReader(context)
+    }
+
+    /**
+     * The book-as-text half of this source.
+     *
+     * Resolves the shared reader first, because that is the instance the renderer is streaming images
+     * out of and closing it would unmap the archive out from under a chapter already on screen. A
+     * cold read — the contents sheet can be opened before the first page loads — opens its own reader
+     * and *adopts* it, so there is still exactly one owner for every mapped archive and one release
+     * path for all of them.
+     */
+    private val text = EpubTextSource { chapter ->
+        resourceReader.readerFor(chapter) ?: resolveChapterFile(chapter)
+            ?.epubReader(context)
+            ?.let { resourceReader.adopt(chapter.url, it) }
     }
 
     /**
@@ -254,73 +273,84 @@ class LocalEpubSource(
     // ---------------------------------------------------------------- reading
 
     /**
-     * Splits a book into one page per spine document.
+     * One page per spine document, raw and unmodified.
      *
-     * Raw markup, unmodified. Whatever CSS and markup the publisher shipped is what the renderer
-     * receives, because stripping it is how a reader ends up with a book that has lost its ruby
-     * annotations, its tables and its drop caps.
+     * Thin: everything that decides what a book *is* — the spine, the ceilings, the stripped text
+     * search runs over — lives in [EpubTextSource], so a book in the manga library behaves
+     * identically to one in this library.
+     *
+     * Whatever CSS and markup the publisher shipped is what the renderer receives, because stripping
+     * it is how a reader ends up with a book that has lost its ruby annotations, its tables and its
+     * drop caps.
      */
-    override suspend fun getTextPageList(chapter: SChapter): List<TextPage> = withIOContext {
-        // Reuses the reader opened by a previous call for this chapter so the archive stays mapped
-        // for the renderer to pull images out of.
-        val epub = resourceReader.readerFor(chapter)
-            ?: throw IllegalStateException("Chapter not found: ${chapter.url}")
+    override suspend fun getTextPageList(chapter: SChapter): List<TextPage> =
+        withIOContext { text.textPages(chapter) }
 
-        if (epub.hasDrm) {
-            resourceReader.release(chapter.url)
-            throw IllegalStateException("This book is DRM-protected and cannot be read")
-        }
+    /**
+     * The chapter's documents with none of their text read.
+     *
+     * The reason this source is worth the [TextIncrementalSource] membership: an EPUB chapter is a
+     * whole novel, so the eager list means inflating and decoding every spine item before the reader
+     * sees the first screen and holding all of it for as long as the book stays open.
+     */
+    override suspend fun getTextPageIndex(chapter: SChapter): List<TextPage> =
+        withIOContext { text.getTextPageIndex(chapter) }
 
-        // Both bounds below are attacker-controlled inputs: the spine is whatever the file declares,
-        // and its length is checked against nothing, while a document's size is bounded only by its
-        // compression ratio. The result is held by every page for as long as the chapter is open, so
-        // a book declaring ten thousand spine items of forty megabytes each has to cost the reader a
-        // truncated book rather than a heap exhaustion report. Both caps sit far above a real novel.
-        var totalChars = 0
-        val documents = epub.textDocuments()
-        logcat {
-            "LocalEpubSource.getTextPageList: chapter=${chapter.url} " +
-                "spineItems=${documents.size} drm=${epub.hasDrm}"
-        }
-        documents.mapIndexedNotNull { index, item ->
-            if (index >= MAX_DOCUMENTS) {
-                xLogE("LocalEpubSource: ${chapter.url} has more than $MAX_DOCUMENTS spine items; truncating")
-                return@mapIndexedNotNull null
-            }
-            val markup = epub.readDocument(item)
-            if (markup == null) {
-                // The single most useful line in this file for "my book will not open": every skipped
-                // spine item is logged by name, so a book that reads as empty can be traced to the
-                // exact file that would not decode instead of appearing as zero pages with no cause.
-                xLogE("LocalEpubSource: ${chapter.url} could not read spine item $index (${item.href})")
-                return@mapIndexedNotNull null
-            }
-            totalChars += markup.length
-            if (totalChars > MAX_CHAPTER_CHARS) {
-                xLogE("EPUB ${chapter.url} exceeds the in-memory markup cap; truncating the chapter")
-                return@mapIndexedNotNull null
-            }
-            TextPage(
-                index = index,
-                url = item.href,
-                text = markup,
-                kind = TextPage.Kind.HTML,
-                baseHref = item.href,
-                name = item.title,
-            )
-        }.also { pages ->
-            logcat {
-                "LocalEpubSource.getTextPageList: ${chapter.url} -> ${pages.size} text page(s) " +
-                    "of ${documents.size} spine item(s), $totalChars chars total"
-            }
-            if (pages.isEmpty()) {
-                logcat(LogPriority.ERROR) {
-                    "LocalEpubSource: ${chapter.url} produced NO text pages. The reader will refuse " +
-                        "this chapter; check the 'could not read spine item' lines above for the cause."
-                }
-            }
+    /** One document's markup, read when the reader reaches it. */
+    override suspend fun getTextPageText(chapter: SChapter, page: TextPage): String? =
+        withIOContext { text.getTextPageText(chapter, page) }
+
+    override suspend fun getTableOfContents(chapter: SChapter): List<TocEntry> =
+        withIOContext { text.getTableOfContents(chapter) }
+
+    /**
+     * Finds [query] across the chapter's documents.
+     *
+     * Cached per chapter because search follows typing: without this, every pause in the keystrokes
+     * re-reads and re-strips every document in the book, so typing a word means reading the chapter
+     * several times over. Stripping depends only on the file, so it is done once and reused. Held as
+     * plain text rather than as [TextPage] so it cannot be mistaken for the loader's own copy of the
+     * markup and quietly double the book's footprint.
+     */
+    override suspend fun searchInChapter(chapter: SChapter, query: String): List<TextSearchHit> {
+        if (query.isBlank()) return emptyList()
+        val needle = query.trim()
+        return plainTextFor(chapter).flatMap { indexed ->
+            indexed.plain.indexesOf(needle, indexed.plain.length)
+                // The offset is within a document; which document it is comes from the cache entry,
+                // so every hit is stamped here rather than inside indexesOf, which knows nothing
+                // about the document it searched.
+                .map { hit -> hit.copy(pageIndex = indexed.index) }
         }
     }
+
+    /** Stripped plain text per document for [chapter], built once and reused across keystrokes. */
+    private suspend fun plainTextFor(chapter: SChapter): List<EpubTextSource.IndexedText> {
+        synchronized(searchLock) { searchCache }?.let { if (it.url == chapter.url) return it.pages }
+        val pages = withIOContext { text.plainTextFor(chapter) }
+        synchronized(searchLock) { searchCache = SearchCache(chapter.url, pages) }
+        return pages
+    }
+
+    /**
+     * Drops the cached plain text.
+     *
+     * Called when a book is re-read. Without it a search opened after a re-import answers from text
+     * that is no longer in the file, and its results point at offsets that mean nothing — which
+     * presents as "search is broken" rather than as "search is stale".
+     */
+    fun invalidateSearchCache() {
+        synchronized(searchLock) { searchCache = null }
+    }
+
+    /**
+     * Stripped text for one chapter, keyed by its url.
+     *
+     * Holds one chapter's worth rather than growing per chapter: moving to another chapter replaces
+     * it. An unbounded cache here would be a second full copy of every book a reader has opened,
+     * held for the life of the process.
+     */
+    private class SearchCache(val url: String, val pages: List<EpubTextSource.IndexedText>)
 
     override fun openResource(absoluteUrl: String) = resourceReader.openResource(absoluteUrl)
 
@@ -352,125 +382,6 @@ class LocalEpubSource(
     override fun releaseAllResourceReaders() {
         resourceReader.releaseAll()
         invalidateSearchCache()
-    }
-
-    /**
-     * The book's table of contents.
-     *
-     * Reads the shared reader without closing it. `readerFor` hands out the instance the renderer
-     * is streaming images out of, so wrapping this in `use` would unmap the archive out from under
-     * a chapter already on screen.
-     */
-    override suspend fun getTableOfContents(chapter: SChapter): List<TocEntry> = withIOContext {
-        val shared = resourceReader.readerFor(chapter)
-        if (shared != null) return@withIOContext shared.toTocEntries()
-
-        // Not open yet (the TOC sheet can be opened before the first page loads), so open a private
-        // reader and close it here.
-        val file = resolveChapterFile(chapter) ?: return@withIOContext emptyList()
-        file.epubReader(context).use { it.toTocEntries() }
-    }
-
-    private fun EpubReader.toTocEntries(): List<TocEntry> = toc.map { it.toTocEntry() }
-
-    private fun EpubTocNode.toTocEntry(): TocEntry = TocEntry(
-        label = label,
-        href = fullHref,
-        children = children.map { it.toTocEntry() },
-    )
-
-    /**
-     * Finds [query] across the chapter's documents.
-     *
-     * Searches the stripped plain text, and **caches it per chapter**.
-     *
-     * The caching is the whole reason this is not simply a call to [getTextPageList]. Search follows
-     * typing, so the host runs this again at every pause in the keystrokes — and as written it
-     * re-opened the archive (a full entry walk plus a full OPF parse), then re-read, re-decoded and
-     * re-stripped every document in the book, four times over to type one word. Stripping is the
-     * expensive part and it depends only on the file, so it is done once and reused. The cache holds
-     * one chapter's worth keyed by URL, so moving to another chapter replaces it rather than grows.
-     *
-     * Held as plain text rather than as [TextPage] so it cannot be mistaken for the loader's own
-     * copy of the markup and quietly double the book's footprint.
-     */
-    override suspend fun searchInChapter(chapter: SChapter, query: String): List<TextSearchHit> {
-        if (query.isBlank()) return emptyList()
-        val needle = query.trim()
-        return plainTextFor(chapter).flatMap { (index, plain) ->
-            plain.indexesOf(needle, plain.length)
-                // The offset is within a document; which document it is comes from the cache entry,
-                // so every hit is stamped here rather than inside indexesOf, which knows nothing
-                // about the document it is searching.
-                .map { hit -> hit.copy(pageIndex = index) }
-        }
-    }
-
-    /** Stripped plain text per document for [chapter], built once and reused across keystrokes. */
-    private suspend fun plainTextFor(chapter: SChapter): List<IndexedText> {
-        synchronized(searchLock) { searchCache }?.let { if (it.url == chapter.url) return it.pages }
-        val pages = getTextPageList(chapter).map { IndexedText(it.index, plainTextOf(it.text)) }
-        synchronized(searchLock) { searchCache = SearchCache(chapter.url, pages) }
-        return pages
-    }
-
-    private data class IndexedText(val index: Int, val plain: String)
-
-    private class SearchCache(val url: String, val pages: List<IndexedText>)
-
-    /**
-     * Drops the search cache.
-     *
-     * Called when the book is re-read. Without it a search opened after a re-import answers from
-     * text that is no longer in the file, and its results point at offsets that mean nothing — which
-     * presents as "search is broken" rather than "search is stale".
-     */
-    fun invalidateSearchCache() {
-        synchronized(searchLock) { searchCache = null }
-    }
-
-    /**
-     * Case-insensitive search over the page's visible text, returning displayable snippets.
-     *
-     * @param plainLength the whole document's length in these same units, reported on every hit so the
-     *   host can convert an offset into a position without re-deriving the text. Pass the *stripped*
-     *   document's length, not the markup's — the two are not interchangeable, which is the entire
-     *   reason [TextSearchHit] carries both.
-     *
-     * Matching runs on text with tags stripped, so a query spanning a tag boundary ("<em>wor</em>ld")
-     * still matches, and the reported offset refers to the same stripped text the snippet shows —
-     * otherwise the host would highlight the wrong characters.
-     */
-    private fun plainTextOf(html: String): String =
-        html.replace(SCRIPT_OR_STYLE, " ")
-            .replace(TAG, " ")
-            .replace(WHITESPACE, " ")
-
-    private fun String.indexesOf(needle: String, plainLength: Int): List<TextSearchHit> {
-        if (isEmpty() || needle.length > length) return emptyList()
-        val hits = mutableListOf<TextSearchHit>()
-        var from = 0
-        while (hits.size < MAX_SEARCH_HITS) {
-            val at = indexOf(needle, from, ignoreCase = true)
-            if (at < 0) break
-            val start = (at - SNIPPET_PADDING).coerceAtLeast(0)
-            val end = (at + needle.length + SNIPPET_PADDING).coerceAtMost(length)
-            val snippet = substring(start, end)
-            hits += TextSearchHit(
-                pageIndex = 0,
-                snippet = snippet,
-                // Measured against the trimmed snippet, so the host highlights the characters the
-                // user can actually see rather than an offset shifted by the trim.
-                matchOffset = at - start - (snippet.length - snippet.trimStart().length),
-                // `at` is the offset into this whole stripped page, which is what a host scrolls to.
-                documentOffset = at,
-                // The page's own length in the same units, because the host's copy is markup and the
-                // two are not interchangeable - see TextSearchHit.
-                documentLength = plainLength,
-            )
-            from = at + needle.length
-        }
-        return hits
     }
 
     /**
@@ -540,34 +451,6 @@ class LocalEpubSource(
         const val ID = 7812L
 
         const val HELP_URL = "https://komikku-app.github.io/docs/guides/local-source/"
-
-        private const val MAX_SEARCH_HITS = 200
-        private const val SNIPPET_PADDING = 40
-
-        /**
-         * Most spine items a chapter may expose to the reader.
-         *
-         * The longest real novel in one file is a few hundred; web novels that ship one file per
-         * chapter get folded into a handful. Anything past this is a declaration, not a book, and the
-         * reader can only show so many pages before the list itself stops being usable.
-         */
-        private const val MAX_DOCUMENTS = 5_000
-
-        /**
-         * Most markup characters one chapter may hold in memory at once.
-         *
-         * An entire novel's text is a few megabytes — the longest real ones are around 10 MB of
-         * markup, and web novels ship a fraction of a spine per chapter. 16 M characters is roughly
-         * 32 MB as a `String`, which a low-end device's heap can hold several times over.
-         *
-         * The previous value here was 64 M characters, which reads like a generous safety margin and
-         * is not one: `String` is UTF-16, so that ceiling permitted a single chapter to reach ~128 MB
-         * before truncating. On a 192 MB-heap device the allocation itself is what gets the process
-         * killed — the truncation that was supposed to prevent an OOM was arriving too late to do
-         * anything about one. A ceiling is only a ceiling if it sits below the limit it exists to
-         * respect.
-         */
-        private const val MAX_CHAPTER_CHARS = 16L * 1024 * 1024
 
         /**
          * Most bytes a cover image may be.

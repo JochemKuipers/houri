@@ -22,7 +22,12 @@ data class NovelTypography(
      */
     val fontSizePt: Int = DEFAULT_FONT_SIZE_PT,
 
-    /** Text colour as `#rrggbb`, or null to leave the publisher's own colour alone. */
+    /**
+     * Text colour as `#rrggbb`, or null to let the publisher's own colour stand.
+     *
+     * Null is not the same as "unpainted": a book that styles its own text dark now gets a colour
+     * derived from [backgroundColor] whenever that is set. See [effectiveFontColor].
+     */
     val fontColor: String? = null,
 
     /**
@@ -30,6 +35,9 @@ data class NovelTypography(
      *
      * Null matters: a publisher that chose a dark plate for one illustration expects it to stay
      * dark, and overriding it globally is how a reader ends up with unreadable black-on-black.
+     *
+     * Setting it forces a text colour even when [fontColor] is null. See [effectiveFontColor] for
+     * why the two cannot be chosen independently.
      */
     val backgroundColor: String? = null,
 
@@ -104,6 +112,29 @@ data class NovelTypography(
     val effectiveFontSizePt: Float
         get() = (fontSizePt * fontScale).coerceIn(MIN_EFFECTIVE_SIZE_PT, MAX_EFFECTIVE_SIZE_PT)
 
+    /**
+     * The colour text is actually painted in, or null to leave the publisher's own alone.
+     *
+     * ### Why this exists rather than emitting `fontColor` directly
+     *
+     * A background and a text colour cannot be chosen independently once either one is set. The
+     * reported symptom was that *any* background other than white made the page unreadable, and the
+     * cause is structural rather than a bad default: the stylesheet emitted `background-color` only
+     * when the reader asked for one and emitted `color` only when the reader *also* asked for one. A
+     * reader who set a dark background and nothing else therefore got the publisher's own black text
+     * on the reader's own black page — black on black, no warning, no error, and a setting screen
+     * that looked like it had done nothing.
+     *
+     * So a background the reader chose implies a foreground the reader did not have to: whatever
+     * contrasts with it. Derived rather than hard-coded to white, because a black background is just
+     * as likely as a white one and a reader who sets one usually wants dark-mode text on it.
+     *
+     * It stays null when neither is set, which is the case the tri-state rules above exist to
+     * protect: a book's own palette — a dark plate, a sepia page, coloured drop caps — is left alone.
+     */
+    val effectiveFontColor: String?
+        get() = fontColor ?: backgroundColor?.let(::contrastingForeground)
+
     /** True when anything differs from the defaults and the stylesheet has to be injected. */
     val isCustomised: Boolean
         get() = this != DEFAULT
@@ -150,5 +181,55 @@ data class NovelTypography(
         const val MAX_VERTICAL_MARGIN = 0.45f
 
         val DEFAULT = NovelTypography()
+
+        /**
+         * Black or white, whichever reads better on [background].
+         *
+         * Pure, so it can be asserted off-device, and it is the reason the reader never paints a
+         * reader-chosen background under a publisher-chosen text colour. See
+         * [NovelTypography.effectiveFontColor].
+         *
+         * The choice is by WCAG relative luminance rather than a brightness sum: perceived brightness
+         * is not the same as contrast, and a mid-tone like `#808080` is exactly where a naive
+         * average picks the wrong one. Only the two extremes are offered, so this is a binary
+         * decision between two known contrasts rather than a search for a better third colour.
+         *
+         * Null when [background] is not a hex colour at all — a hand-edited preference, or a value an
+         * extension wrote. A null here means "keep the publisher's colour", which is the status quo
+         * and never worse than guessing.
+         */
+        fun contrastingForeground(background: String): String? {
+            val channels = hexChannels(background) ?: return null
+            val luminance = 0.2126 * relativeLuminance(channels[0]) +
+                0.7152 * relativeLuminance(channels[1]) +
+                0.0722 * relativeLuminance(channels[2])
+            // WCAG contrast against each candidate: (lighter + 0.05) / (darker + 0.05).
+            val againstBlack = (luminance + 0.05) / 0.05
+            val againstWhite = 1.05 / (luminance + 0.05)
+            return if (againstWhite >= againstBlack) LIGHT else DARK
+        }
+
+        /** `#rgb` / `#rrggbb` to 0..255 channels, or null for anything else. */
+        private fun hexChannels(color: String): IntArray? {
+            val hex = color.trim().removePrefix("#")
+            if (hex.length != 3 && hex.length != 6) return null
+            if (!hex.all { it.isDigit() || it.lowercaseChar() in 'a'..'f' }) return null
+            val expanded = if (hex.length == 3) hex.map { "$it$it" }.joinToString("") else hex
+            val value = expanded.toLongOrNull(16) ?: return null
+            return intArrayOf(
+                ((value shr 16) and 0xFF).toInt(),
+                ((value shr 8) and 0xFF).toInt(),
+                (value and 0xFF).toInt(),
+            )
+        }
+
+        /** The sRGB gamma expansion WCAG defines, so mid-tones are not read as far too bright. */
+        private fun relativeLuminance(channel: Int): Double {
+            val c = channel / 255.0
+            return if (c <= 0.04045) c / 12.92 else Math.pow((c + 0.055) / 1.055, 2.4)
+        }
+
+        const val DARK = "#000000"
+        const val LIGHT = "#ffffff"
     }
 }

@@ -4,6 +4,11 @@ import android.content.Context
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.source.Source
+import eu.kanade.tachiyomi.source.model.EntryType
+import eu.kanade.tachiyomi.source.model.EntryTypeSource
+import eu.kanade.tachiyomi.source.model.MixedContentSource
+import eu.kanade.tachiyomi.source.model.SChapter
+import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.source.text.TextSource
@@ -16,6 +21,8 @@ import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MergedMangaReference
+import tachiyomi.domain.manga.model.entryType
+import tachiyomi.domain.manga.model.hasExplicitEntryType
 import tachiyomi.domain.source.model.StubSource
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.i18n.MR
@@ -47,7 +54,11 @@ data class PageLoaderRequest(
 
 object PageLoaderRegistry {
     // KMK -->
-    private val providers = mutableListOf<PageLoaderProvider>(TextPageLoaderProvider, DefaultPageLoaderProvider)
+    private val providers = mutableListOf<PageLoaderProvider>(
+        TextEntryPageLoaderProvider,
+        TextPageLoaderProvider,
+        DefaultPageLoaderProvider,
+    )
     // KMK <--
 
     fun register(provider: PageLoaderProvider) {
@@ -97,6 +108,14 @@ private object TextPageLoaderProvider : PageLoaderProvider {
     override val order: Int = -10
 
     override fun create(request: PageLoaderRequest): PageLoader? {
+        // A source that serves books for *some* of its entries is not answerable by asking the source
+        // alone — it is a TextSource and it also holds comic folders, so claiming every chapter here
+        // would hand every comic to the book reader. Those sources declare `MixedContentSource` and are
+        // routed per entry by `TextEntryPageLoaderProvider` instead.
+        if (request.source is MixedContentSource) {
+            logcat { "TextPageLoaderProvider: deferring ${request.source::class.simpleName} to the entry-typed provider" }
+            return null
+        }
         val source = request.source as? TextSource ?: return null
         // A downloaded chapter has no text to load — downloads only store images — so a text source
         // is always read live.
@@ -105,6 +124,64 @@ private object TextPageLoaderProvider : PageLoaderProvider {
         }
     }
 }
+// KMK <--
+
+// KMK -->
+private object TextEntryPageLoaderProvider : PageLoaderProvider {
+    override val order: Int = -20
+
+    /**
+     * Claims a chapter whose library entry resolves to [EntryType.BOOK].
+     *
+     * Ordered ahead of [TextPageLoaderProvider] because the two answer different questions. That one
+     * asks "is this *source* a text source", which is true of a webnovel extension and says nothing
+     * about an entry inside a source that serves both kinds. This one asks about the entry.
+     *
+     * Declining when the entry is not a book is the whole point: an art book that reached here would
+     * be drawn as prose, and a comic folder would be read as a novel.
+     */
+    override fun create(request: PageLoaderRequest): PageLoader? {
+        val provider = request.source as? MixedContentSource ?: return null
+        val bookSource = request.source as? TextSource ?: return null
+        if (!request.manga.isBookEntry(request.source, request.chapter.chapter, provider)) return null
+        logcat { "TextEntryPageLoaderProvider: claiming ${request.chapter.chapter.url} as a book" }
+        return TextPageLoader(bookSource, request.chapter.chapter).apply {
+            isLocal = bookSource !is HttpSource
+        }
+    }
+}
+
+/**
+ * Resolves this entry's content type, or false when it is not a book.
+ *
+ * Explicit user choice first, then the source's declaration, then detection. Only the first may
+ * overrule the second: a heuristic that silently beats what a user chose is worse than no heuristic,
+ * because they cannot correct a decision they were never told about. See
+ * `docs/superpowers/specs/2026-10-17-library-entry-types-design.md`.
+ */
+private fun Manga.isBookEntry(
+    source: Any?,
+    chapter: SChapter,
+    provider: MixedContentSource,
+): Boolean {
+    val explicit = entryType().takeIf { hasExplicitEntryType() }
+    if (explicit != null) return explicit == EntryType.BOOK
+
+    val declared = (source as? EntryTypeSource)?.entryTypeOf(toSManga())
+    if (declared != null) return declared == EntryType.BOOK
+
+    val detected = runCatching { provider.detectBookEntry(toSManga(), chapter) }.getOrDefault(false)
+    logcat { "Reader: $url detected ${if (detected) "BOOK" else "COMIC"} from content" }
+    return detected
+}
+
+/**
+ * This manga reduced to what a source may look at.
+ *
+ * Url only: a declaration that could depend on anything else could change answer underneath a library
+ * refresh, and the user would see a book silently turn back into a comic.
+ */
+private fun Manga.toSManga(): SManga = SManga.create().apply { url = this@toSManga.url }
 // KMK <--
 
 private object DefaultPageLoaderProvider : PageLoaderProvider {
