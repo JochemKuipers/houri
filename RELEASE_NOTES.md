@@ -12,4 +12,6 @@ files moved. See .github/scripts/release_notes.py.
 
 ### Improve
 
+- Controller stick smoothly scrolls webtoons (and long-strip mode) at a speed based on how far the stick is tilted; adjust **Controller scroll speed** in reader settings (Reading mode → webtoon options)
+
 ### Fix
