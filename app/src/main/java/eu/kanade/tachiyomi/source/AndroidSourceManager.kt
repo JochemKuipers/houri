@@ -46,7 +46,6 @@ import tachiyomi.domain.manga.interactor.GetMergedReferencesById
 import tachiyomi.domain.source.model.StubSource
 import tachiyomi.domain.source.repository.StubSourceRepository
 import tachiyomi.domain.source.service.SourceManager
-import tachiyomi.source.epub.LocalEpubSource
 import tachiyomi.source.local.LocalSource
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.reflect.KClass
@@ -113,15 +112,6 @@ class AndroidSourceManager(
                                     sourcePreferences.allowLocalSourceHiddenFolders()::get,
                                     // SY <--
                                 ),
-                                // KMK --> EPUB library. Registered unconditionally: it is local,
-                                // costs nothing when the folder is empty, and gating it on a
-                                // preference would hide a whole source from users who never knew to
-                                // go looking for the toggle.
-                                LocalEpubSource.ID to LocalEpubSource(
-                                    context,
-                                    globalAppGraph.epubSourceFileSystem,
-                                ),
-                                // KMK <--
                             ),
                         ).apply {
                             // KMK -->

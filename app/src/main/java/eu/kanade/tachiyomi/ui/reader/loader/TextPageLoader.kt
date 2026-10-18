@@ -211,7 +211,7 @@ internal class TextPageLoader(
      *
      * Safe to call while the renderer is still streaming out of the archive: the release marks the
      * book unreachable and the unmap waits for the last open stream to close. See
-     * `EpubResourceReader`.
+     * `EpubResourceServer`.
      */
     override fun recycle() {
         super.recycle()

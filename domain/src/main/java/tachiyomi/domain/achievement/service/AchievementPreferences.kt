@@ -425,6 +425,27 @@ class AchievementPreferences(
     @Volatile
     var suppressOrganicForImport: Boolean = false
 
+    // KMK -->
+    /**
+     * In-memory: unlocks are dropped while onboarding has not been completed.
+     *
+     * Onboarding is where the reader decides whether achievements exist at all — it has an
+     * enable switch — so anything unlocked before that step was answered would be recorded for a
+     * user who then turns the whole system off. Even for one who keeps it on, the feature hooks
+     * evaluate their settings once at install: a value that is true merely because it *shipped*
+     * true would earn its achievement before the reader had made any choice at all.
+     *
+     * An in-memory mirror of the app layer's onboarding-complete preference rather than a read of
+     * it: this module cannot see the class that owns the key, and duplicating a key string here
+     * would be a second answer that drifts. The app arms it on every start from the real
+     * preference and releases it when onboarding finishes; a backup restore is unaffected because
+     * it rewrites the unlocked set directly, and one started from onboarding happens after the
+     * hold is released anyway. See [AchievementManager.tryUnlock] for the gate itself.
+     */
+    @Volatile
+    var unlocksHeldForOnboarding: Boolean = false
+    // KMK <--
+
     @Synchronized
     fun computeStats(totalAchievements: Int): tachiyomi.domain.achievement.model.AchievementStats {
         val ids = getUnlockedIds()

@@ -51,7 +51,8 @@ fun Manga.isEhBasedManga() = source in eHentaiSourceIds
  * `docs/superpowers/specs/2026-10-17-library-entry-types-design.md` — and answers it from the same
  * column read raw, plus detection. The two meanings are kept apart here on purpose: an art book
  * imported as EPUB from a light-novel source is still an art book, and letting provenance decide its
- * renderer would break exactly the case `source-epub/AGENTS.md` records as relied upon.
+ * renderer would break exactly the art-book import case the manga library relies on — see
+ * `LocalEpubTextAdapter` in `source-local`.
  */
 fun Manga.isLightNovel() = isLightNovel || source in lnSourceIds
 // KMK <--

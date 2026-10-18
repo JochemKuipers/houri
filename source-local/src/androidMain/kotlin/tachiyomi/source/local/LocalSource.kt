@@ -535,9 +535,32 @@ class LocalSource(
                 }
                 is Format.Epub -> {
                     format.file.epubReader(context).use { epub ->
-                        val entry = epub.getImagesFromPages().firstOrNull()
-
-                        entry?.let { coverManager.update(manga, epub.getInputStream(it)!!) }
+                        // KMK --> The book's own declared cover first: `coverHref` is the
+                        // manifest's cover declaration as the engine resolved it, and asking for
+                        // it costs nothing. `getImagesFromPages` reads and parses every spine
+                        // document — the art-book fallback, not the first thing to try, and for
+                        // a prose book the "first image" can be a publisher logo.
+                        //
+                        // DRM is refused outright: the bytes are enciphered however they are
+                        // addressed, and a cover written from them would be noise. (Font
+                        // obfuscation does not set hasDrm, so those books keep their covers.)
+                        //
+                        // `readBytes` bounds the read (the engine's per-entry ceiling) and answers
+                        // null for a missing entry, which the `!!` this replaces turned into a
+                        // NullPointerException whenever a manifest href named nothing the archive
+                        // actually contains.
+                        val entry = if (epub.hasDrm) {
+                            null
+                        } else {
+                            epub.coverHref
+                                ?: epub.getImagesFromPages().firstOrNull()
+                        }
+                        entry?.let { href ->
+                            epub.readBytes(href)?.let { bytes ->
+                                coverManager.update(manga, bytes.inputStream())
+                            }
+                        }
+                        // KMK <--
                     }
                 }
             }

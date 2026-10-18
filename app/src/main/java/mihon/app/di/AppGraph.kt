@@ -239,7 +239,6 @@ import tachiyomi.domain.track.interactor.GetTracksPerManga
 import tachiyomi.domain.track.interactor.InsertTrack
 import tachiyomi.domain.updates.interactor.GetUpdates
 import tachiyomi.domain.updates.service.UpdatesPreferences
-import tachiyomi.source.epub.EpubSourceFileSystem
 import tachiyomi.source.local.image.LocalCoverManager
 import tachiyomi.source.local.io.LocalSourceFileSystem
 
@@ -487,8 +486,7 @@ interface AppGraph : ViewModelGraph {
     val xml: XML
     val localCoverManager: LocalCoverManager
     val localSourceFileSystem: LocalSourceFileSystem
-    // KMK --> built-in EPUB library source (folder = series, .epub = chapter)
-    val epubSourceFileSystem: EpubSourceFileSystem
+    // KMK -->
     val novelTypographyPreferences: NovelTypographyPreferences
     // KMK <--
     val getExhFavoriteMangaWithMetadata: GetExhFavoriteMangaWithMetadata

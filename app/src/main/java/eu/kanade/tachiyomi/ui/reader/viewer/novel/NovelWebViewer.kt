@@ -41,7 +41,6 @@ import mihon.app.di.globalAppGraph
 import mihon.core.archive.EpubArchiveUrls
 import mihon.core.archive.EpubMimeSniff
 import tachiyomi.core.common.util.system.logcat
-import tachiyomi.source.epub.EpubResourceReader
 import java.io.ByteArrayInputStream
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -548,7 +547,7 @@ internal class NovelWebViewer(
         currentPage = page
 
         // The base URL decides where every relative reference in this document points, and it is a
-        // property of the document, not of the book. EpubResourceReader.BASE_URL is the right answer
+        // property of the document, not of the book. EpubArchiveUrls.BASE_URL is the right answer
         // only for a spine item that sits at the archive root.
         val baseUrl = baseUrlFor(textPage)
 
@@ -589,7 +588,7 @@ internal class NovelWebViewer(
 
     /** The URL a document must be loaded at so its own relative references resolve. */
     private fun baseUrlFor(textPage: TextPage): String =
-        (resources as? TextBaseUrlSource)?.baseUrlFor(textPage) ?: EpubResourceReader.BASE_URL
+        (resources as? TextBaseUrlSource)?.baseUrlFor(textPage) ?: EpubArchiveUrls.BASE_URL
 
     /** The fraction to restore for [page], or null when this document has no stored position. */
     private fun restoreFractionFor(page: ReaderPage): Float? {
@@ -1065,9 +1064,9 @@ internal class NovelWebViewer(
 
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             val url = request.url.toString()
-            if (!EpubResourceReader.isArchiveUrl(url)) return null
+            if (!EpubArchiveUrls.isArchiveUrl(url)) return null
 
-            val path = EpubResourceReader.archivePathOf(url)
+            val path = EpubArchiveUrls.archivePathOf(url)
             if (path == null) {
                 logcat { "NovelViewer: archive url with no path, refused: $url" }
                 return notFound()
@@ -1124,7 +1123,7 @@ internal class NovelWebViewer(
             // An archive-internal link is one of the book's own documents. The platform has no
             // handler for the scheme, so handing it back would simply fail — it has to be turned
             // into a page turn here instead.
-            if (EpubResourceReader.isArchiveUrl(url)) {
+            if (EpubArchiveUrls.isArchiveUrl(url)) {
                 openArchiveLink(url)
                 return true
             }
@@ -1143,7 +1142,7 @@ internal class NovelWebViewer(
         /**
          * Follows a link inside the book, when it names a document this chapter actually loaded.
          *
-         * The URL is mapped back with [EpubResourceReader.archivePathOf] — the same decoding and
+         * The URL is mapped back with [EpubArchiveUrls.archivePathOf] — the same decoding and
          * normalisation the resource loader applies — so it lines up with the `TextPage.url` values
          * the page list is built from. Anything that does not name one of them is refused: a
          * whole book's links span files this chapter never read, and showing a document the loader
@@ -1151,7 +1150,7 @@ internal class NovelWebViewer(
          */
         private fun openArchiveLink(url: String) {
             val pages = chapters?.currChapter?.pages
-            val document = EpubResourceReader.archivePathOf(url)
+            val document = EpubArchiveUrls.archivePathOf(url)
             val page = pages?.firstOrNull { it.textPage?.url == document }
             if (page != null) {
                 showDocument(page)

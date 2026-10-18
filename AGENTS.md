@@ -135,7 +135,7 @@ Before `git push`, confirm the working tree contains only the intended changes (
 | `core:concurrency/` | Coroutine dispatch helpers |
 | `core:archive/` | CBZ/archive reading with optional encryption |
 | `core-metadata/` | Comic-info metadata parsing |
-| `source-api/` / `source-local/` / `source-epub/` | Extension `Source` API (KMP `commonMain`/`androidMain`) + local manga source + built-in EPUB library source |
+| `source-api/` / `source-local/` | Extension `Source` API (KMP `commonMain`/`androidMain`) + local manga source (comics **and** books) |
 | `presentation-core/` | Shared Compose components |
 | `presentation-widget/` | Home-screen Glance widget |
 | `yakuyomi-engine/` (`:yakuyomi`) | Komikku-side MTL wrapper (`exh.yakuyomi.*`: manager, translators, models, cache) |

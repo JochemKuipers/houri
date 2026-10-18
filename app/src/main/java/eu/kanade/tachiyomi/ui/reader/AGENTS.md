@@ -291,7 +291,7 @@ probe's write-back until the drag ends, so a slow seek cannot fight the thumb. S
 is scrolling, taps and the buttons; non-sequential is the contents list.
 
 Resources (images, CSS, fonts) are streamed by the `TextPageLoader`'s `resourceSource` over the
-reserved `https://book.internal/` origin — see `source-epub/AGENTS.md` — and, for the references a
+reserved `https://book.internal/` origin — see `EpubArchiveUrls` in `core/archive` — and, for the references a
 document actually reads, inlined into it by `NovelInline` (see above: the inliner and the server
 read the same archive lease).
 

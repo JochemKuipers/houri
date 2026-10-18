@@ -15,13 +15,14 @@ import tachiyomi.core.common.util.system.logcat
  * Serves an EPUB chapter as text, in the form a book's reader wants: one document per spine item,
  * with the publisher's markup untouched.
  *
- * ### Why this is shared rather than written twice
+ * ### Why this lives in `core:archive` rather than in the source that uses it
  *
- * Two libraries now serve books — the built-in EPUB library and the manga library — and a book must
- * look the same in both. Everything that decides what a book *is* to a host lives here: the spine,
+ * The manga local source serves books, and so does anything else that ever grows a book half —
+ * the reader and the source cannot depend on each other, and a book must read the same wherever
+ * it was opened from. Everything that decides what a book *is* to a host lives here: the spine,
  * the size ceilings, the stripped plain text that search runs over, and the contents list. Two
- * implementations would drift, and the failure mode of drift is a book that reads correctly in one
- * place and not the other.
+ * implementations would drift, and the failure mode of drift is a book that reads correctly in
+ * one place and not the other.
  *
  * ### Bounds, and why each is where it is
  *
@@ -201,7 +202,7 @@ class EpubTextSource(
      *
      * Caching the stripped text is left to the caller. It depends only on the file, so it is
      * computed once per chapter rather than per keystroke, but *where* to keep it belongs to the
-     * source that owns the archive — see `LocalEpubSource`.
+     * source that owns the archive — see `LocalEpubTextAdapter` in `source-local`.
      */
     override suspend fun searchInChapter(chapter: SChapter, query: String): List<TextSearchHit> {
         if (query.isBlank()) return emptyList()

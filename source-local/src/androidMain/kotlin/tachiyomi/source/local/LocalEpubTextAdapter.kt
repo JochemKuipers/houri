@@ -32,8 +32,8 @@ import java.io.InputStream
  * ### Why the manga path is untouched
  *
  * `LocalSource` treats an `.epub` chapter as `Format.Epub`, which the loader chain turns into
- * `EpubPageLoader` — one page per illustration, the art-book behaviour that `source-epub/AGENTS.md`
- * records as relied upon. That is unchanged and is still what happens for an entry resolved as
+ * `EpubPageLoader` — one page per illustration, the art-book behaviour that this module's own
+ * adapter documents as relied upon. That is unchanged and is still what happens for an entry resolved as
  * [EntryType.COMIC]. What this adds is the other answer: one document per spine item, the
  * publisher's stylesheet kept, its illustrations inline. Nothing about the file changes — only which
  * renderer claims it.
@@ -41,7 +41,7 @@ import java.io.InputStream
  * ### Sharing
  *
  * The URL namespace, the refcounted archive lease and the book parsing all live in `core:archive`, so
- * a book reads identically here and in the built-in EPUB library. Two implementations would drift,
+ * a book reads identically no matter which module grows a book half next. Two implementations would drift,
  * and the drift would show as a book that works in one library and not the other.
  */
 internal class LocalEpubTextAdapter(

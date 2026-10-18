@@ -8,47 +8,45 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 
 /**
- * Fills manga and chapter metadata using this epub file's metadata.
+ * Fills manga and chapter metadata from this epub file's own metadata.
+ *
+ * ### Why this reads [EpubReader.metadata] and not the OPF again
+ *
+ * The engine has already parsed the package document — namespace-aware, so a book that binds
+ * Dublin Core to `dcterms:` instead of the usual `dc:` prefix reads the same as any other. The
+ * version this replaces re-parsed the OPF with Jsoup and matched elements by their literal tag
+ * prefix (`getElementsByTag("dc:title")`), which is exactly the producer variation
+ * `core/archive/AGENTS.md` records the engine as having been built to handle: for such a book
+ * every lookup here silently yielded nothing, and the file name stood in as the chapter title
+ * with no author or description anywhere. Reading the one parsed answer is cheaper than
+ * opening the archive a second way, and it is the only way, so the two cannot disagree.
  *
  * ### Why every step here is nullable
  *
- * This runs against whatever `.epub` happens to sit in a folder, and a fair number of those are not
- * really books: a partial download, a file an extractor renamed, something with no OPF at all. Every
- * lookup below therefore degrades to "leave the field as it was" rather than throwing, because a
- * library refresh that dies on one malformed file takes the whole refresh — and every other folder —
- * with it.
- *
- * The one that used to be a hard crash is `getPackageDocument`, which returned `Document` and was
- * dereferenced with `!!`. A book whose `container.xml` names a file the archive does not contain is
- * malformed, not exceptional, and it took the scan down with a `NullPointerException`.
+ * This runs against whatever `.epub` happens to sit in a folder, and a fair number of those are
+ * not really books: a partial download, a file an extractor renamed, something with no OPF at
+ * all. Every lookup below therefore degrades to "leave the field as it was" rather than
+ * throwing, because a library refresh that dies on one malformed file takes the whole refresh —
+ * and every other folder — with it.
  */
 fun EpubReader.fillMetadata(manga: SManga, chapter: SChapter) {
-    val ref = getPackageHref()
-    val doc = getPackageDocument(ref) ?: return
+    val metadata = this.metadata
 
-    val title = doc.getElementsByTag("dc:title").first()
-    val publisher = doc.getElementsByTag("dc:publisher").first()
-    val creator = doc.getElementsByTag("dc:creator").first()
-    val description = doc.getElementsByTag("dc:description").first()
-    var date = doc.getElementsByTag("dc:date").first()
-    if (date == null) {
-        date = doc.select("meta[property=dcterms:modified]").first()
-    }
+    // Multiple authors are joined rather than first-picked: the OPF allows any number of
+    // dc:creator elements, and dropping all but the first is information the book did carry.
+    metadata.authors.takeIf { it.isNotEmpty() }?.let { manga.author = it.joinToString(", ") }
+    metadata.description?.takeIf { it.isNotBlank() }?.let { manga.description = it }
 
-    creator?.text()?.let { manga.author = it }
-    description?.text()?.let { manga.description = it }
+    metadata.title?.takeIf { it.isNotBlank() }?.let { chapter.name = it }
 
-    title?.text()?.let { chapter.name = it }
+    // The publisher is the scanlator-shaped field an epub actually has; a creator stands in
+    // when the book names none, which is the same precedence the old OPF walk used.
+    chapter.scanlator = metadata.publisher?.takeIf { it.isNotBlank() }
+        ?: metadata.authors.firstOrNull()
 
-    if (publisher != null) {
-        chapter.scanlator = publisher.text()
-    } else if (creator != null) {
-        chapter.scanlator = creator.text()
-    }
-
-    if (date != null) {
-        parseEpubDate(date.text())?.let { chapter.date_upload = it }
-    }
+    // The engine already falls back from dc:date to the file's dcterms:modified when a book
+    // carries no publication date, so one field is the whole answer here.
+    metadata.date?.let { parseEpubDate(it) }?.let { chapter.date_upload = it }
 }
 
 /**

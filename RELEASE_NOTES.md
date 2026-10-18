@@ -182,3 +182,17 @@ files moved. See .github/scripts/release_notes.py.
   range with no end in sight, and finishing a series never marked it completed — the reader could
   not tell which chapter was the last one. The count now comes from MangaBaka's own series data,
   for newly bound series and existing ones alike.
+- **Achievements no longer unlock during onboarding.** The preferences behind them are evaluated
+  the moment the app starts, so a value that was true only because it *shipped* true could earn
+  its achievement before you had chosen anything — including whether to have achievements at
+  all, which is one of the things onboarding asks. Nothing unlocks until onboarding is finished.
+  A backup restore is unaffected, and still brings back everything you had.
+- **A book's real title, author and description show in the library.** Books whose publisher
+  bound the metadata to the `dcterms:` prefix instead of the usual `dc:` showed nothing but their
+  file names — the local source was reading the book's own catalogue with a parser that only
+  understood one spelling of it. It now reads the catalogue the book engine already parsed, which
+  understands both spellings, and a book with several authors lists them all.
+- **A book's cover is its declared cover.** The library thumbnail was whatever image turned up
+  first in the book — for most novels that is a publisher logo. It is now the cover the book
+  itself declares, falling back to the first illustration only when the book declares none, and
+  a DRM-locked book no longer writes a thumbnail of noise.

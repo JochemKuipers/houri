@@ -264,9 +264,6 @@ dependencies {
     implementation(projects.core.concurrency)
     implementation(projects.coreMetadata)
     implementation(projects.sourceApi)
-    // KMK --> built-in EPUB library source (folder = series, .epub file = chapter)
-    implementation(projects.sourceEpub)
-    // KMK <--
     implementation(projects.sourceLocal)
     implementation(projects.data)
     implementation(projects.domain)

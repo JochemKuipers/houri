@@ -27,6 +27,11 @@ class OnboardingScreen : Screen() {
 
         val finishOnboarding: () -> Unit = {
             basePreferences.shownOnboardingFlow().set(true)
+            // KMK --> Releases the achievement hold: anything unlocked from here on was enabled by
+            // a completed onboarding, so it is the reader's choice and not a default that happened
+            // to be true. See AchievementPreferences.unlocksHeldForOnboarding.
+            runCatching { globalAppGraph.achievementPreferences.unlocksHeldForOnboarding = false }
+            // KMK <--
             navigator.pop()
         }
 

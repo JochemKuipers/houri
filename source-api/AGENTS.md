@@ -41,8 +41,8 @@ machine for a failure mode that cannot occur.
 **Why `TextResourceSource` is separate from `TextSource`.** Markup references resources the host
 cannot reach. Inlining every image as a `data:` URI turns one illustrated chapter into tens of
 megabytes of base64 held for as long as the chapter is open. Instead the source streams them on
-demand — see `source-epub/EpubResourceReader.kt` for the reserved `.internal` scheme that makes
-`../images/plate.jpg` resolve inside a zip file.
+demand — see `EpubArchiveUrls` / `EpubResourceServer` in `core/archive` for the reserved
+`.internal` origin that makes `../images/plate.jpg` resolve inside a zip file.
 
 **Rules for implementors.** All three are enforced by hosts and all three are easy to get wrong:
 

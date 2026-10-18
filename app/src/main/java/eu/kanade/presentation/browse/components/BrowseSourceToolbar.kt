@@ -22,7 +22,6 @@ import tachiyomi.domain.library.model.LibraryDisplayMode
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
-import tachiyomi.source.epub.LocalEpubSource
 import tachiyomi.source.local.LocalSource
 
 @Composable
@@ -51,9 +50,10 @@ fun BrowseSourceToolbar(
     // Avoid capturing unstable source in actions lambda
     val title = source?.name
     val isLocalSource = source is LocalSource
-    // KMK --> Both built-in libraries are folders, so both can be re-read. `source is LocalSource`
-    // missed the EPUB library, which is why it had no refresh at all.
-    val isBuiltInLibrary = isLocalSource || source?.id == LocalEpubSource.ID
+    // KMK --> The one built-in library is the local source, and its browse is folders on disk,
+    // so it can always be re-read. (The separate epub library this once also matched is gone;
+    // books are browsed through the local source now.)
+    val isBuiltInLibrary = isLocalSource
 
     var selectingDisplayMode by remember { mutableStateOf(false) }
 

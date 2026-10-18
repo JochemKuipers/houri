@@ -664,6 +664,14 @@ class AchievementManager(
 
     private fun tryUnlock(id: String, out: MutableList<String>) {
         if (!prefs.achievementsEnabled().get()) return
+        // KMK --> Onboarding is where the reader decides whether achievements exist at all, so
+        // nothing may unlock before it is completed — a default-on preference would otherwise
+        // earn its achievement before the reader had made any choice, and a reader who then
+        // disables the system would be carrying unlocks they never consented to. The hold is
+        // released by the app layer when onboarding finishes; see
+        // [AchievementPreferences.unlocksHeldForOnboarding] for why the flag lives where it does.
+        if (prefs.unlocksHeldForOnboarding) return
+        // KMK <--
         if (prefs.unlock(id)) {
             out.add(id)
             // Collection achievements can only be reached by re-checking whenever the set grows,

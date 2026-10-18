@@ -29,11 +29,11 @@ package mihon.core.archive
  *
  * ### Why this is here and not in a source
  *
- * Both the built-in EPUB library and the manga library serve books now, from two modules that cannot
- * depend on each other. The translation is identical for both and has to stay identical — the
- * per-document base URL is the single most consequential detail in the whole EPUB path, and it
- * silently fails as bare text when it is wrong. One implementation, in the module both already
- * depend on, with no source-API types in sight.
+ * The manga local source serves books, and so does anything else that ever grows a book half — and a
+ * source and the reader cannot depend on each other. The translation is identical for every one of
+ * them and has to stay identical — the per-document base URL is the single most consequential detail
+ * in the whole EPUB path, and it silently fails as bare text when it is wrong. One implementation,
+ * in the module all of them already depend on, with no source-API types in sight.
  *
  * Every function here is pure and asserted by `scripts/kotlinc-check`.
  */

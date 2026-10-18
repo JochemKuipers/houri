@@ -35,9 +35,9 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * ### Why this lives in `core:archive`
  *
- * Two modules serve books — the built-in EPUB library and the manga library — and they cannot depend
- * on each other. The lease and the URL space are identical for both and must stay identical, so both
- * build on this.
+ * The manga local source serves books, and so does anything else that ever grows a book half — and
+ * a source and the reader cannot depend on each other. The lease and the URL space are identical for
+ * every one of them and must stay identical, so all build on this.
  */
 class EpubResourceServer<K : Any>(
     /**

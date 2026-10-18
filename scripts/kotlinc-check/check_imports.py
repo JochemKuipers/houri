@@ -47,7 +47,7 @@ BUILTIN = {
 
 # Source roots worth scanning for declarations. Deliberately the Kotlin ones; generated and build
 # output directories are skipped so stale classes cannot vouch for a deleted symbol.
-SOURCE_ROOTS = ["app/src", "core", "domain", "data", "source-api", "source-local", "source-epub",
+SOURCE_ROOTS = ["app/src", "core", "domain", "data", "source-api", "source-local",
                 "presentation-core", "presentation-widget", "core-metadata"]
 
 

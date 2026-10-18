@@ -208,6 +208,18 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             runCatching { globalAppGraph.achievementNotifier.start() }
                 .onFailure { xLogE("Failed to start achievement notifier", it) }
         }
+        // KMK --> Achievements: hold unlocks until onboarding has been completed — onboarding is
+        // where the enable/disable choice is made, and the feature hooks below evaluate their
+        // settings once at install, so arming this after them would let a default-on preference
+        // unlock before the reader had chosen anything at all. Armed from the real onboarding
+        // preference (in-memory mirror; the domain cannot see the class that owns the key),
+        // released by OnboardingScreen when it finishes. Restore is unaffected: it rewrites the
+        // unlocked set directly, and one launched from onboarding runs after the release.
+        runCatching {
+            globalAppGraph.achievementPreferences.unlocksHeldForOnboarding =
+                !globalAppGraph.basePreferences.shownOnboardingFlow().get()
+        }.onFailure { xLogE("Failed to arm the onboarding achievement hold", it) }
+        // KMK <--
         // KMK --> Process start is the only moment "opened the app at 03:33" can be true.
         ProcessLifecycleOwner.get().lifecycleScope.launchIO {
             val now = java.util.Calendar.getInstance()
