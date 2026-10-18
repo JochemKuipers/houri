@@ -1,18 +1,29 @@
 package eu.kanade.presentation.reader.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.tachiyomi.ui.reader.setting.NovelTypographyPreferences
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelFonts
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
+import eu.kanade.tachiyomi.util.system.toast
 import mihon.app.di.globalAppGraph
 import tachiyomi.core.common.preference.TriState
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.CheckboxItem
 import tachiyomi.presentation.core.components.HeadingItem
+import tachiyomi.presentation.core.components.IconItem
 import tachiyomi.presentation.core.components.SelectItem
 import tachiyomi.presentation.core.components.SettingsChipRow
 import tachiyomi.presentation.core.components.SliderItem
@@ -78,12 +89,49 @@ internal fun NovelTypographyPage(
         onChange = { novelPrefs.fontScale.set(it / 100f) },
     )
 
+    // KMK --> Fonts the reader brought themselves, offered beside the built-in families.
+    val fontContext = LocalContext.current
+    var fontImportVersion by remember { mutableIntStateOf(0) }
+    val fontFamilies = remember(fontImportVersion) {
+        FONT_FAMILIES.toList() + NovelFonts.list(fontContext)
+    }
     SelectItem(
         label = stringResource(KMR.strings.pref_novel_font_family),
-        options = FONT_FAMILIES,
-        selectedIndex = FONT_FAMILIES.indexOf(typography.fontFamily).coerceAtLeast(0),
-        onSelect = { novelPrefs.fontFamily.set(FONT_FAMILIES[it]) },
+        options = fontFamilies.map { it.removePrefix(NovelFonts.PREFIX) }.toTypedArray(),
+        selectedIndex = fontFamilies.indexOf(typography.fontFamily).coerceAtLeast(0),
+        onSelect = { novelPrefs.fontFamily.set(fontFamilies[it]) },
     )
+
+    val fontPicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            if (NovelFonts.import(fontContext, uri)) {
+                fontContext.toast(KMR.strings.novel_font_added)
+            } else {
+                fontContext.toast(KMR.strings.novel_font_add_failed)
+            }
+            fontImportVersion++
+        }
+    }
+    IconItem(
+        label = stringResource(KMR.strings.novel_font_add),
+        icon = Icons.Outlined.UploadFile,
+        onClick = {
+            // `font/*` first, but storage providers are uneven about font MIME types, and a
+            // font picker that offers nothing is a dead button — octet-stream catches the rest.
+            fontPicker.launch(
+                arrayOf(
+                    "font/*",
+                    "application/x-font-ttf",
+                    "application/x-font-otf",
+                    "application/font-woff",
+                    "application/octet-stream",
+                ),
+            )
+        },
+    )
+    // KMK <--
 
     // Colours are a fixed palette rather than a free-text hex field on purpose. They are stored as
     // `#rrggbb`, which is what the stylesheet needs, and a hex field would let a reader type a colour

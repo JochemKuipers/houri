@@ -44,6 +44,10 @@ files moved. See .github/scripts/release_notes.py.
   live in a **Reading appearance** tab in the reader's settings, offered exactly when the open
   chapter is a book. Colours are a fixed palette, and picking a page colour also picks a text colour
   that stays readable on it, so a dark page can never again mean invisible text.
+- **You can add your own fonts to the book reader.** The font picker in the Reading appearance tab
+  now has an **Add a font** option: pick a `.ttf`, `.otf` or `.woff` file from your device and it
+  is offered beside the built-in families, for every book you read. The file is copied into the
+  app's own storage once — nothing is left pointing at your files.
 - **The chapter selector now knows what a book's chapters are.** A book is one library chapter, so
   the selector offered a single row — or, for a folder of novels, a list of *other books*. While
   reading a book it now lists the volume's own sections from its table of contents, and tapping one
@@ -58,9 +62,16 @@ files moved. See .github/scripts/release_notes.py.
   own Reading appearance tab, and nothing it cannot act on.
 - **A book's chapter buttons now step its chapters.** The previous/next chapter buttons skipped a
   whole book — one library chapter — so inside a novel they were useless. They now move through the
-  book's own sections, and leave for the next volume only at either end of the book. The page slider
-  no longer appears while reading a book: it was serving as the chapter navigator, which is the
-  contents list's job, and its "page 3 of 412" counted whole chapters as pages.
+  book's own sections, and leave for the next volume only at either end of the book.
+- **A book reads like the continuous manga reader.** Scrolling used to stop dead at the end of each
+  chapter, and the only way onward was a tap or a button. The next chapter now flows in as you
+  reach the bottom of the one you are reading — and the previous one flows back in above you when
+  you scroll up — so a book reads as one long page. Pushing past the very end of the book moves on
+  to the next volume.
+- **The page slider now shows chapter progress.** For a book it used to offer the chapter list as a
+  row of "pages" — a chapter navigator wearing the wrong label, competing with the contents list.
+  It now shows how far through the chapter on screen you are, as a percentage, and dragging it
+  moves through that chapter.
 - **The book reader can be navigated at all.** Taps, swipes and volume keys did nothing in an EPUB, so
   a chapter with no text on the first screen — which is what most books open on, since their first
   file is usually the cover — left you stuck. Tapping an edge now moves, tapping the middle opens the
@@ -151,7 +162,9 @@ files moved. See .github/scripts/release_notes.py.
   images, its fonts, its own styling — when the page's address is a real web one. Every file a
   book asked for was being refused before the reader ever saw the request, so a novel showed its
   text and nothing else, with no error anywhere: the reader looked simply broken rather than short
-  one illustration. Books now live at a reserved address the engine accepts. (A file without a
+  one illustration. Books now live at a reserved address the engine accepts — and the illustrations
+  and stylesheets of the chapter you are reading are carried inside the page itself, so they
+  arrive the same way the text does and cannot be refused by anything. (A file without a
   conventional extension — a WebP, an image stored as `.bin` — is also identified by its contents
   when its name does not say.)
 - **Reaching the end of a section now turns it.** A tap's job — scroll, and turn the page when

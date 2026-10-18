@@ -48,6 +48,8 @@ import eu.kanade.presentation.util.isTabletUi
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Slider
 import tachiyomi.presentation.core.i18n.stringResource
+import kotlin.math.roundToInt
+import androidx.compose.material3.Slider as ProgressSlider
 
 @Composable
 fun ChapterNavigator(
@@ -67,8 +69,17 @@ fun ChapterNavigator(
     onPageIndexChangeFinished: () -> Unit = {},
     // Mihon <--
     // KMK -->
-    /** Whether the page slider is offered at all. False for a book: see the caller in ReaderActivity. */
-    showSlider: Boolean = true,
+    /**
+     * Chapter-progress mode, for a book: the reader's place in the chapter on screen, 0..1.
+     *
+     * Non-null renders a chapter-progress slider instead of the page slider. A book's chapters have
+     * no pages to count, but the one being read has a beginning and an end, and this is where the
+     * reader is between them; dragging it moves through that chapter. Chapter *jumps* belong to
+     * the contents list, which is what the chapter selector renders for a book.
+     */
+    chapterFraction: Float? = null,
+    onChapterFractionChange: (Float) -> Unit = {},
+    onChapterFractionChangeFinished: () -> Unit = {},
     // KMK <--
 ) {
     // SY -->
@@ -87,7 +98,9 @@ fun ChapterNavigator(
             onPageIndexChangeFinished = onPageIndexChangeFinished,
             // Mihon <--
             // KMK -->
-            showSlider = showSlider,
+            chapterFraction = chapterFraction,
+            onChapterFractionChange = onChapterFractionChange,
+            onChapterFractionChangeFinished = onChapterFractionChangeFinished,
             // KMK <--
         )
         return
@@ -132,10 +145,34 @@ fun ChapterNavigator(
                 )
             }
 
-            // KMK --> `showSlider` hides the slider for a book: its documents are whole chapters,
-            // and a slider that offers them as pages is a chapter navigator wearing the wrong label.
-            // The spacer keeps the chapter buttons at the edges either way.
-            if (showSlider && totalPages > 1) {
+            // KMK --> Chapter progress: a book's position is a fraction of the chapter on screen,
+            // not a page number. The percentage stands where the page counter does, and the
+            // chapter's end stands where the page total does; the slider between them is the
+            // same control the manga bar shows for pages.
+            if (chapterFraction != null) {
+                CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(backgroundColor)
+                            .padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(text = chapterProgressText(chapterFraction), color = textColor)
+                        ProgressSlider(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 8.dp),
+                            value = chapterFraction,
+                            valueRange = 0f..1f,
+                            onValueChange = onChapterFractionChange,
+                            onValueChangeFinished = onChapterFractionChangeFinished,
+                        )
+                        Text(text = "100%", color = textColor)
+                    }
+                }
+            } else if (totalPages > 1) {
                 CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
                     Row(
                         modifier = Modifier
@@ -226,8 +263,10 @@ fun ChapterNavigatorVert(
     onPageIndexChangeFinished: () -> Unit = {},
     // Mihon <--
     // KMK -->
-    /** Whether the page slider is offered at all. False for a book: see the caller in ReaderActivity. */
-    showSlider: Boolean = true,
+    /** Chapter-progress mode, for a book: see the horizontal variant's doc. */
+    chapterFraction: Float? = null,
+    onChapterFractionChange: (Float) -> Unit = {},
+    onChapterFractionChangeFinished: () -> Unit = {},
     // KMK <--
 ) {
     val isTabletUi = isTabletUi()
@@ -266,9 +305,50 @@ fun ChapterNavigatorVert(
             )
         }
 
-        // KMK --> Same rule as the horizontal bar: a book's sections are chapters, not pages, so
-        // the slider is not offered and the spacer keeps the buttons at top and bottom.
-        if (showSlider && totalPages > 1) {
+        // KMK --> Chapter progress, the vertical bar's shape of the same mode the horizontal bar
+        // renders: percentage at the top, the chapter's end at the bottom, and the rotated slider
+        // between them.
+        if (chapterFraction != null) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(backgroundColor)
+                    .padding(vertical = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(text = chapterProgressText(chapterFraction), color = textColor)
+                CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                    ProgressSlider(
+                        modifier = Modifier
+                            .padding(vertical = 8.dp)
+                            .graphicsLayer {
+                                rotationZ = 90f
+                                transformOrigin = TransformOrigin(0f, 0f)
+                            }
+                            .layout { measurable, constraints ->
+                                val placeable = measurable.measure(
+                                    Constraints(
+                                        minWidth = constraints.minHeight,
+                                        maxWidth = constraints.maxHeight,
+                                        minHeight = constraints.minWidth,
+                                        maxHeight = constraints.maxWidth,
+                                    ),
+                                )
+                                layout(placeable.height, placeable.width) {
+                                    placeable.place(0, -placeable.height)
+                                }
+                            }
+                            .weight(1f),
+                        value = chapterFraction,
+                        valueRange = 0f..1f,
+                        onValueChange = onChapterFractionChange,
+                        onValueChangeFinished = onChapterFractionChangeFinished,
+                    )
+                }
+                Text(text = "100%", color = textColor)
+            }
+        } else if (totalPages > 1) {
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -355,6 +435,11 @@ fun ChapterNavigatorVert(
         }
     }
 }
+
+// KMK -->
+/** A chapter-progress fraction as the whole percent the bar shows. */
+private fun chapterProgressText(fraction: Float): String = "${(fraction * 100f).roundToInt()}%"
+// KMK <--
 
 @Preview
 @Composable

@@ -159,13 +159,27 @@ object NovelTypographyCss {
         .trimEnd('0')
         .trimEnd('.')
 
-    /** Quotes a family name so `Georgia, serif` does not parse as one broken family. */
+    /**
+     * Quotes a family name so `Georgia, serif` does not parse as one broken family — and so a
+     * name that is not a CSS identifier at all still arrives intact.
+     *
+     * The non-identifier case is not hypothetical: a reader-imported font's family value is
+     * `user/<file name>`, which is an arbitrary reader-chosen string with a slash in it. Left
+     * unquoted that is a syntax error in the `font-family` declaration, the whole rule is dropped,
+     * and the book silently keeps its publisher's font — the exact "the setting does nothing"
+     * failure the quoting here exists to prevent. A name is an identifier exactly when it is
+     * one: letters, digits, underscore and hyphen, not starting with a digit. Everything else is
+     * quoted, and a quote inside the name cannot survive being one, so it is stripped.
+     */
     private fun quoteFamily(name: String): String {
         val generic = GENERIC_FAMILIES
         if (name in generic) return name
         val safe = name.replace("\"", "")
-        return if (safe.any { it.isWhitespace() }) "\"$safe\"" else safe
+        return if (CSS_IDENTIFIER.matches(safe)) safe else "\"$safe\""
     }
+
+    /** A name that needs no quotes: a single CSS identifier. */
+    private val CSS_IDENTIFIER = Regex("""-?[A-Za-z_][-A-Za-z0-9_]*""")
 
     private val GENERIC_FAMILIES = setOf(
         "serif",

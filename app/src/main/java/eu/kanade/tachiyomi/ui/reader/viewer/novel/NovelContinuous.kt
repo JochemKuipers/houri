@@ -1,0 +1,203 @@
+// KMK -->
+package eu.kanade.tachiyomi.ui.reader.viewer.novel
+
+/**
+ * The book as one continuous scroll: the pieces of it that are pure strings and string surgery.
+ *
+ * ### What "continuous" means here, and why
+ *
+ * A book is one library chapter whose *sections* are its spine documents, and a reader moving
+ * through it does not experience "next section" as a jump: the manga reader they are used to is
+ * the continuous one, where scrolling never stops at a chapter boundary. So the live document
+ * grows: while the reader is still a screen or so from the bottom, the *next* section's content is
+ * appended into the same DOM; scrolling up past the top prepends the previous section, with the
+ * scroll position compensated inside the same synchronous script so no frame ever shows the
+ * shift. A document is a window around the section being read — trimmed at both ends as the
+ * reader moves — and everything else (taps, the buttons, the contents sheet, seeking) still works
+ * exactly as it does on a single document.
+ *
+ * ### The segment marker
+ *
+ * Every section in the DOM — including the one the document was loaded with — sits inside one
+ * `kmk-seg` element carrying its position in the reader's page list (`data-i`) and its archive
+ * path (`data-u`). The probe walks those markers to answer the only question the host cannot
+ * answer from its own state: *which* section is under the viewport, and how far into it. That is
+ * what drives the page counter, the saved position, the chapter-progress slider, and where the
+ * next append/prepend happens.
+ *
+ * ### What only the engine can measure
+ *
+ * The probe and the seek are `evaluateJavascript` round trips on purpose: segment bounds live in
+ * laid-out CSS pixels, and this folder has already learned (see `step`) not to guess the engine's
+ * pixel arithmetic from outside. Both degrade to no-ops when scripting is unavailable — the reader
+ * loses live progress and the continuous appends, never the text.
+ *
+ * Every string here is pure; `DocumentHarness` asserts the marker format and the fragment
+ * extraction. The orchestration — when to append, what to trim — lives in [NovelWebViewer].
+ */
+object NovelContinuous {
+
+    /** The class every segment wrapper carries. */
+    const val SEGMENT_CLASS = "kmk-seg"
+
+    /**
+     * How far ahead of the reader a segment may sit before it is trimmed from the window.
+     *
+     * Two in each direction: far enough that a fast fling through a short section does not run off
+     * the end before the next append lands, near enough that a long session's DOM stays bounded.
+     */
+    const val WINDOW_EDGE = 2
+
+    /** Marks [inner] — one section's body content — as the segment at [position]. */
+    fun wrap(position: Int, url: String, inner: String): String =
+        openTag(position, url) + inner + CLOSE
+
+    /** The opening half of [wrap], for the document [NovelDocument.build] loads directly. */
+    fun openTag(position: Int, url: String): String =
+        """<div class="$SEGMENT_CLASS" data-i="$position" data-u="${escapeAttribute(url)}">"""
+
+    /** The closing half of [wrap]. */
+    const val CLOSE = "</div>"
+
+    private fun escapeAttribute(value: String): String = buildString(value.length) {
+        for (c in value) {
+            when (c) {
+                '&' -> append('&').append("amp;")
+                '"' -> append('&').append("quot;")
+                '<' -> append('&').append("lt;")
+                '>' -> append('&').append("gt;")
+                else -> append(c)
+            }
+        }
+    }
+
+    /**
+     * One section's body content, extracted from its markup for appending.
+     *
+     * Head-borne rules (the section's own `<style>` blocks, stylesheets already inlined as such by
+     * [NovelInline]) travel inside the fragment — a `<style>` element is valid anywhere and applies
+     * to the whole document, which for sections of the same book is what their author intended.
+     * Anything before `<body>` that is not a style is dropped: the live document already has its
+     * charset, its base and the reader's own rules.
+     */
+    fun bodyFragment(markup: String): String {
+        val match = BODY.find(markup) ?: return markup
+        return match.groupValues[1].ifBlank { markup }
+    }
+
+    private val BODY = Regex("""<body\b[^>]*>([\s\S]*)</body\s*>""", RegexOption.IGNORE_CASE)
+
+    // ---------------------------------------------------------------- scripts
+
+    /**
+     * Reports the section under the viewport and the reading state around it.
+     *
+     * Returns an object the host parses as JSON — `evaluateJavascript` delivers a script's return
+     * value already JSON-encoded, so an object arrives as one and a hand-built string would arrive
+     * twice-encoded. Null when the document carries no segments at all, which is the moment
+     * before the first load.
+     *
+     * Measured with `getBoundingClientRect().top + pageYOffset` rather than `offsetTop`: body
+     * margins are part of the document's coordinate space and outside the offsetParent chain, and
+     * the day-old lesson of `scrollToAnchor` applies to segments too.
+     */
+    const val PROBE: String = """
+        (function(){
+          var segs = document.querySelectorAll('.kmk-seg');
+          if (segs.length === 0) return null;
+          var y = window.pageYOffset;
+          function top(el){ return el.getBoundingClientRect().top + window.pageYOffset; }
+          var cur = segs[0];
+          for (var i = 0; i < segs.length; i++) {
+            if (top(segs[i]) <= y + 1) cur = segs[i]; else break;
+          }
+          var t = top(cur), h = Math.max(1, cur.offsetHeight);
+          var f = Math.min(1, Math.max(0, (y - t) / h));
+          var vh = window.innerHeight;
+          var el = document.documentElement, b = document.body;
+          var total = Math.max(el ? el.scrollHeight : 0, b ? b.scrollHeight : 0);
+          return {
+            i: parseInt(cur.getAttribute('data-i'), 10) || 0,
+            f: f,
+            nb: (total - y - vh) < vh * 1.5 ? 1 : 0,
+            nt: y < vh ? 1 : 0
+          };
+        })()
+    """
+
+    /**
+     * Appends one section's [html] as the segment at [position].
+     *
+     * `innerHTML` on a detached element on purpose: content inserted that way does not execute
+     * scripts, which is exactly the property wanted when the content is a file the user downloaded.
+     */
+    fun appendScript(html: String, position: Int, url: String): String = """
+        (function(){
+          var div = document.createElement('div');
+          div.className = '$SEGMENT_CLASS';
+          div.setAttribute('data-i', '$position');
+          div.setAttribute('data-u', ${NovelScrollBridge.quoteForJs(url)});
+          div.innerHTML = ${NovelScrollBridge.quoteForJs(html)};
+          document.body.appendChild(div);
+          return true;
+        })()
+    """
+
+    /**
+     * Prepends one section's [html] as the segment at [position].
+     *
+     * The scroll compensation shares the script: both land before the next frame paints, so the
+     * reader's viewport never shows the content shifting underneath it — an insert without the
+     * compensation would jump them to the new section's top.
+     */
+    fun prependScript(html: String, position: Int, url: String): String = """
+        (function(){
+          var div = document.createElement('div');
+          div.className = '$SEGMENT_CLASS';
+          div.setAttribute('data-i', '$position');
+          div.setAttribute('data-u', ${NovelScrollBridge.quoteForJs(url)});
+          div.innerHTML = ${NovelScrollBridge.quoteForJs(html)};
+          document.body.insertBefore(div, document.body.firstChild);
+          window.scrollBy(0, div.offsetHeight);
+          return true;
+        })()
+    """
+
+    /**
+     * Removes the segment at [position]; [compensate] holds the viewport still for a removal above
+     * it (the content below moves up by exactly the removed height), and is false for one below,
+     * where removing content cannot move what is on screen.
+     */
+    fun trimScript(position: Int, compensate: Boolean): String = """
+        (function(){
+          var el = document.querySelector('.kmk-seg[data-i="$position"]');
+          if (!el || !el.parentNode) return false;
+          var h = el.offsetHeight;
+          el.parentNode.removeChild(el);
+          if ($compensate) window.scrollBy(0, -h);
+          return true;
+        })()
+    """
+
+    /**
+     * Scrolls to [fraction] of the section under the viewport — the chapter-progress slider's seek.
+     *
+     * Fraction-of-segment rather than fraction-of-document, because the document is now several
+     * sections tall and "where am I in this chapter" is the question the slider is drawn to answer.
+     */
+    fun seekScript(fraction: Float): String = """
+        (function(f){
+          var segs = document.querySelectorAll('.kmk-seg');
+          if (segs.length === 0) return false;
+          var y = window.pageYOffset;
+          function top(el){ return el.getBoundingClientRect().top + window.pageYOffset; }
+          var cur = segs[0];
+          for (var i = 0; i < segs.length; i++) {
+            if (top(segs[i]) <= y + 1) cur = segs[i]; else break;
+          }
+          window.scrollTo(0, Math.round(top(cur) + f * cur.offsetHeight));
+          return true;
+        })(${fraction.coerceIn(0f, 1f)})
+    """
+}
+// KMK <--

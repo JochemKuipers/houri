@@ -39,6 +39,13 @@ object NovelDocument {
      * [baseUrl] must be absolute and end in `/`; see
      * [eu.kanade.tachiyomi.source.text.TextBaseUrlSource] for why.
      *
+     * [segment], when set, marks the document as one section of the book's continuous scroll:
+     * its body content is wrapped in the marker `NovelContinuous` probes. Null for callers that
+     * are not the reader — the harness among them.
+     *
+     * [extraHead] is emitted after the base and the charset — the reader font's `@font-face`,
+     * which is CSS and so cares about the cascade but not about the base.
+     *
      * The head content is injected at **two** points, and the split is not cosmetic:
      *
      *  - `<base>` and the charset go at the very top of the head. A `<base>` has to precede every
@@ -51,9 +58,17 @@ object NovelDocument {
      *    that is the single most common complaint about EPUB readers — but `!important` against
      *    `!important` is decided by source order, so a publisher that also uses it has to come second.
      */
-    fun build(source: String, typography: NovelTypography, baseUrl: String): String {
-        val document = normalize(source)
-        val prologue = prologue(baseUrl)
+    fun build(
+        source: String,
+        typography: NovelTypography,
+        baseUrl: String,
+        // KMK -->
+        segment: Pair<Int, String>? = null,
+        extraHead: String = "",
+        // KMK <--
+    ): String {
+        val document = wrapBody(normalize(source), segment)
+        val prologue = prologue(baseUrl) + extraHead
         val epilogue = epilogue(typography)
 
         val headOpen = HEAD_OPEN.find(document)
@@ -80,6 +95,31 @@ object NovelDocument {
             // No <html> at all — a fragment, or a file whose root element is something else. Wrapping is
             // the only way to give the engine the head the base and the charset need.
             "$HTML_SHELL<head>$prologue$epilogue</head>\n$document\n</body>\n</html>"
+        }
+    }
+
+    /**
+     * Wraps [document]'s body content in the continuous-reading segment marker.
+     *
+     * Untouched when [segment] is null. A document with a `<body>` gets the marker inside it — one
+     * per body, however the publisher nested their sections, because the marker names a *spine
+     * section*, which is exactly what the body of a spine document holds. A fragment with no body
+     * of its own is wrapped wholesale; the shell [build] puts around it then carries both.
+     */
+    private fun wrapBody(document: String, segment: Pair<Int, String>?): String {
+        if (segment == null) return document
+        val (position, url) = segment
+        val open = NovelContinuous.openTag(position, url)
+        val bodyOpen = BODY_OPEN.find(document)
+        if (bodyOpen == null) return "$open$document${NovelContinuous.CLOSE}"
+        val bodyClose = BODY_CLOSE.find(document, bodyOpen.range.last + 1)
+        return if (bodyClose != null) {
+            // Later offset first, for the same reason as the head surgery above.
+            document
+                .replaceRange(bodyClose.range, NovelContinuous.CLOSE + bodyClose.value)
+                .replaceRange(bodyOpen.range, bodyOpen.value + open)
+        } else {
+            document.replaceRange(bodyOpen.range, bodyOpen.value + open + NovelContinuous.CLOSE)
         }
     }
 
@@ -158,6 +198,12 @@ object NovelDocument {
     private val HEAD_OPEN = Regex("""<head\b[^>]*>""", RegexOption.IGNORE_CASE)
 
     private val HEAD_CLOSE = Regex("""</head\s*>""", RegexOption.IGNORE_CASE)
+
+    // KMK --> the continuous-reading marker wraps the body; see [wrapBody] and NovelContinuous.
+    private val BODY_OPEN = Regex("""<body\b[^>]*>""", RegexOption.IGNORE_CASE)
+
+    private val BODY_CLOSE = Regex("""</body\s*>""", RegexOption.IGNORE_CASE)
+    // KMK <--
 
     private val BASE_TAG = Regex("""<base\b[^>]*>""", RegexOption.IGNORE_CASE)
 

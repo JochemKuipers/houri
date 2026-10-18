@@ -74,13 +74,15 @@ fun ReaderAppBars(
     // Mihon <--
     // KMK -->
     /**
-     * Whether the page slider part of the bottom navigator is offered.
+     * Chapter-progress mode, for a book: the reader's place in the chapter on screen, 0..1.
      *
-     * False while the open chapter is a book: the slider was being used as its chapter navigator
-     * (a book's "pages" in the reader's own numbering are whole documents), which is a role the
-     * contents list fills properly. The prev/next chapter buttons stay either way.
+     * Non-null renders a chapter-progress slider instead of the page slider — a book has pages
+     * without number, and its chapters flow into each other, so the bar shows where the reader is
+     * in the chapter they are reading. The prev/next chapter buttons step chapters either way.
      */
-    showPageNavigator: Boolean = true,
+    chapterFraction: Float? = null,
+    onChapterFractionChange: (Float) -> Unit = {},
+    onChapterFractionChangeFinished: () -> Unit = {},
     // KMK <--
 
     readingMode: ReadingMode,
@@ -206,7 +208,9 @@ fun ReaderAppBars(
                         currentPageText = currentPageText,
                         // SY <--
                         // KMK -->
-                        showSlider = showPageNavigator,
+                        chapterFraction = chapterFraction,
+                        onChapterFractionChange = onChapterFractionChange,
+                        onChapterFractionChangeFinished = onChapterFractionChangeFinished,
                         // KMK <--
                     )
                 }
@@ -244,7 +248,9 @@ fun ReaderAppBars(
                         currentPageText = currentPageText,
                         // SY <--
                         // KMK -->
-                        showSlider = showPageNavigator,
+                        chapterFraction = chapterFraction,
+                        onChapterFractionChange = onChapterFractionChange,
+                        onChapterFractionChangeFinished = onChapterFractionChangeFinished,
                         // KMK <--
                     )
                 }
@@ -279,7 +285,9 @@ fun ReaderAppBars(
                         currentPageText = currentPageText,
                         // SY <--
                         // KMK -->
-                        showSlider = showPageNavigator,
+                        chapterFraction = chapterFraction,
+                        onChapterFractionChange = onChapterFractionChange,
+                        onChapterFractionChangeFinished = onChapterFractionChangeFinished,
                         // KMK <--
                     )
                 }

@@ -102,6 +102,9 @@ fun main() {
     // generic family must not be quoted; a real name with a space must be
     contains("generic unquoted", NovelTypographyCss.stylesheet(NovelTypography(fontFamily = "serif")), "font-family: serif !important")
     contains("spaced name quoted", NovelTypographyCss.stylesheet(NovelTypography(fontFamily = "Noto Serif JP")), "\"Noto Serif JP\"")
+    // A reader-imported font's value is "user/<file name>" — a slash is not a CSS identifier
+    // character, and an unquoted family would drop the whole rule (see quoteFamily).
+    contains("reader font quoted", NovelTypographyCss.stylesheet(NovelTypography(fontFamily = "user/My Font")), "\"user/My Font\"")
 
     // ---------------- style tag ----------------
     val tag = NovelTypographyCss.styleTag(t)

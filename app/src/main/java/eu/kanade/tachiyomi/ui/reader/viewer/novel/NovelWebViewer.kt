@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import eu.kanade.tachiyomi.source.text.TextBaseUrlSource
+import eu.kanade.tachiyomi.source.text.TextPage
 import eu.kanade.tachiyomi.source.text.TextResourceSource
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.loader.TextPageLoader
@@ -38,10 +39,12 @@ import kotlinx.coroutines.launch
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import mihon.core.archive.EpubArchiveUrls
+import mihon.core.archive.EpubMimeSniff
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.source.epub.EpubResourceReader
 import java.io.ByteArrayInputStream
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * Renders a text chapter in a WebView.
@@ -188,6 +191,84 @@ internal class NovelWebViewer(
      */
     private var currentBaseUrl: String? = null
 
+    // ---------------------------------------------------------------- continuous reading
+
+    /**
+     * The live document is a window of the book, not one section: while the reader scrolls, the
+     * sections either side are appended into and prepended out of it. [windowFirst] and
+     * [windowLast] name the page-list positions the DOM currently spans, and are reset to the
+     * one loaded document by every [renderDocument] — a tap, a button or a contents jump starts a
+     * fresh window deliberately, the same way a manga reader's page jump resets its neighbourhood.
+     */
+    private var windowFirst = -1
+    private var windowLast = -1
+
+    /** The section the viewport is over, as the probe last reported it. */
+    private var currentSegment = -1
+
+    /** One append/prepend at a time; further probes queue behind the next scroll event. */
+    private var windowJob: Job? = null
+
+    /**
+     * When the scroll position was last probed, so a fling does not run one per frame.
+     */
+    private var lastProbeAt = 0L
+
+    /**
+     * Where the reader is inside the section under the viewport, 0..1 — the value the bottom
+     * navigator's slider shows. Kept as compose state so the bar follows the reader live.
+     */
+    var scrollFraction by mutableStateOf(0f)
+        private set
+
+    /** True while that slider is being dragged: its seeks drive the state; the scroll must not. */
+    private var fractionDragActive = false
+
+    /** The scroll position the gesture tracker last saw, to tell "moved" from "stuck at an edge". */
+    private var lastObservedScrollY = 0
+
+    /** Consecutive forward/backward drag steps that produced no scroll, and when a stuck turn last fired. */
+    private var stuckForward = 0
+    private var stuckBackward = 0
+    private var lastStuckTurnAt = 0L
+
+    /**
+     * Serves [NovelInline] from the same archive the streaming path reads: one reader, one lease,
+     * one release path.
+     */
+    private val inlineFetcher = NovelInline.Fetcher { url ->
+        val stream = runCatching { resources?.openResource(url) }
+            .onFailure { xLogE("Failed to open archive resource for inlining: $url", it) }
+            .getOrNull() ?: return@Fetcher null
+        val bytes = try {
+            stream.use { it.readBytes() }
+        } catch (e: Exception) {
+            xLogE("Failed to read archive resource for inlining: $url", e)
+            return@Fetcher null
+        }
+        NovelInline.Resource(
+            bytes = bytes,
+            mimeType = runCatching { resources?.contentTypeFor(url) }.getOrNull()
+                ?: EpubMimeSniff.of(bytes)
+                ?: OCTET_STREAM,
+        )
+    }
+
+    /** The reader font's `@font-face`, when the family chosen is one the reader brought. */
+    private fun readerFontCss(): String {
+        val family = typography.fontFamily
+        if (!family.startsWith(NovelFonts.PREFIX)) return ""
+        val name = family.removePrefix(NovelFonts.PREFIX)
+        if (name.isBlank()) return ""
+        val face = readerFontCache.getOrPut(family) {
+            NovelFonts.load(activity, family) ?: return ""
+        }
+        return NovelFonts.faceCss(family, face)
+    }
+
+    /** The chosen font, read once per family rather than once per document. */
+    private val readerFontCache = mutableMapOf<String, NovelFonts.Face>()
+
     /** Cancelled in [destroy]: the typography subscription outlives the viewer otherwise. */
     private var typographyJob: Job? = null
 
@@ -265,6 +346,7 @@ internal class NovelWebViewer(
                 if (abs(dy) > MIN_SCROLL_TO_HIDE_MENU && activity.viewModel.state.value.menuVisible) {
                     activity.hideMenu()
                 }
+                trackStuckScroll(dy)
                 return false
             }
         },
@@ -292,6 +374,10 @@ internal class NovelWebViewer(
             gestureDetector.onTouchEvent(event)
             false
         }
+        // Every scroll of the document — finger, fling, seek or an append's compensation — is the
+        // moment to ask where the reader now is: the probe updates the page counter, the saved
+        // position and the progress slider, and decides whether the window should grow.
+        setOnScrollChangeListener { _, _, _, _, _ -> scheduleContinuousProbe() }
     }
 
     override fun getView(): View = webView
@@ -365,6 +451,9 @@ internal class NovelWebViewer(
         // A read in flight must not outlive the viewer: it would finish against a destroyed WebView.
         documentLoadJob?.cancel()
         documentLoadJob = null
+        // The window grows on the activity's scope; it has no business outliving the view it feeds.
+        windowJob?.cancel()
+        windowJob = null
         webView.stopLoading()
         webView.webViewClient = WebViewClient()
         webView.destroy()
@@ -461,12 +550,34 @@ internal class NovelWebViewer(
         // The base URL decides where every relative reference in this document points, and it is a
         // property of the document, not of the book. EpubResourceReader.BASE_URL is the right answer
         // only for a spine item that sits at the archive root.
-        val baseUrl = (resources as? TextBaseUrlSource)?.baseUrlFor(textPage) ?: EpubResourceReader.BASE_URL
-        val html = NovelDocument.build(textPage.text, typography, baseUrl)
+        val baseUrl = baseUrlFor(textPage)
+
+        // The document's own illustrations and stylesheets travel inside it, as data: URIs — the
+        // one channel that has never failed to reach the engine. Anything over the ceiling stays a
+        // URL and keeps the streaming path.
+        val inlined = NovelInline.inline(textPage.text, baseUrl, inlineFetcher)
+
+        val position = chapters?.currChapter?.positionOf(page) ?: page.index
+        // A fresh document is a fresh window: the continuous layer grows it from here.
+        windowFirst = position
+        windowLast = position
+        currentSegment = position
+        lastSavedFraction = -1f
+        scrollFraction = 0f
+        stuckForward = 0
+        stuckBackward = 0
+        lastObservedScrollY = 0
 
         // Set before the load, because onPageFinished for it can arrive before this function returns
         // on a warm engine, and a null here would make the finish look like somebody else's.
         currentBaseUrl = baseUrl
+        val html = NovelDocument.build(
+            inlined,
+            typography,
+            baseUrl,
+            segment = position to textPage.url,
+            extraHead = readerFontCss(),
+        )
         webView.loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null)
 
         pendingRestoreFraction = restoreFractionFor(page)
@@ -475,6 +586,10 @@ internal class NovelWebViewer(
         lastSavedFraction = -1f
         activity.onPageSelected(page)
     }
+
+    /** The URL a document must be loaded at so its own relative references resolve. */
+    private fun baseUrlFor(textPage: TextPage): String =
+        (resources as? TextBaseUrlSource)?.baseUrlFor(textPage) ?: EpubResourceReader.BASE_URL
 
     /** The fraction to restore for [page], or null when this document has no stored position. */
     private fun restoreFractionFor(page: ReaderPage): Float? {
@@ -594,7 +709,16 @@ internal class NovelWebViewer(
 
         webView.post {
             if (abs(webView.scrollY - before) < MIN_MOVEMENT_PX) {
-                if (volumeForward) advanceDocument() else retreatDocument()
+                // The tap ran out of room. Inside the book that room is one append away — a tap
+                // grows the window rather than jumping the reader out of the chapter — and only
+                // the book's own edges fall through to a volume turn.
+                if (volumeForward) {
+                    if (growWindowForward()) return@post
+                    advanceDocument()
+                } else {
+                    if (growWindowBackward()) return@post
+                    retreatDocument()
+                }
             }
         }
     }
@@ -682,6 +806,247 @@ internal class NovelWebViewer(
     /** Whether there is a previous section or volume for [previousSection] to go to. */
     val hasPreviousSection: Boolean
         get() = neighbour(-1) != null || chapters?.prevChapter != null
+
+    // ---------------------------------------------------------------- continuous reading
+
+    /**
+     * Grows the window forward if there is a section left to grow into, and reports whether it
+     * did (or already had one in flight) — the caller falls through to a volume turn only when the
+     * book itself has run out.
+     */
+    private fun growWindowForward(): Boolean {
+        if (windowJob?.isActive == true) return true
+        val pages = chapters?.currChapter?.pages ?: return false
+        if (windowLast >= pages.lastIndex) return false
+        appendAhead()
+        return true
+    }
+
+    /** [growWindowForward], backwards. */
+    private fun growWindowBackward(): Boolean {
+        if (windowJob?.isActive == true) return true
+        if (windowFirst <= 0) return false
+        prependBehind()
+        return true
+    }
+
+    /**
+     * Asks the document where the reader is, at most once per [PROBE_INTERVAL_MS]: a fling fires
+     * the scroll listener on every frame, and the answer cannot change faster than the document
+     * can reflow.
+     */
+    private fun scheduleContinuousProbe() {
+        if (fractionDragActive) return
+        val now = System.currentTimeMillis()
+        if (now - lastProbeAt < PROBE_INTERVAL_MS) return
+        lastProbeAt = now
+        webView.evaluateJavascript(NovelContinuous.PROBE) { raw -> onProbe(raw) }
+    }
+
+    /** The probe's answer, once parsed. Drives everything that follows the reader as they read. */
+    private fun onProbe(raw: String?) {
+        val probe = parseProbe(raw) ?: return
+
+        if (!fractionDragActive &&
+            (probe.fraction * 100f).roundToInt() != (scrollFraction * 100f).roundToInt()
+        ) {
+            scrollFraction = probe.fraction
+        }
+
+        if (probe.position != currentSegment) {
+            currentSegment = probe.position
+            lastSavedFraction = -1f
+            chapters?.currChapter?.pages?.getOrNull(probe.position)?.let { page ->
+                // The page under the viewport is the page the reader is reading: the counter, the
+                // history and the contents sheet's marker all follow it, exactly as they follow
+                // the page on screen in the continuous manga viewer.
+                currentPage = page
+                activity.onPageSelected(page)
+            }
+            trimToWindow()
+        }
+
+        savePosition(probe)
+        if (probe.nearBottom) growWindowForward()
+        if (probe.nearTop) growWindowBackward()
+    }
+
+    /**
+     * The next section, appended into the live document.
+     *
+     * A *body fragment*, not a document: the live page already has its charset, its base and the
+     * reader's rules, and the fragment's own references were resolved against its own base at
+     * inline time — data: URIs have no base to be wrong about.
+     */
+    private fun appendAhead() {
+        val position = windowLast + 1
+        val page = chapters?.currChapter?.pages?.getOrNull(position) ?: return
+        val loader = loader ?: return
+        windowJob = activity.lifecycleScope.launch {
+            if (!loader.ensureText(page)) {
+                logcat(LogPriority.WARN) { "NovelViewer: could not append section $position; leaving the window" }
+                return@launch
+            }
+            val textPage = page.textPage ?: return@launch
+            val fragment = NovelInline.inline(
+                NovelContinuous.bodyFragment(textPage.text),
+                baseUrlFor(textPage),
+                inlineFetcher,
+            )
+            webView.evaluateJavascript(
+                NovelContinuous.appendScript(fragment, position, textPage.url),
+            ) { _ ->
+                windowLast = position
+                trimToWindow()
+            }
+        }
+    }
+
+    /** The previous section, prepended with the scroll held still. See [NovelContinuous.prependScript]. */
+    private fun prependBehind() {
+        val position = windowFirst - 1
+        if (position < 0) return
+        val page = chapters?.currChapter?.pages?.getOrNull(position) ?: return
+        val loader = loader ?: return
+        windowJob = activity.lifecycleScope.launch {
+            if (!loader.ensureText(page)) {
+                logcat(LogPriority.WARN) { "NovelViewer: could not prepend section $position; leaving the window" }
+                return@launch
+            }
+            val textPage = page.textPage ?: return@launch
+            val fragment = NovelInline.inline(
+                NovelContinuous.bodyFragment(textPage.text),
+                baseUrlFor(textPage),
+                inlineFetcher,
+            )
+            webView.evaluateJavascript(
+                NovelContinuous.prependScript(fragment, position, textPage.url),
+            ) { _ ->
+                windowFirst = position
+                trimToWindow()
+            }
+        }
+    }
+
+    /**
+     * Keeps the window to [NovelContinuous.WINDOW_EDGE] sections either side of the one under the
+     * viewport, so a long session's DOM stays bounded the way the continuous manga viewer's
+     * chapter neighbourhood does. One section per call; the next probe trims the rest.
+     */
+    private fun trimToWindow() {
+        val edge = NovelContinuous.WINDOW_EDGE
+        if (currentSegment - windowFirst > edge && windowFirst < windowLast) {
+            webView.evaluateJavascript(NovelContinuous.trimScript(windowFirst, compensate = true), null)
+            windowFirst++
+        }
+        if (windowLast - currentSegment > edge && windowFirst < windowLast) {
+            webView.evaluateJavascript(NovelContinuous.trimScript(windowLast, compensate = false), null)
+            windowLast--
+        }
+    }
+
+    /**
+     * A drag that keeps trying to scroll past the end of the *book* — where no append can answer —
+     * turns to the next volume, the way the continuous manga reader runs off the last page into
+     * the next chapter. Only at the book's own edges: mid-book, "nowhere left to scroll" means an
+     * append has not landed yet, not that the book is over.
+     */
+    private fun trackStuckScroll(dy: Float) {
+        val y = webView.scrollY
+        val moved = y - lastObservedScrollY
+        lastObservedScrollY = y
+
+        if (dy > STUCK_SCROLL_DELTA) {
+            if (moved < MIN_MOVEMENT_PX) stuckForward++ else stuckForward = 0
+            if (stuckForward >= STUCK_SCROLL_EVENTS && canTurnAtStuckEdge(forward = true)) {
+                stuckForward = 0
+                lastStuckTurnAt = System.currentTimeMillis()
+                advanceDocument()
+            }
+        } else if (dy < -STUCK_SCROLL_DELTA) {
+            if (moved > -MIN_MOVEMENT_PX) stuckBackward++ else stuckBackward = 0
+            if (stuckBackward >= STUCK_SCROLL_EVENTS && canTurnAtStuckEdge(forward = false)) {
+                stuckBackward = 0
+                lastStuckTurnAt = System.currentTimeMillis()
+                retreatDocument()
+            }
+        }
+    }
+
+    /** A stuck edge is a volume turn only at the book's ends, once per push. */
+    private fun canTurnAtStuckEdge(forward: Boolean): Boolean {
+        if (windowJob?.isActive == true) return false
+        if (System.currentTimeMillis() - lastStuckTurnAt < STUCK_TURN_COOLDOWN_MS) return false
+        val pages = chapters?.currChapter?.pages ?: return false
+        return if (forward) windowLast >= pages.lastIndex else windowFirst <= 0
+    }
+
+    /**
+     * The bottom navigator's slider moved: seek to [fraction] of the section under the viewport.
+     *
+     * The slider state follows the thumb immediately, and the document's own scroll reports are
+     * muted until the drag ends — a seek that scrolled the document underneath a live drag would
+     * fight the thumb for the position.
+     */
+    fun seekFraction(fraction: Float) {
+        val target = fraction.coerceIn(0f, 1f)
+        scrollFraction = target
+        fractionDragActive = true
+        webView.evaluateJavascript(NovelContinuous.seekScript(target), null)
+    }
+
+    /** The drag ended: the document's scroll takes the thumb back over. */
+    fun seekFractionEnd() {
+        fractionDragActive = false
+    }
+
+    /**
+     * Persists where the reader is inside the section under the viewport.
+     *
+     * Throttled on a fraction delta rather than per probe: this is a preference write, and a fling
+     * probes more often than it scrolls far.
+     */
+    private fun savePosition(probe: Probe) {
+        val page = chapters?.currChapter?.pages?.getOrNull(probe.position) ?: return
+        val length = documentLengths().getOrNull(page.index) ?: return
+        if (abs(probe.fraction - lastSavedFraction) < SAVE_THRESHOLD) return
+        lastSavedFraction = probe.fraction
+        novelPrefs.setPosition(
+            page.chapter.chapter.url,
+            NovelProgress.Position(
+                documentIndex = page.index,
+                characterOffset = NovelProgress.characterOffsetFor(probe.fraction, length),
+                characterLength = length,
+            ),
+        )
+    }
+
+    /** The probe's reply: which section, how far in, and whether the edges of the window are near. */
+    private data class Probe(
+        val position: Int,
+        val fraction: Float,
+        val nearBottom: Boolean,
+        val nearTop: Boolean,
+    )
+
+    /**
+     * Parses the probe out of the `evaluateJavascript` reply.
+     *
+     * The reply is the JSON encoding of the script's return object, so the fields arrive in the
+     * order the script wrote them and nowhere else; a document with no segments replies `null`,
+     * which is the moment before the first load and not an error.
+     */
+    private fun parseProbe(raw: String?): Probe? {
+        if (raw.isNullOrBlank() || raw.trim() == "null") return null
+        val position = PROBE_POSITION.find(raw)?.groupValues?.get(1)?.toIntOrNull() ?: return null
+        val fraction = PROBE_FRACTION.find(raw)?.groupValues?.get(1)?.toDoubleOrNull() ?: return null
+        return Probe(
+            position = position,
+            fraction = fraction.toFloat().coerceIn(0f, 1f),
+            nearBottom = PROBE_NEAR_BOTTOM.find(raw)?.groupValues?.get(1) == "1",
+            nearTop = PROBE_NEAR_TOP.find(raw)?.groupValues?.get(1) == "1",
+        )
+    }
 
     // ---------------------------------------------------------------- resources
 
@@ -825,7 +1190,9 @@ internal class NovelWebViewer(
             // Re-assert typography in the live DOM too, so the injected stylesheet and the running
             // document cannot drift apart after a self-navigation.
             view.evaluateJavascript(liveTypographyJs(), null)
-            savePosition()
+            // The probe is where the page counter, the saved position and the progress slider all
+            // start from: run one now rather than waiting for the reader's first scroll.
+            scheduleContinuousProbe()
         }
 
         private fun notFound(): WebResourceResponse = WebResourceResponse(
@@ -849,11 +1216,12 @@ internal class NovelWebViewer(
      * reader-chosen, so this was reachable by the reader and by nothing else — which is why it
      * presented as "the font setting does nothing" rather than as a crash.
      *
-     * One encoder, used everywhere a value crosses into a script, is the fix. (Interim: this whole
-     * script is deleted in phase 3 of the native-renderer spec.)
+     * A reader-chosen font's `@font-face` rides along, for the same reason it is in the built
+     * document's head: a live style swap that changed the family without redeclaring the face
+     * would fall back to the publisher's font until the next document.
      */
     private fun liveTypographyJs(): String {
-        val css = NovelTypographyCss.stylesheet(typography)
+        val css = readerFontCss() + NovelTypographyCss.stylesheet(typography)
         return """
             (function(){
               var old = document.getElementById('kmk-typography-live');
@@ -893,31 +1261,6 @@ internal class NovelWebViewer(
             NovelScrollBridge.SET_FRACTION.replace("%f", fraction.toString()),
             null,
         )
-    }
-
-    /**
-     * Persists where the reader is inside the current document.
-     *
-     * Throttled on a fraction delta rather than per event: this is a preference write, and a drag
-     * produces one of those per frame. The delta is small enough that a reader who closes the book
-     * mid-sentence loses at most one percent of position.
-     */
-    private fun savePosition() {
-        val page = currentPage ?: return
-        val length = documentLengths().getOrNull(page.index) ?: return
-        webView.evaluateJavascript(NovelScrollBridge.FRACTION) { raw ->
-            val fraction = NovelScrollBridge.number(raw).toFloat().coerceIn(0f, 1f)
-            if (abs(fraction - lastSavedFraction) < SAVE_THRESHOLD) return@evaluateJavascript
-            lastSavedFraction = fraction
-            novelPrefs.setPosition(
-                page.chapter.chapter.url,
-                NovelProgress.Position(
-                    documentIndex = page.index,
-                    characterOffset = NovelProgress.characterOffsetFor(fraction, length),
-                    characterLength = length,
-                ),
-            )
-        }
     }
 
     init {
@@ -970,6 +1313,35 @@ internal class NovelWebViewer(
 
         /** Last resort for a resource no extension table and no signature could classify. */
         const val OCTET_STREAM = "application/octet-stream"
+
+        /**
+         * How often the document may be asked where the reader is.
+         *
+         * A fling fires the scroll listener per frame; the answer cannot change faster than the
+         * document can reflow, and every probe is a script round trip.
+         */
+        const val PROBE_INTERVAL_MS = 150L
+
+        /**
+         * How hard a drag must push before "nowhere left to scroll" counts as trying to get past
+         * the end, and how many such pushes in a row it takes.
+         *
+         * The threshold filters the glide of a drag arriving at the edge; the count asks for a
+         * *continued* push — a reader who merely reaches the end of the book does not turn.
+         */
+        const val STUCK_SCROLL_DELTA = 8f
+
+        /** See [STUCK_SCROLL_DELTA]. */
+        const val STUCK_SCROLL_EVENTS = 3
+
+        /** One stuck-edge turn per push: a continuing drag must not machine-gun volume turns. */
+        const val STUCK_TURN_COOLDOWN_MS = 750L
+
+        /** The probe's fields, read out of its JSON encoding. */
+        val PROBE_POSITION = Regex(""""i":(-?\d+)""")
+        val PROBE_FRACTION = Regex(""""f":([0-9.]+)""")
+        val PROBE_NEAR_BOTTOM = Regex(""""nb":(\d+)""")
+        val PROBE_NEAR_TOP = Regex(""""nt":(\d+)""")
     }
 }
 

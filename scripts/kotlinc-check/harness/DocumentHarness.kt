@@ -1,7 +1,9 @@
 // Assertions for NovelDocument (the markup handed to the WebView) and NovelScrollBridge (the JS
 // contract with the loaded document). Both are deliberately Android-free, so they link directly.
 // Run via scripts/kotlinc-check/run-harness.sh document
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelContinuous
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelDocument
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelInline
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelReaderTheme
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelScrollBridge
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
@@ -27,6 +29,8 @@ private fun contains(name: String, haystack: String, needle: String) = check(nam
 private fun absent(name: String, haystack: String, needle: String) = check(name, haystack.contains(needle), false)
 
 private fun checkTrue(name: String, actual: Boolean) = check(name, actual, true)
+
+private fun containsTrue(name: String, haystack: String, needle: String) = check(name, haystack.contains(needle), true)
 
 /** Runs [EpubDoctype.strip] over a literal document. */
 private fun stripped(doc: String): String =
@@ -120,6 +124,72 @@ fun main() {
     contains("body kept", built, "これは最初の段落です。")
     contains("relative image kept", built, """src="../images/plate.jpg"""")
     contains("publisher stylesheet kept", built, """href="../style/main.css"""")
+
+    // ---------------- the continuous-reading segment marker ----------------
+    // The live document's sections each sit in one marker the probe walks; the marker for the
+    // section the document was loaded with is part of the document itself.
+    val segged = NovelDocument.build(REAL_SPINE_ITEM, t, BASE, segment = 2 to "OEBPS/Text/ch1.xhtml")
+    contains(
+        "segment opens before the content",
+        segged,
+        """<div class="kmk-seg" data-i="2" data-u="OEBPS/Text/ch1.xhtml">""",
+    )
+    checkTrue(
+        "segment wraps the body content",
+        segged.indexOf("kmk-seg") < segged.indexOf("これは最初の段落です。") &&
+            segged.indexOf("これは最初の段落です。") < segged.indexOf("</div>") &&
+            segged.indexOf("</div>") < segged.indexOf("</body>"),
+    )
+    val unsegmented = NovelDocument.build(REAL_SPINE_ITEM, t, BASE)
+    absent("no marker without a segment", unsegmented, "kmk-seg")
+
+    check("fragment extracted", NovelContinuous.bodyFragment("<html><body>HELLO</body></html>"), "HELLO")
+    check("fragment without a body is itself", NovelContinuous.bodyFragment("just text"), "just text")
+    checkTrue(
+        "wrapper carries the position",
+        NovelContinuous.wrap(3, "a b.xhtml", "X").startsWith("""<div class="kmk-seg" data-i="3" data-u="a b.xhtml">"""),
+    )
+    checkTrue("wrapper closes", NovelContinuous.wrap(3, "u.xhtml", "X").endsWith("</div>"))
+    checkTrue(
+        "append script carries the fragment quoted",
+        NovelContinuous.appendScript("<p>x</p>", 4, "u.xhtml").contains(NovelScrollBridge.quoteForJs("<p>x</p>")),
+    )
+
+    // ---------------- inlining: the book's resources travel inside the document ----------------
+    // A fetcher that knows the archive: plate.jpg and main.css resolve (the css in turn names
+    // bg.png), missing.png does not exist, and example.com is not this book's to copy.
+    val inlineDoc = (
+        "<html><head>" +
+            """<link rel="stylesheet" type="text/css" href="../style/main.css" />""" +
+            "</head><body>" +
+            """<p>hi</p><img src="../images/plate.jpg" />""" +
+            """<img src="../images/missing.png" />""" +
+            """<img src="https://example.com/x.jpg" />""" +
+            """<image xlink:href="cover.svg" />""" +
+            "</body></html>"
+        )
+    val archive = mapOf(
+        "https://book.internal/OEBPS/style/main.css" to
+            NovelInline.Resource("body{background:url(../images/bg.png)}".toByteArray(), "text/css"),
+        "https://book.internal/OEBPS/images/plate.jpg" to
+            NovelInline.Resource(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()), "image/jpeg"),
+        "https://book.internal/OEBPS/images/bg.png" to
+            NovelInline.Resource(byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47), "image/png"),
+        "https://book.internal/OEBPS/Text/cover.svg" to
+            NovelInline.Resource("<svg/>".toByteArray(), "image/svg+xml"),
+    )
+    val inlined = NovelInline.inline(inlineDoc, BASE) { url -> archive[url] }
+
+    containsTrue("image inlined", inlined, """src="data:image/jpeg;base64,/9j/"""")
+    // The stylesheet becomes a <style> whose own url() was resolved against the css's own URL.
+    containsTrue(
+        "stylesheet inlined with its url()",
+        inlined,
+        """<style>body{background:url(data:image/png;base64,iVBOR""",
+    )
+    contains("missing reference untouched", inlined, """src="../images/missing.png"""")
+    contains("external image untouched", inlined, """src="https://example.com/x.jpg"""")
+    containsTrue("svg image inlined", inlined, """xlink:href="data:image/svg+xml;base64,""")
 
     // ---------------- malformed input ----------------
     // A document that opens <head> and never closes it is common in generated EPUBs; the injection

@@ -56,8 +56,11 @@ The reader's preferences are layered on as an injected stylesheet; the document 
 
 | File | Concern |
 |------|---------|
-| `NovelWebViewer.kt` | The WebView, taps and keys, document/chapter turning, and the `ViewerProvider` that selects it |
+| `NovelWebViewer.kt` | The WebView, taps and keys, document/chapter turning, the continuous window's orchestration, and the `ViewerProvider` that selects it |
 | `NovelDocument.kt` | Turns one spine item's XHTML into a document the engine can be handed |
+| `NovelContinuous.kt` | The book as one continuous scroll: segment markers, the probe, append/prepend/trim/seek scripts. Pure strings |
+| `NovelInline.kt` | Rewrites a document's images and stylesheets into `data:` URIs. Pure |
+| `NovelFonts.kt` | Fonts the reader imported, stored and offered beside the built-in families |
 | `NovelScrollBridge.kt` | `window.KmkReader` — how the host measures and scrolls the document, and `quoteForJs` |
 | `NovelNavigation.kt` | Contents rows and search results: the pure mapping from source models to renderable ones |
 | `NovelReaderScreenModels.kt` | `NovelTocScreenModel` + `NovelSearchScreenModel` |
@@ -126,11 +129,30 @@ document's layout hostage. A 404 shows a broken image and gets out of the way.
 
 **The URL space is real `https`, on a reserved host.** A book's documents and resources live under
 `https://book.internal/…` — the `WebViewAssetLoader` pattern. It was an invented `epub-archive://`
-scheme first, and that was why "images are not rendered" outlived every fix in the resource chain:
-the platform documents that a `loadDataWithBaseURL` base "must be an HTTP(S) URL" and that WebView
+scheme first, and that was why "images are not rendered" outlived the first round of fixes: the
+platform documents that a `loadDataWithBaseURL` base "must be an HTTP(S) URL" and that WebView
 restricts resource requests using custom schemes, so `<img>`, `<link>` and `@font-face` requests
 were refused before `shouldInterceptRequest` was ever consulted. The text still rendered — which is
 what made it read as "the reader is broken" rather than "one file is missing".
+
+**A document's own images and stylesheets are inlined as `data:` URIs (`NovelInline`).** The https
+origin fixed the class of failure above and images *still* did not render on the reporting device,
+which is the point of this rule: intercepted subresource loading is the one link in the book path
+that can fail without a single log line, and it has now failed three times. So the references a
+reader actually reads — `<img>`, SVG `<image>`, and `<link rel="stylesheet">` with the `url()`s
+inside it — are resolved and embedded into the document itself before it is handed over, travelling
+the same channel as the text, which has never once failed to arrive. Per-resource and per-document
+ceilings degrade oversized books to the streaming path rather than to a missing chapter; external
+URLs are never copied. The interception path stays — for over-ceiling files and anything the
+inliner does not cover — and the two read from the same archive lease.
+
+**A reader-imported font reaches the document the same way (`NovelFonts`).** The picked file is
+copied into private storage (a SAF grant is not the document's to inherit, and the reader's own
+hardening closes `file://`), the family is stored as `user/<name>`, and the `@font-face` rides in
+the document's head as a `data:` URI — built into `NovelDocument.build`'s head and into
+`liveTypographyJs`, so a live family change re-declares the face. `quoteFamily` quotes any name
+that is not a CSS identifier: `user/My Font` unquoted would drop the whole `font-family` rule and
+the setting would silently do nothing.
 
 **Progress is a character offset, not a page index.** A page index in a reflowable document means
 something different on every device and at every font size; `NovelProgress.Position`
@@ -156,11 +178,26 @@ specific choice. The merge is in `NovelWebViewer.withReaderThemeBackground`, the
 `NovelReaderTheme`, and the subscription covers both settings so a change applies to the open
 document rather than to the next one.
 
-**A book loads a document at a time.** `TextIncrementalSource` — optional, like every interface an
-extension may or may not implement — splits the eager `getTextPageList` into `getTextPageIndex` (the
-spine, no text read) and `getTextPageText` (one document). `TextPageLoader.ensureText` reads a page's
-markup the first time the viewer shows it, and `showDocument` carries a monotonic request token so a
-stale read cannot displace a newer tap.
+**A book loads a document at a time — and then grows into a window (`NovelContinuous`).**
+`TextIncrementalSource` — optional, like every interface an extension may or may not implement —
+splits the eager `getTextPageList` into `getTextPageIndex` (the spine, no text read) and
+`getTextPageText` (one document). `TextPageLoader.ensureText` reads a page's markup the first time
+the viewer shows it, and `showDocument` carries a monotonic request token so a stale read cannot
+displace a newer tap.
+
+On top of that, the live document is the book's *continuous* scroll: every section in the DOM —
+including the one the document loaded with — sits in a `kmk-seg` marker, and a throttled probe
+(`NovelContinuous.PROBE`) walks them to report which section the viewport is over and how far in.
+Near the bottom, the next section is appended into the same DOM (`innerHTML` on a detached node,
+so a book's scripts cannot run); near the top, the previous one is prepended with the scroll
+compensation in the same synchronous script, so no frame shows the shift. The window is trimmed to
+two sections either side of the current one. The probe's report drives the same things a page
+report drives in the continuous manga viewer: the page counter (`onPageSelected`), the saved
+position, the contents sheet's marker, and the chapter-progress slider. A push that keeps trying to
+scroll past the end of the *book* — where no append can answer — turns to the next volume, the way
+the continuous manga reader runs off its last page; mid-book, "nowhere to scroll" means an append
+has not landed, and is not a turn. A tap, a button or a contents jump re-renders fresh and starts a
+new window on purpose.
 
 The settings UI for all of the above is the **Reading appearance** tab in `ReaderSettingsDialog`
 (`NovelTypographySettingsPage`), offered only while the open chapter is text — the same signal that
@@ -247,13 +284,16 @@ early while `chapter.pages` is null, which is exactly the case for a chapter not
 at either edge runs, so a button can never mean "skip the whole book" (one library chapter *is* the
 book) nor disagree with the gesture about what "next" means. Their enabled state is
 `hasNextSection`/`hasPreviousSection`, recomputed off the same state changes that repaint the bars.
-The page slider is not offered at all while a text chapter is open (`ReaderAppBars`'
-`showPageNavigator`, decided from the loader): the slider is a *page* navigator, a book's documents
-are whole chapters, and offering them as "pages 1..N" was how it came to double as the chapter
-navigator. Sequential movement is taps and the buttons; non-sequential is the contents list.
+The slider stays, as a *chapter-progress* slider (`chapterFraction` through `ReaderAppBars`, decided
+from the loader): a book has no pages to count, so the bar shows the reader's place in the chapter
+on screen as a percentage, and dragging it seeks through that chapter — `seekFraction` mutes the
+probe's write-back until the drag ends, so a slow seek cannot fight the thumb. Sequential movement
+is scrolling, taps and the buttons; non-sequential is the contents list.
 
 Resources (images, CSS, fonts) are streamed by the `TextPageLoader`'s `resourceSource` over the
-reserved `https://book.internal/` origin — see `source-epub/AGENTS.md`.
+reserved `https://book.internal/` origin — see `source-epub/AGENTS.md` — and, for the references a
+document actually reads, inlined into it by `NovelInline` (see above: the inliner and the server
+read the same archive lease).
 
 ## Page splitting
 

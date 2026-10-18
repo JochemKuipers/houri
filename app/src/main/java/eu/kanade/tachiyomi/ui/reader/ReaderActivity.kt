@@ -914,10 +914,10 @@ class ReaderActivity : BaseActivity() {
 
         // KMK --> A book is one library chapter, so the bottom navigator means something different
         // while one is open. The prev/next buttons step the book's own sections — the same decision
-        // a tap at either edge makes, volumes only at the ends — and the page slider is not offered
-        // at all: the slider is a page navigator, a book's documents are whole chapters, and offering
-        // them as pages was what made the slider double as a chapter navigator. The contents list is
-        // the chapter selector for a book.
+        // a tap at either edge makes, volumes only at the ends — and the page slider becomes a
+        // chapter-progress slider: a book has no pages to count, so the bar shows where the reader
+        // is in the chapter on screen and dragging it moves through that chapter. Chapter jumps
+        // belong to the contents list, which is what the chapter selector renders for a book.
         //
         // Decided from the loader, the same signal that chose the renderer, the Book settings tab
         // and the contents buttons — not from the viewer class, so a viewer that is momentarily
@@ -975,7 +975,9 @@ class ReaderActivity : BaseActivity() {
             onPageIndexChangeFinished = { isScrollingThroughPages = false },
             // Mihon <--
             // KMK -->
-            showPageNavigator = !isTextChapter,
+            chapterFraction = bookViewer?.scrollFraction.takeIf { isTextChapter },
+            onChapterFractionChange = { bookViewer?.seekFraction(it) },
+            onChapterFractionChangeFinished = { bookViewer?.seekFractionEnd() },
             // KMK <--
 
             readingMode = ReadingMode.fromPreference(

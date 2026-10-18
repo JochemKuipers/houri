@@ -30,9 +30,11 @@ package mihon.core.archive
  * signature is listed before a shorter one that is a prefix of it (`\u0000\u0000\u0000jP  ` before the
  * bare `\u0000\u0000\u0000\u0010jP  ` for JPEG XL, whose container prefix is shared with JPEG 2000).
  *
- * Pure, and therefore assertable off-device: `DocumentHarness` runs the whole table.
+ * Pure, and therefore assertable off-device: `DocumentHarness` runs the whole table. Public
+ * because the book renderer's inlining path (see `NovelInline`) needs the same answer the
+ * streaming path gets, from the same table rather than a second copy of it.
  */
-internal object EpubMimeSniff {
+object EpubMimeSniff {
 
     /** How many leading bytes a signature may need. */
     private const val MAX_SIGNATURE = 12

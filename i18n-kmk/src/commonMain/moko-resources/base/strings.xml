@@ -690,6 +690,9 @@
     <string name="pref_novel_font_size">Font size</string>
     <string name="pref_novel_font_scale">Font scale</string>
     <string name="pref_novel_font_family">Font</string>
+    <string name="novel_font_add">Add a font…</string>
+    <string name="novel_font_added">Font added</string>
+    <string name="novel_font_add_failed">Could not add that font</string>
     <string name="pref_novel_font_color">Font colour</string>
     <string name="pref_novel_background_color">Background colour</string>
     <string name="pref_novel_smooth_text">Smooth text</string>
