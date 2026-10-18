@@ -92,6 +92,20 @@ internal fun ReadingModePage(screenModel: ReaderSettingsScreenModel) {
             label = stringResource(MR.strings.pref_webtoon_disable_zoom_out),
             pref = screenModel.preferences.webtoonDisableZoomOut(),
         )
+
+        // Stick scroll applies to both legacy webtoon and WebGPU continuous; keep it
+        // here (resolved mode) so HQ renderer does not hide it under WebGpuViewerSettings.
+        val controllerScrollSpeed by screenModel.preferences.controllerScrollSpeed().collectAsState()
+        SliderItem(
+            value = controllerScrollSpeed,
+            valueRange = ReaderPreferences.CONTROLLER_SCROLL_SPEED_MIN..ReaderPreferences.CONTROLLER_SCROLL_SPEED_MAX,
+            label = stringResource(KMR.strings.pref_controller_scroll_speed),
+            valueString = controllerScrollSpeed.toString(),
+            onChange = {
+                screenModel.preferences.controllerScrollSpeed().set(it)
+            },
+            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+        )
     }
     // KMK <--
 
@@ -331,18 +345,6 @@ private fun WebtoonViewerSettings(
     )
 
     // KMK -->
-    val controllerScrollSpeed by screenModel.preferences.controllerScrollSpeed().collectAsState()
-    SliderItem(
-        value = controllerScrollSpeed,
-        valueRange = ReaderPreferences.CONTROLLER_SCROLL_SPEED_MIN..ReaderPreferences.CONTROLLER_SCROLL_SPEED_MAX,
-        label = stringResource(KMR.strings.pref_controller_scroll_speed),
-        valueString = controllerScrollSpeed.toString(),
-        onChange = {
-            screenModel.preferences.controllerScrollSpeed().set(it)
-        },
-        pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-    )
-
     CheckboxItem(
         label = stringResource(KMR.strings.pref_viewer_nav_smaller_tap_zone),
         pref = screenModel.preferences.smallerTapZone(),
