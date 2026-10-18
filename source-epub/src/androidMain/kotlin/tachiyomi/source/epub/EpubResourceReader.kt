@@ -16,8 +16,8 @@ import java.io.InputStream
  * and it fails silently as bare text when it is wrong. This class only knows which file a chapter
  * URL names.
  *
- * @see EpubArchiveUrls for the reserved `epub-archive://book.internal/` scheme and why the base
- *   URL is the document's own directory rather than the archive root.
+ * @see EpubArchiveUrls for the reserved `https://book.internal/` origin — real scheme, reserved
+ *   host — and why the base URL is the document's own directory rather than the archive root.
  */
 class EpubResourceReader(
     bookProvider: (SChapter) -> EpubReader?,

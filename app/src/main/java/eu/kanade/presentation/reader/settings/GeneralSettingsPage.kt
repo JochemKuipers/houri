@@ -21,6 +21,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +67,12 @@ private val flashColors = listOf(
 @Composable
 internal fun GeneralPage(screenModel: ReaderSettingsScreenModel) {
     val readerTheme by screenModel.preferences.readerTheme().collectAsState()
+
+    // KMK --> A book cannot act on the image-reader-only rows further down, and offering them
+    // anyway was a settings screen half full of switches that silently do nothing. Decided from the
+    // same loader signal that chose the renderer and the Book tab.
+    val isTextChapter by screenModel.isTextChapterFlow.collectAsState()
+    // KMK <--
 
     val flashPageState by screenModel.preferences.flashOnPageChange().collectAsState()
 
@@ -143,15 +150,25 @@ internal fun GeneralPage(screenModel: ReaderSettingsScreenModel) {
         pref = screenModel.preferences.keepScreenOn(),
     )
 
-    CheckboxItem(
-        label = stringResource(MR.strings.pref_read_with_long_tap),
-        pref = screenModel.preferences.readWithLongTap(),
-    )
+    // KMK --> The page-actions sheet this drives (set as cover, share, save image) acts on a page's
+    // bitmap, which a text page does not have.
+    if (!isTextChapter) {
+        CheckboxItem(
+            label = stringResource(MR.strings.pref_read_with_long_tap),
+            pref = screenModel.preferences.readWithLongTap(),
+        )
+    }
+    // KMK <--
 
-    CheckboxItem(
-        label = stringResource(MR.strings.pref_always_show_chapter_transition),
-        pref = screenModel.preferences.alwaysShowChapterTransition(),
-    )
+    // KMK --> Chapter transition pages are an image-viewer concept; a book runs from one document
+    // straight into the next with nothing between them to show.
+    if (!isTextChapter) {
+        CheckboxItem(
+            label = stringResource(MR.strings.pref_always_show_chapter_transition),
+            pref = screenModel.preferences.alwaysShowChapterTransition(),
+        )
+    }
+    // KMK <--
 
     // KMK -->
     val chapterCompletionSoundEnabled by screenModel.preferences.chapterCompletionSound().collectAsState()
@@ -181,46 +198,55 @@ internal fun GeneralPage(screenModel: ReaderSettingsScreenModel) {
         pref = screenModel.preferences.pageTransitions(),
     ) SY <-- */
 
-    CheckboxItem(
-        label = stringResource(MR.strings.pref_flash_page),
-        pref = screenModel.preferences.flashOnPageChange(),
-    )
+    // KMK --> The flash repaints an image between two pages; a book has no page bitmaps to repaint
+    // and no image-chapter cadence to pace, so the whole block is an image-reader feature.
+    if (!isTextChapter) {
+        CheckboxItem(
+            label = stringResource(MR.strings.pref_flash_page),
+            pref = screenModel.preferences.flashOnPageChange(),
+        )
 
-    if (flashPageState) {
-        SliderItem(
-            value = flashMillis / ReaderPreferences.MILLI_CONVERSION,
-            valueRange = 1..15,
-            label = stringResource(MR.strings.pref_flash_duration),
-            valueString = stringResource(MR.strings.pref_flash_duration_summary, flashMillis),
-            onChange = { flashMillisPref.set(it * ReaderPreferences.MILLI_CONVERSION) },
-            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        )
-        SliderItem(
-            value = flashInterval,
-            valueRange = 1..10,
-            label = stringResource(MR.strings.pref_flash_page_interval),
-            valueString = pluralStringResource(MR.plurals.pref_pages, flashInterval, flashInterval),
-            onChange = {
-                flashIntervalPref.set(it)
-            },
-            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        )
-        SettingsChipRow(MR.strings.pref_flash_with) {
-            flashColors.map { (labelRes, value) ->
-                FilterChip(
-                    selected = flashColor == value,
-                    onClick = { flashColorPref.set(value) },
-                    label = { Text(stringResource(labelRes)) },
-                )
+        if (flashPageState) {
+            SliderItem(
+                value = flashMillis / ReaderPreferences.MILLI_CONVERSION,
+                valueRange = 1..15,
+                label = stringResource(MR.strings.pref_flash_duration),
+                valueString = stringResource(MR.strings.pref_flash_duration_summary, flashMillis),
+                onChange = { flashMillisPref.set(it * ReaderPreferences.MILLI_CONVERSION) },
+                pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            )
+            SliderItem(
+                value = flashInterval,
+                valueRange = 1..10,
+                label = stringResource(MR.strings.pref_flash_page_interval),
+                valueString = pluralStringResource(MR.plurals.pref_pages, flashInterval, flashInterval),
+                onChange = {
+                    flashIntervalPref.set(it)
+                },
+                pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            )
+            SettingsChipRow(MR.strings.pref_flash_with) {
+                flashColors.map { (labelRes, value) ->
+                    FilterChip(
+                        selected = flashColor == value,
+                        onClick = { flashColorPref.set(value) },
+                        label = { Text(stringResource(labelRes)) },
+                    )
+                }
             }
         }
     }
+    // KMK <--
 
     // SY -->
-    CheckboxItem(
-        label = stringResource(SYMR.strings.auto_webtoon_mode),
-        pref = screenModel.preferences.useAutoWebtoon(),
-    )
+    // KMK --> Auto-webtoon picks a viewer for image chapters; a book's viewer is fixed.
+    if (!isTextChapter) {
+        CheckboxItem(
+            label = stringResource(SYMR.strings.auto_webtoon_mode),
+            pref = screenModel.preferences.useAutoWebtoon(),
+        )
+    }
+    // KMK <--
     // SY <--
 }
 

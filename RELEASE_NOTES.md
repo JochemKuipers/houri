@@ -51,6 +51,11 @@ files moved. See .github/scripts/release_notes.py.
   dead button.
 
 ### Improve
+- **A book's settings only offer what a book can use.** While reading an epub, the reader's settings
+  were the manga reader's: scale types, crop borders, page spreads, tap-zone layouts, page flash,
+  chapter transitions, colour filters — none of which do anything to text, and several of which
+  were visible for no reason. A book now shows General, trimmed to the options that apply, plus its
+  own Reading appearance tab, and nothing it cannot act on.
 - **The book reader can be navigated at all.** Taps, swipes and volume keys did nothing in an EPUB, so
   a chapter with no text on the first screen — which is what most books open on, since their first
   file is usually the cover — left you stuck. Tapping an edge now moves, tapping the middle opens the
@@ -136,11 +141,21 @@ files moved. See .github/scripts/release_notes.py.
   colour standing, so a dark page meant dark text on it — unreadable, and with nothing in the
   settings to suggest why. Choosing a page colour now also chooses a text colour that contrasts
   with it, unless you picked a text colour yourself.
-- **Illustrations, stylesheets and embedded fonts render again.** A book's file without a
-  conventional extension — a cover named by a query string, a WebP, an image stored as `.bin` — was
-  handed to the renderer with a type it refuses to decode, so it silently did not appear while the
-  page around it did. Files are now identified by their contents when their name does not say.
-- **Reaching the end of a page now turns it.** The reader decided a tap should turn by asking "did
-  the page move?", and a page with nowhere left to scroll answers "no" — so the last screen of a
-  section could only be left with the chapter buttons. The reader now asks *which* end the
-  document ran out of room at, and turns that way.
+- **A book's illustrations, stylesheets and embedded fonts render.** Books were being shown at a
+  made-up internal address, and the reader's engine only loads the files a page asks for — its
+  images, its fonts, its own styling — when the page's address is a real web one. Every file a
+  book asked for was being refused before the reader ever saw the request, so a novel showed its
+  text and nothing else, with no error anywhere: the reader looked simply broken rather than short
+  one illustration. Books now live at a reserved address the engine accepts. (A file without a
+  conventional extension — a WebP, an image stored as `.bin` — is also identified by its contents
+  when its name does not say.)
+- **Reaching the end of a section now turns it.** A tap's job — scroll, and turn the page when
+  there is nothing left to scroll — was delegated to a script inside the book's own page, and when
+  that script did not run, every tap silently did nothing: the page slider was the only way from
+  one chapter of a book to the next. Turning is now decided by the reader itself, so it cannot be
+  disabled by the book, the engine, or anything else.
+- **The black background works on books, and a dark background no longer hides the text.** Choosing
+  black in the reader's general settings painted only the window behind the page and left the
+  book's own text colour standing — which for most books is black text on a black page, i.e.
+  invisible. A dark background now colours the page itself and the text switches to the colour
+  that reads on it. A page colour you picked yourself in the Reading appearance tab still wins.

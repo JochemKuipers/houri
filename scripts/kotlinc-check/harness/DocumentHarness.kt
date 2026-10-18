@@ -2,6 +2,7 @@
 // contract with the loaded document). Both are deliberately Android-free, so they link directly.
 // Run via scripts/kotlinc-check/run-harness.sh document
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelDocument
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelReaderTheme
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelScrollBridge
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
 import mihon.core.archive.EpubArchiveUrls
@@ -48,7 +49,7 @@ private val REAL_SPINE_ITEM = """
 """.trimIndent()
 
 /** The document sits in `OEBPS/Text`, so `../style/main.css` has to resolve to `OEBPS/style/main.css`. */
-private const val BASE = "epub-archive://book.internal/OEBPS/Text/"
+private const val BASE = "https://book.internal/OEBPS/Text/"
 
 fun main() {
     val t = NovelTypography.DEFAULT
@@ -144,8 +145,8 @@ fun main() {
     checkTrue("empty still has the base", empty.contains("""<base href="$BASE">"""))
 
     // The base url is escaped, so a directory name with a quote cannot break out of the attribute.
-    val quoted = NovelDocument.build("<p>x</p>", t, """epub-archive://book.internal/OEBPS/a"b/""")
-    check("base attribute escaped", quoted.contains("""<base href="epub-archive://book.internal/OEBPS/a&quot;b/">"""), true)
+    val quoted = NovelDocument.build("<p>x</p>", t, """https://book.internal/OEBPS/a"b/""")
+    check("base attribute escaped", quoted.contains("""<base href="https://book.internal/OEBPS/a&quot;b/">"""), true)
 
     // ---------------- redirects ----------------
     // A <meta http-equiv="refresh"> is honoured by the engine with no involvement from the host, so a
@@ -187,17 +188,22 @@ fun main() {
     val script = NovelScrollBridge.BRIDGE_SCRIPT
     checkTrue("bridge guards against double install", script.contains("if (window.KmkReader) return"))
     checkTrue("bridge exposes fraction", script.contains("fraction"))
-    checkTrue("bridge reports real movement", script.contains("return self.top() - before"))
+    // Turning no longer goes through the bridge — see NovelScrollBridge's own doc for the reported
+    // failure that ended that — so what it carries now is exactly the measurements only the laid-out
+    // document can answer. Scrolling among them would be the first step back to a tap that can
+    // silently do nothing.
+    checkTrue("bridge no longer scrolls", !script.contains("scrollViewport"))
+    checkTrue("bridge no longer probes edges", !script.contains("edge"))
 
     // evaluateJavascript hands back the JSON encoding, so a script returning NaN arrives as "null".
-    // Reading that as anything but "no movement" turns the document on every tap at a page edge.
+    // Reading that as anything but "no value" breaks the position save on every document.
     check("parses a number", NovelScrollBridge.number("42.5"), 42.5)
     check("parses zero", NovelScrollBridge.number("0"), 0.0)
-    check("null means no movement", NovelScrollBridge.number("null"), 0.0)
-    check("undefined means no movement", NovelScrollBridge.number("undefined"), 0.0)
-    check("empty means no movement", NovelScrollBridge.number(""), 0.0)
-    check("garbage means no movement", NovelScrollBridge.number("{\"a\":1}"), 0.0)
-    check("absent means no movement", NovelScrollBridge.number(null), 0.0)
+    check("null means no value", NovelScrollBridge.number("null"), 0.0)
+    check("undefined means no value", NovelScrollBridge.number("undefined"), 0.0)
+    check("empty means no value", NovelScrollBridge.number(""), 0.0)
+    check("garbage means no value", NovelScrollBridge.number("{\"a\":1}"), 0.0)
+    check("absent means no value", NovelScrollBridge.number(null), 0.0)
 
     // The restore snippet carries a substitution, so a broken template would silently do nothing.
     checkTrue("set fraction is templated", NovelScrollBridge.SET_FRACTION.contains("%f"))
@@ -402,8 +408,8 @@ fun main() {
     // between them is not detectable by reading either one. It has to be asserted.
     check("root document base url", EpubArchiveUrls.documentBaseUrl(null), EpubArchiveUrls.BASE_URL)
     check("blank href falls back to root", EpubArchiveUrls.documentBaseUrl("   "), EpubArchiveUrls.BASE_URL)
-    check("fragment stripped", EpubArchiveUrls.documentBaseUrl("OEBPS/a.xhtml#top"), "epub-archive://book.internal/OEBPS/")
-    check("query stripped", EpubArchiveUrls.documentBaseUrl("OEBPS/a.xhtml?x=1"), "epub-archive://book.internal/OEBPS/")
+    check("fragment stripped", EpubArchiveUrls.documentBaseUrl("OEBPS/a.xhtml#top"), "https://book.internal/OEBPS/")
+    check("query stripped", EpubArchiveUrls.documentBaseUrl("OEBPS/a.xhtml?x=1"), "https://book.internal/OEBPS/")
 
     // The single most consequential line in the EPUB path: a spine item must load at the directory
     // that *contains* it, or every relative reference in the book 404s and it renders as bare text.
@@ -413,12 +419,12 @@ fun main() {
     check(
         "document base url is the document's directory",
         EpubArchiveUrls.documentBaseUrl("OEBPS/chapter1.xhtml"),
-        "epub-archive://book.internal/OEBPS/",
+        "https://book.internal/OEBPS/",
     )
     check(
         "a document nested deeper keeps every level",
         EpubArchiveUrls.documentBaseUrl("OEBPS/Text/chapter1.xhtml"),
-        "epub-archive://book.internal/OEBPS/Text/",
+        "https://book.internal/OEBPS/Text/",
     )
     check(
         "a document at the root needs no directory",
@@ -428,7 +434,7 @@ fun main() {
     check(
         "a trailing slash is not treated as the file",
         EpubArchiveUrls.documentBaseUrl("OEBPS/chapter1/"),
-        "epub-archive://book.internal/OEBPS/",
+        "https://book.internal/OEBPS/",
     )
 
     // A `..` in a producer's href must not walk the base URL off the reserved host. Note what the
@@ -437,20 +443,36 @@ fun main() {
     // somewhere the renderer will not be served leaves every relative reference unresolvable.
     val escaped = EpubArchiveUrls.documentBaseUrl("OEBPS/../../etc/passwd")
     checkTrue("traversal stays on the reserved host", escaped.startsWith(EpubArchiveUrls.BASE_URL))
-    check("traversal is normalised, not preserved", escaped, "epub-archive://book.internal/etc/")
+    check("traversal is normalised, not preserved", escaped, "https://book.internal/etc/")
 
     val climbedToRoot = EpubArchiveUrls.documentBaseUrl("a/b/../../../x.xhtml")
     checkTrue("climbing past the root clamps", climbedToRoot.startsWith(EpubArchiveUrls.BASE_URL))
 
-    checkTrue("archive url recognised", EpubArchiveUrls.isArchiveUrl("epub-archive://book.internal/OEBPS/a.png"))
+    // The scheme is plain https now, so the host is the only thing separating the book's own
+    // resources from the real web. That is the pair of assertions below, and the second one is
+    // load-bearing: claiming every https URL would silently swallow every genuinely external
+    // image, stylesheet and footnote a book points at.
+    checkTrue("archive url recognised", EpubArchiveUrls.isArchiveUrl("https://book.internal/OEBPS/a.png"))
     checkTrue("external url refused", EpubArchiveUrls.isArchiveUrl("https://example.com/a.png").not())
+    checkTrue("scheme is a real web scheme", EpubArchiveUrls.BASE_URL.startsWith("https://"))
+    checkTrue("host is the reserved one", EpubArchiveUrls.BASE_URL.startsWith("https://book.internal/"))
 
-    check("archive path extracted", EpubArchiveUrls.archivePathOf("epub-archive://book.internal/OEBPS/a.png"), "OEBPS/a.png")
-    check("archive path percent-decoded", EpubArchiveUrls.archivePathOf("epub-archive://book.internal/OEBPS/My%20a.png"), "OEBPS/My a.png")
-    check("fragment dropped", EpubArchiveUrls.archivePathOf("epub-archive://book.internal/OEBPS/a.xhtml#s1"), "OEBPS/a.xhtml")
-    check("traversal normalised", EpubArchiveUrls.archivePathOf("epub-archive://book.internal/OEBPS/../a.png"), "a.png")
+    check("archive path extracted", EpubArchiveUrls.archivePathOf("https://book.internal/OEBPS/a.png"), "OEBPS/a.png")
+    check("archive path percent-decoded", EpubArchiveUrls.archivePathOf("https://book.internal/OEBPS/My%20a.png"), "OEBPS/My a.png")
+    check("fragment dropped", EpubArchiveUrls.archivePathOf("https://book.internal/OEBPS/a.xhtml#s1"), "OEBPS/a.xhtml")
+    check("traversal normalised", EpubArchiveUrls.archivePathOf("https://book.internal/OEBPS/../a.png"), "a.png")
     check("external url has no archive path", EpubArchiveUrls.archivePathOf("https://example.com/a.png"), null)
-    check("garbage has no archive path", EpubArchiveUrls.archivePathOf("epub-archive://book.internal/"), null)
+    check("garbage has no archive path", EpubArchiveUrls.archivePathOf("https://book.internal/"), null)
+
+    // ---------------- the general reader theme, as the book sees it ----------------
+    // A dark reader theme has to reach the document as a background (the existing
+    // effectiveFontColor rule then derives a text colour that contrasts with it), and a light one
+    // must reach it as nothing at all — "white" forced into the cascade would strip a publisher's
+    // own dark plate for no benefit. The colours are the app's reader-theme palette: pure black,
+    // the reader gray, and the white that means "no opinion".
+    check("black theme becomes the book's background", NovelReaderTheme.backgroundHex(0xFF000000.toInt()), "#000000")
+    check("gray theme becomes the book's background", NovelReaderTheme.backgroundHex(0xFF202125.toInt()), "#202125")
+    check("white theme forces nothing", NovelReaderTheme.backgroundHex(0xFFFFFFFF.toInt()), null)
 
     // Content types are load-bearing for the renderer, not conventional: a stylesheet served as
     // text/plain is ignored and the book loses its own appearance with no error anywhere.

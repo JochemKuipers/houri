@@ -48,7 +48,7 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
              -name 'EpubPaths.kt' -o -name 'EpubBook.kt' \
              -o -name 'NovelTypography.kt' -o -name 'NovelTypographyCss.kt' -o -name 'NovelProgress.kt' \
              -o -name 'NovelDocument.kt' -o -name 'NovelScrollBridge.kt' \
-             -o -name 'NovelNavigation.kt' \
+             -o -name 'NovelNavigation.kt' -o -name 'NovelReaderTheme.kt' \
         2>/dev/null | sort -u
     )
     # EpubDoctype carries the XXE defence that EpubXmlReader applies, and EpubArchiveUrls is the URL

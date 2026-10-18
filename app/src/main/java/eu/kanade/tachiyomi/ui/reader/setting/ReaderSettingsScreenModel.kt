@@ -45,13 +45,18 @@ class ReaderSettingsScreenModel(
     /**
      * Whether the chapter on screen has pages to colour-filter.
      *
-     * A text chapter has none: there is no bitmap, and a filter applied to one would be a setting that
-     * silently does nothing. Distinct from [isTextChapterFlow] on purpose — the two are read
-     * independently rather than as one flag, so a chapter that is somehow both does not end up with
-     * neither tab.
+     * A text chapter has none, and that is decided from the loader rather than from the page count:
+     * a book's documents *are* its entries in the page list, so "pages is non-empty" is true of a
+     * novel too — and gating the colour tab on that alone offered a colour filter with no bitmap to
+     * filter, every time an EPUB was opened. Distinct from [isTextChapterFlow] on purpose — the two
+     * are read independently rather than as one flag, so a chapter that is somehow neither (its
+     * pages are still loading) keeps the base tabs rather than losing one.
      */
     val hasPagesFlow: StateFlow<Boolean> = readerState
-        .map { it.currentChapter?.pages?.isNotEmpty() == true }
+        .map { state ->
+            val chapter = state.currentChapter
+            chapter?.pageLoader !is TextPageLoader && chapter?.pages?.isNotEmpty() == true
+        }
         .distinctUntilChanged()
         .stateIn(ioCoroutineScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), false)
     // KMK <--

@@ -62,6 +62,7 @@ The reader's preferences are layered on as an injected stylesheet; the document 
 | `NovelNavigation.kt` | Contents rows and search results: the pure mapping from source models to renderable ones |
 | `NovelReaderScreenModels.kt` | `NovelTocScreenModel` + `NovelSearchScreenModel` |
 | `NovelTypography.kt` | The settings value. No Android imports, so it is unit-testable |
+| `NovelReaderTheme.kt` | The general reader theme's background, as the book's stylesheet can use it |
 | `NovelTypographyCss.kt` | Turns that value into a stylesheet; `styleTag` escapes `</` |
 | `NovelProgress.kt` | Reading position and percentage progress |
 
@@ -103,18 +104,33 @@ silently outrank ours.
 
 **The bridge is a `<script>`, and its result is JSON.** `evaluateJavascript` hands back the *JSON
 encoding* of the script's return value, so a script returning `NaN` arrives as the five characters
-`null`. `NovelScrollBridge.number` has to read that as "no movement", or every tap near a page edge
-turns the document instead of doing nothing.
+`null`. `NovelScrollBridge.number` has to read that as "no value", or the position save breaks on
+every document.
 
-**Turning asks which edge the document ran out at, not whether it moved.** "No movement" is ambiguous
-twice over: a scroll with nowhere left to go answers it, and so does a scroll that simply did nothing.
-`window.KmkReader.edge()` returns `0` middle, `1` top, `2` bottom, `3` whole-document-fits, and `step`
-turns only on the edge it actually ran out at — so a tap that did nothing still does nothing, and the
-last screen of a section still turns.
+**Turning is decided by the host, natively — never by asking the document.** A tap scrolls
+`WebView.scrollBy` and reads `scrollY` back after a `post`: no movement means the document ran out
+of room in the tapped direction, and the document turns. This used to be two `evaluateJavascript`
+round trips through the injected bridge, which made turning depend on the book's own `<script>`
+having run — and where it did not, every tap silently did nothing and the page navigator was the
+only way from one chapter to the next, which is exactly how it was reported. The bridge survives
+only for what the *laid-out document* alone can answer: the fraction a reading position is stored
+as, and the element a contents entry names. Both degrade to nothing without the bridge, which is
+survivable — a book opens at the top of a section instead of where it was left. A document that
+has not laid out yet (`contentHeight` 0) answers every scroll with "no movement", so turning is
+guarded on it — turning on that reading is what skipped a document on the first tap of a
+freshly-opened book.
 
 **A missing resource answers 404, not null.** `shouldInterceptRequest` returning null hands the URL
-back to the platform, which then waits on a scheme nothing handles — so one missing plate holds the
+back to the platform, which then waits on a request nothing answers — so one missing plate holds the
 document's layout hostage. A 404 shows a broken image and gets out of the way.
+
+**The URL space is real `https`, on a reserved host.** A book's documents and resources live under
+`https://book.internal/…` — the `WebViewAssetLoader` pattern. It was an invented `epub-archive://`
+scheme first, and that was why "images are not rendered" outlived every fix in the resource chain:
+the platform documents that a `loadDataWithBaseURL` base "must be an HTTP(S) URL" and that WebView
+restricts resource requests using custom schemes, so `<img>`, `<link>` and `@font-face` requests
+were refused before `shouldInterceptRequest` was ever consulted. The text still rendered — which is
+what made it read as "the reader is broken" rather than "one file is missing".
 
 **Progress is a character offset, not a page index.** A page index in a reflowable document means
 something different on every device and at every font size; `NovelProgress.Position`
@@ -129,6 +145,17 @@ settings screen re-lays-out a book nobody reopens and the reader concludes the s
 The job is cancelled in `destroy()`, because the activity's scope outlives a viewer that a
 reading-mode switch has already torn down.
 
+**The general reader theme's background reaches the book, through the appearance tab's value.** The
+novel viewer merges `readerTheme`'s colour into the typography it applies: a dark theme (black, gray,
+automatic-in-dark) becomes the document's `background-color`, and the existing
+`effectiveFontColor` rule derives a contrasting text colour from it — choosing *black* in the
+general settings used to paint only the window behind a transparent WebView, leaving the
+publisher's own black text invisible on it. A white theme forces nothing (white is "no opinion";
+the container already shows white), and an appearance-tab page colour always wins as the more
+specific choice. The merge is in `NovelWebViewer.withReaderThemeBackground`, the policy in
+`NovelReaderTheme`, and the subscription covers both settings so a change applies to the open
+document rather than to the next one.
+
 **A book loads a document at a time.** `TextIncrementalSource` — optional, like every interface an
 extension may or may not implement — splits the eager `getTextPageList` into `getTextPageIndex` (the
 spine, no text read) and `getTextPageText` (one document). `TextPageLoader.ensureText` reads a page's
@@ -140,6 +167,15 @@ The settings UI for all of the above is the **Reading appearance** tab in `Reade
 chose the renderer. Its rows are hand-built from `presentation-core`'s `SettingsItems` rather than the
 settings framework: the values are floats the stylesheet reads as page fractions, and tri-states,
 which the framework's int-slider and switch helpers cannot express.
+
+**While a book is open, the settings sheet offers only what a book can use.** The reading-mode tab
+is not offered at all (a book's renderer is fixed; every row there — scale types, crop, spreads,
+per-viewer tap layouts — is an image-reader setting that would silently do nothing), the colour
+filter waits for actual bitmap pages (`hasPagesFlow` excludes text, because a book's documents *are*
+its page-list entries and a count alone cannot tell the two apart), and the general tab drops its
+image-reader rows (long-tap page actions, chapter transitions, page flash, auto webtoon). What
+remains — background theme, page number, navigator layout, fullscreen, keep-screen-on, completion
+sounds — is everything a book can act on, beside its own Reading appearance tab.
 
 ## Contents and search
 
@@ -207,7 +243,7 @@ which reuses the same `loadAdjacent` path the toolbar buttons use. Not `onPageSe
 early while `chapter.pages` is null, which is exactly the case for a chapter not yet loaded.
 
 Resources (images, CSS, fonts) are streamed by the `TextPageLoader`'s `resourceSource` over the
-reserved `epub-archive://book.internal/` scheme — see `source-epub/AGENTS.md`.
+reserved `https://book.internal/` origin — see `source-epub/AGENTS.md`.
 
 ## Page splitting
 

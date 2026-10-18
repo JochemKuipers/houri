@@ -28,8 +28,12 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerProvider
+import eu.kanade.tachiyomi.util.system.readerBackgroundColor
 import exh.log.xLogE
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
@@ -57,10 +61,16 @@ import kotlin.math.abs
  *
  * Each document is loaded at the base URL its source asks for
  * ([eu.kanade.tachiyomi.source.text.TextBaseUrlSource]) — for an EPUB that is the **directory the
- * document sits in**, not the root of the archive. Requests to that scheme are intercepted and streamed
+ * document sits in**, not the root of the archive. Requests to that origin are intercepted and streamed
  * out of the archive, which is what makes `<img src="../images/plate.jpg">` resolve inside a zip file.
  * Requests to any other host are deliberately **not** intercepted, so an absolutely-linked image or an
  * external stylesheet still loads normally.
+ *
+ * The origin is `https://book.internal/` — a *real* scheme on a reserved host, because the engine only
+ * dispatches subresource requests for a document whose base URL is http(s). An invented scheme here
+ * was why illustrations, stylesheets and embedded fonts never arrived: the document rendered, and
+ * every file it asked for was refused before interception was ever consulted. See
+ * [mihon.core.archive.EpubArchiveUrls] for the whole account.
  *
  * Getting that base wrong is invisible and total: every relative reference lands one or two levels from
  * where the publisher meant it, so the stylesheets, illustrations and embedded fonts all 404 and the
@@ -72,8 +82,10 @@ import kotlin.math.abs
  * | Concern | Owner |
  * |---|---|
  * | the markup handed to the engine | [NovelDocument] |
- * | measuring and scrolling the document | [NovelScrollBridge] |
+ * | turning a screen at a tap, and deciding when a document has run out of room | this class, natively — `scrollBy`/`scrollY`, no scripting involved |
+ * | fractions and anchors — the measurements only the laid-out document can answer | [NovelScrollBridge] |
  * | typography and per-chapter positions | [NovelTypographyPreferences] |
+ * | the general reader theme's background, as the book sees it | [NovelReaderTheme] |
  * | the stylesheet itself | [NovelTypographyCss] |
  *
  * // KMK -->
@@ -179,14 +191,52 @@ internal class NovelWebViewer(
     /** Cancelled in [destroy]: the typography subscription outlives the viewer otherwise. */
     private var typographyJob: Job? = null
 
-    /** Typography, republished from settings. Changing it re-applies in place, no reload. */
-    var typography by mutableStateOf(NovelTypography.DEFAULT)
+    /**
+     * Typography, republished from settings. Changing it re-applies in place, no reload.
+     *
+     * Seeded at construction with [withReaderThemeBackground] rather than plain
+     * [NovelTypographyPreferences.typography], because the first document renders with whatever this
+     * holds — a seed taken without the reader theme would paint the first page with the reader's own
+     * `black` background and the publisher's own `black` text standing on it, which is exactly the
+     * unreadable combination the merge exists to prevent.
+     */
+    var typography by mutableStateOf(withReaderThemeBackground(currentTypography()))
+
+    /**
+     * The typography the settings hold, with the general reader theme's background standing in when
+     * the appearance tab chose none.
+     *
+     * The general tab's background (black / gray / automatic) is a preference the novel viewer used
+     * to ignore entirely: it painted the *container* behind the WebView but left the document to the
+     * publisher's own colours, so choosing `black` there left the book's own black text standing on
+     * a black page — reported as "the text disappears". A dark theme background therefore flows into
+     * the document as a `background-color`, and the stylesheet's existing
+     * [NovelTypography.effectiveFontColor] rule derives a contrasting text colour from it — no new
+     * colour logic, the one that already existed is simply allowed to see the background.
+     *
+     * A white theme stays null on purpose: white is the absence of a reader opinion (the transparent
+     * WebView over the white container already reads as white), and forcing `background-color: white
+     * !important` for it would override a publisher's dark plate for no benefit. An appearance-tab
+     * background always wins — it is the more specific choice, made in the tab that shows a preview.
+     */
+    private fun withReaderThemeBackground(value: NovelTypography): NovelTypography {
+        if (value.backgroundColor != null) return value
+        val fromTheme = NovelReaderTheme.backgroundHex(
+            activity.readerBackgroundColor(readerPrefs.readerTheme().get()),
+        ) ?: return value
+        return value.copy(backgroundColor = fromTheme)
+    }
+
+    /** The typography the settings hold right now, sanitized, never null. */
+    private fun currentTypography(): NovelTypography =
+        runCatching { novelPrefs.typography() }.getOrDefault(NovelTypography.DEFAULT)
 
     /**
      * Reader-controlled background, applied to the WebView itself as well as the document.
      *
      * A WebView whose content is black but whose overscroll glow is white reads as a rendering bug, so
-     * this goes on both.
+     * this goes on both. Follows [typography], so the general reader theme reaches it through the
+     * merge above.
      */
     private val backgroundColor: Int
         get() = typography.backgroundColor?.toColorIntOrNull() ?: Color.TRANSPARENT
@@ -508,65 +558,43 @@ internal class NovelWebViewer(
      * One unit of forward or backward reading: scroll a screen, or turn the document when there is no
      * screen left to scroll.
      *
-     * The decision is made **inside** the JavaScript callback, not after it. `evaluateJavascript` posts
-     * its result to the UI thread's queue rather than answering inline, so a caller that asked "did that
-     * move?" on the line after the call always got "no" and turned the document on every tap, however far
-     * down the page the reader actually was.
+     * ### Why the scroll and the verdict are the host's, not the document's
      *
-     * ### Why a scroll that did not move is not on its own a reason to turn
+     * This used to be two `evaluateJavascript` round trips — scroll through the bridge's
+     * `scrollViewport`, then ask the bridge's `edge()` which way the document had run out of room —
+     * which made turning depend on the document's own `<script>` having run and on the engine
+     * answering host evaluations. Where either did not happen, every tap did nothing: no scroll
+     * mid-document, no turn at either end, and the page navigator was left the only way from one
+     * chapter to the next. A WebView's scroll position is not a secret the document holds —
+     * [WebView.scrollY] can be read and [WebView.scrollBy] driven from here, neither of which
+     * involves scripting — so turning is decided natively now. The bridge remains for what only the
+     * document can know: fractions for the reading position and anchors from the contents.
      *
-     * It used to be, and the same test had to mean both "at the end" and "at the beginning", which it
-     * cannot: a tap that failed for either reason turned *forward*. The reported symptom was that
-     * reaching the end of a document needed the page navigator, because the document could not tell
-     * the host which end had been reached.
-     *
-     * So the host asks, once, with [NovelScrollBridge.EDGE], and acts on the answer:
+     * The verdict is taken **after** the scroll, from a `post`, not on the line after it: a scroll
+     * that has not settled yet reads as "did not move" and would turn the document on a tap that was
+     * about to scroll.
      *
      * | Where the document is | Backward tap | Forward tap |
      * |---|---|---|
-     * | at the top | previous document | scroll |
-     * | in the middle | scroll | scroll |
-     * | at the bottom | scroll | next document |
-     * | one screen tall | previous document | next document |
-     * | no bridge | nothing | nothing |
+     * | room to scroll this way | scroll | scroll |
+     * | nowhere left this way | previous document | next document |
+     * | fits on one screen | previous document | next document |
+     * | not laid out yet | nothing | nothing |
      *
-     * "No bridge" deliberately does nothing. The bridge is installed by the document itself, so its
-     * absence means the document has not parsed yet — and turning on that reading is what skipped a
-     * document on the first tap of a freshly-opened book.
-     *
-     * Everything reached from these callbacks runs on the UI thread and only ever starts another load,
-     * which is what makes it safe to call from here.
+     * "Not laid out yet" is guarded rather than inferred: a WebView with no content answers every
+     * scroll with "did not move", and reading that as an edge turned the document on the first tap of
+     * a freshly-opened book — which is how a book got skipped before its first screen was ever seen.
      */
     private fun step(volumeForward: Boolean) {
-        val script = if (volumeForward) {
-            NovelScrollBridge.SCROLL_BY_VIEWPORT
-        } else {
-            NovelScrollBridge.SCROLL_BACK_BY_VIEWPORT
-        }
+        if (webView.height <= 0 || webView.contentHeight <= 0) return
 
-        webView.evaluateJavascript(script) { raw ->
-            if (abs(NovelScrollBridge.number(raw)) > MIN_MOVEMENT_PX) return@evaluateJavascript
-            turnAtEdge(volumeForward)
-        }
-    }
+        val before = webView.scrollY
+        val by = (webView.height * 0.9f).toInt() * if (volumeForward) 1 else -1
+        webView.scrollBy(0, by)
 
-    /**
-     * Asks the document which way it has run out of room and turns, if it has.
-     *
-     * A second round trip rather than a second column in the first script's result, because the first
-     * script's whole job is to move the document and its answer has to be read before the move is
-     * judged; asking again afterwards is the only ordering that cannot see a stale position.
-     */
-    private fun turnAtEdge(volumeForward: Boolean) {
-        webView.evaluateJavascript(NovelScrollBridge.EDGE) { raw ->
-            when (NovelScrollBridge.number(raw).toInt()) {
-                // Nowhere left to go this way.
-                EDGE_AT_TOP -> retreatDocument()
-                EDGE_AT_BOTTOM -> advanceDocument()
-                // A document that fits on one screen has no "middle"; either tap leaves it.
-                EDGE_WHOLE_DOCUMENT -> if (volumeForward) advanceDocument() else retreatDocument()
-                // In the middle of the document, or no bridge to ask. Neither is a reason to turn.
-                else -> Unit
+        webView.post {
+            if (abs(webView.scrollY - before) < MIN_MOVEMENT_PX) {
+                if (volumeForward) advanceDocument() else retreatDocument()
             }
         }
     }
@@ -755,10 +783,16 @@ internal class NovelWebViewer(
 
         override fun onPageFinished(view: WebView, url: String) {
             super.onPageFinished(view, url)
+            val askedFor = currentBaseUrl ?: return
             // Only the document that was asked for counts. Applying a pending position to some other
             // document would scroll to an offset measured against a completely different layout, and
             // the reader would land mid-sentence with no way to explain it.
-            if (url != currentBaseUrl) return
+            //
+            // Compared percent-decoded: a directory the book's own producer named in non-ASCII comes
+            // back from the engine percent-encoded, and a raw string comparison would then mistake
+            // the document that was asked for somebody else's - silently skipping the restore, the
+            // contents jump and the position save that all hang off this check.
+            if (EpubArchiveUrls.percentDecode(url) != EpubArchiveUrls.percentDecode(askedFor)) return
             applyPendingPosition()
             // Re-assert typography in the live DOM too, so the injected stylesheet and the running
             // document cannot drift apart after a self-navigation.
@@ -859,14 +893,26 @@ internal class NovelWebViewer(
     }
 
     init {
-        // Typography is read once at construction so the first document is never painted unstyled, and
-        // then observed. Without the observation the settings screen re-lays-out a book nobody reopens,
-        // and the reader quite reasonably concludes the setting does nothing.
+        // Typography is read once at construction (into the seed of [typography], before anything
+        // renders) and then observed from two places, because two settings pages can move it:
+        //
+        //  - the Reading appearance tab, which hands over the whole new value;
+        //  - the general tab's reader theme, which only chooses a background — so the current
+        //    appearance value is re-read and re-merged, and the two can never disagree about
+        //    which background a page wears.
+        //
+        // Without the second subscription the theme choice applied to the *next* document only,
+        // which for a reader who opened the settings mid-book is "the setting did nothing".
         //
         // Started here rather than handed in, so the subscription ends with the viewer: the activity's
         // scope outlives a viewer that a reading-mode switch has already destroyed.
         typographyJob = activity.lifecycleScope.launch {
-            novelPrefs.changes().collect { value ->
+            merge(
+                novelPrefs.changes().map(::withReaderThemeBackground),
+                readerPrefs.readerTheme().changes().drop(1).map {
+                    withReaderThemeBackground(currentTypography())
+                },
+            ).collect { value ->
                 typography = value
                 applyTypography()
             }
@@ -882,26 +928,20 @@ internal class NovelWebViewer(
         /** Pixels of scroll before a drag counts as "the reader is reading", and hides the menu. */
         const val MIN_SCROLL_TO_HIDE_MENU = 8f
 
-        /** Below this, a "scroll" is the engine clamping at a document edge, not real movement. */
-        const val MIN_MOVEMENT_PX = 0.5
+        /**
+         * Below this, a "scroll" is the engine clamping at a document edge, not real movement.
+         *
+         * In view pixels, read against `WebView.scrollY` before and after a [step]: one rather
+         * than zero because a clamped scroll can still settle a fraction of a pixel away from the
+         * position it started from.
+         */
+        const val MIN_MOVEMENT_PX = 1
 
         /** How far the reader must travel before the position is written again. */
         const val SAVE_THRESHOLD = 0.02f
 
         /** Last resort for a resource no extension table and no signature could classify. */
         const val OCTET_STREAM = "application/octet-stream"
-
-        /**
-         * Answers of [NovelScrollBridge.EDGE], named so the turn logic reads as a table rather than
-         * as magic numbers.
-         */
-        const val EDGE_AT_TOP = 1
-
-        /** Room in both directions: a scroll, not a turn. Also the "no bridge" answer. */
-        const val EDGE_MIDDLE = 0
-
-        const val EDGE_AT_BOTTOM = 2
-        const val EDGE_WHOLE_DOCUMENT = 3
     }
 }
 
@@ -978,11 +1018,13 @@ object NovelViewerProvider : ViewerProvider {
             loader = loader,
             readerPrefs = globalAppGraph.readerPreferences,
             novelPrefs = globalAppGraph.novelTypographyPreferences,
-        ).apply {
-            // Applied before the first page renders, so the document is never painted unstyled and then
-            // restyled - that flash is what makes a reader think the typography is broken.
-            typography = runCatching { globalAppGraph.novelTypographyPreferences.typography() }
-                .getOrDefault(NovelTypography.DEFAULT)
-        }
+        )
+        // KMK --> No typography is handed in here any more: the viewer seeds its own state at
+        // construction, because the seed has to merge the general reader theme's background in
+        // (see NovelWebViewer.typography) and the provider does not know that rule. Seeding in two
+        // places would have meant one of them painting the first page without the merge - the
+        // unreadable combination the merge exists to prevent. The first document still renders
+        // styled: the seed is set before the viewer is returned to the reader.
+        // KMK <--
     }
 }

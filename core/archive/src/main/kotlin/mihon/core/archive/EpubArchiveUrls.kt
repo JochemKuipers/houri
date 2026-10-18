@@ -14,6 +14,19 @@ package mihon.core.archive
  * `book.internal` is reserved by RFC 6761 and can never collide with a real host, so a book that
  * links to a genuine external image is never mistaken for an archive one.
  *
+ * ### Why the scheme is `https` and not something invented
+ *
+ * It was `epub-archive` once, and that was the whole reason "images are not rendered" outlived every
+ * other fix in the book path. A WebView document is loaded with `loadDataWithBaseURL`, whose base
+ * URL the platform documents as **must be an HTTP(S) URL**, and the same documentation warns that
+ * WebView "applies restrictions when requesting resources… that use a custom URL scheme" and only
+ * invokes the interception callbacks for well-formed URLs. In practice that meant the inline
+ * document rendered — it is handed over as a string — while every `<img>`, `<link>` and `@font-face`
+ * it asked for was refused before `shouldInterceptRequest` was ever consulted: the book rendered as
+ * bare text wearing only the reader's own styling, with no error anywhere. Serving the same reserved
+ * host under `https` is the pattern `WebViewAssetLoader` itself uses (`appassets.androidplatform.net`),
+ * and no request to it ever leaves the device because the viewer intercepts every one.
+ *
  * ### Why this is here and not in a source
  *
  * Both the built-in EPUB library and the manga library serve books now, from two modules that cannot
@@ -26,8 +39,11 @@ package mihon.core.archive
  */
 object EpubArchiveUrls {
 
-    /** Reserved scheme for archive-internal resources. */
-    const val SCHEME = "epub-archive"
+    /**
+     * The scheme of the reserved space. Plain `https`, deliberately: a custom scheme was the bug,
+     * not the safety. See the class doc for what it cost.
+     */
+    const val SCHEME = "https"
 
     /** Reserved host. Never resolvable on a real network. */
     const val HOST = "book.internal"
@@ -76,10 +92,12 @@ object EpubArchiveUrls {
      * Null is the host's signal to let the URL load normally, which is what keeps a book that links
      * to an external stylesheet working.
      *
-     * The host is matched loosely rather than against one exact prefix: the path is whatever follows
-     * the first `/` after the authority, so a document loaded at a different reserved host still
-     * resolves. The path is percent-decoded because the renderer hands it back encoded
-     * (`My%20Image.jpg`) while the archive stores it decoded (`My Image.jpg`).
+     * Matched on the scheme **and the reserved host**, not on the scheme alone: the scheme is real
+     * `https` now, so a scheme-only test would swallow every genuinely external image, stylesheet
+     * and footnote the book points at. The host is matched loosely rather than against one exact
+     * prefix: the path is whatever follows the first `/` after the authority, so a document loaded
+     * at a different reserved host still resolves. The path is percent-decoded because the renderer
+     * hands it back encoded (`My%20Image.jpg`) while the archive stores it decoded (`My Image.jpg`).
      */
     fun archivePathOf(absoluteUrl: String): String? {
         if (!isArchiveUrl(absoluteUrl)) return null
@@ -93,8 +111,15 @@ object EpubArchiveUrls {
             ?.takeIf { it.isNotBlank() }
     }
 
-    /** True when [url] is in this namespace. */
-    fun isArchiveUrl(url: String): Boolean = url.startsWith("$SCHEME://", ignoreCase = true)
+    /**
+     * True when [url] is in this namespace.
+     *
+     * The reserved host is what makes this a test rather than a guess: `book.internal` cannot belong
+     * to a real site, so claiming every request to it costs nothing, while any other `https` host
+     * stays untouched and loads normally.
+     */
+    fun isArchiveUrl(url: String): Boolean =
+        url.startsWith("$SCHEME://$HOST/", ignoreCase = true)
 
     /**
      * MIME type for an in-archive [path], or null when the extension is not recognised.

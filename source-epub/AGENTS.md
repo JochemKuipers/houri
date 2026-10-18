@@ -71,9 +71,14 @@ is in `docs/superpowers/specs/2026-10-17-library-entry-types-design.md`.
   `getTextPageList`'s callers and its index stays sparse; the two agree only while nothing was
   skipped, which is the same reason consumers match on `textPage.index` and never on a list position.
 
-Pages load under `epub-archive://book.internal/`, a **reserved `.internal` scheme** (RFC 6761) that
-cannot collide with a real site. The viewer's `shouldInterceptRequest` serves those from the archive;
-every other URL is left alone so a book linking to an external image still works.
+Pages load under `https://book.internal/` — a **real web scheme on a reserved `.internal` host**
+(RFC 6761), the same pattern `WebViewAssetLoader` uses. That it is *https* is load-bearing, not
+cosmetic: the platform documents that a `loadDataWithBaseURL` base "must be an HTTP(S) URL" and that
+WebView restricts resource requests using custom schemes — the invented `epub-archive://` scheme
+this module used first was why every illustration, stylesheet and embedded font silently 404'd
+while the text still rendered. Requests never reached `shouldInterceptRequest`, which is what
+serves them out of the open archive; every other host is left alone so a book linking to an
+external image still works.
 
 The URL space itself is `EpubArchiveUrls` in `core:archive`, and the lifetime of the mapped archives
 is `EpubResourceServer`. Both are asserted by `DocumentHarness`.
