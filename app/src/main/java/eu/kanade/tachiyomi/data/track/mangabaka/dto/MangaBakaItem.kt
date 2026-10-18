@@ -28,9 +28,14 @@ data class MangaBakaItem(
     val type: String,
     val rating: Double?,
     val titles: List<MangaBakaItemTitle>?,
-    // KMK --> series-detail payloads carry relationships_v2; absent on search items
+    // KMK --> series-detail payloads carry relationships_v2 (absent on search items), and every
+    // payload carries the series' own chapter count as a JSON *string* ("72"), null while the
+    // site has none recorded — see [totalChaptersCount].
     @SerialName("relationships_v2")
     val relationshipsV2: List<MangaBakaRelationship>? = null,
+    @SerialName("total_chapters")
+    val totalChapters: String? = null,
+    // KMK <--
 ) {
     fun chooseBestTitle(): String {
         val bestTitlePerLanguage = TITLE_PRIORITIES.associateWith { lang ->
@@ -50,6 +55,19 @@ data class MangaBakaItem(
             ?: titles?.firstOrNull()?.title
             ?: "ID: $id - Could not find name! (report on the MangaBaka Discord)"
     }
+
+    // KMK -->
+    /**
+     * The series' chapter count, or 0 when the site has not recorded one.
+     *
+     * This is the number the tracker row's "chapters x / y" is measured against, and the one
+     * [MangaBaka.update]'s completion rule compares the reader's progress to — reading the last
+     * chapter of a series only marks it completed when the tracker knows which chapter is the
+     * last. Parsed through a double because the payload carries the count as a *string*, and 0 is
+     * the tracker model's "unknown" — a value that does not parse must land there, not throw.
+     */
+    fun totalChaptersCount(): Long = totalChapters?.toDoubleOrNull()?.toLong() ?: 0L
+    // KMK <--
 }
 
 @Serializable

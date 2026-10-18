@@ -655,6 +655,34 @@ internal class NovelWebViewer(
         return pages.getOrNull(at + offset)
     }
 
+    // ---------------------------------------------------------------- chapter navigation
+
+    /**
+     * The bottom navigator's next button, while a book is on screen: the next *section* of the book,
+     * or the next library chapter at its end.
+     *
+     * A book is one library chapter, so the button's manga meaning — "next library chapter" — would
+     * skip the entire book and land in another volume. For a book, its sections are its chapters:
+     * the button steps them the same way a tap at the bottom edge does, and falls through to the
+     * adjacent volume at either end of the book. Non-sequential jumps belong to the contents list,
+     * which is what the chapter selector renders for a book.
+     *
+     * Deliberately the same code as the tap, so the button and the gesture cannot disagree about
+     * what "next" means.
+     */
+    fun nextSection() = advanceDocument()
+
+    /** [nextSection], backwards: the previous section, or the previous volume at the book's start. */
+    fun previousSection() = retreatDocument()
+
+    /** Whether there is a next section or volume for [nextSection] to go to. */
+    val hasNextSection: Boolean
+        get() = neighbour(1) != null || chapters?.nextChapter != null
+
+    /** Whether there is a previous section or volume for [previousSection] to go to. */
+    val hasPreviousSection: Boolean
+        get() = neighbour(-1) != null || chapters?.prevChapter != null
+
     // ---------------------------------------------------------------- resources
 
     /**

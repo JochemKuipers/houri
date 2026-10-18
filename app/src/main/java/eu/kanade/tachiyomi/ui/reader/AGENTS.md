@@ -242,6 +242,16 @@ webtoon viewers do, so reaching a chapter boundary goes through `ReaderViewModel
 which reuses the same `loadAdjacent` path the toolbar buttons use. Not `onPageSelected`: that returns
 early while `chapter.pages` is null, which is exactly the case for a chapter not yet loaded.
 
+**For a book, the bottom navigator is a chapter navigator and says so.** The prev/next buttons call
+`NovelWebViewer.nextSection`/`previousSection` — the same `advanceDocument`/`retreatDocument` a tap
+at either edge runs, so a button can never mean "skip the whole book" (one library chapter *is* the
+book) nor disagree with the gesture about what "next" means. Their enabled state is
+`hasNextSection`/`hasPreviousSection`, recomputed off the same state changes that repaint the bars.
+The page slider is not offered at all while a text chapter is open (`ReaderAppBars`'
+`showPageNavigator`, decided from the loader): the slider is a *page* navigator, a book's documents
+are whole chapters, and offering them as "pages 1..N" was how it came to double as the chapter
+navigator. Sequential movement is taps and the buttons; non-sequential is the contents list.
+
 Resources (images, CSS, fonts) are streamed by the `TextPageLoader`'s `resourceSource` over the
 reserved `https://book.internal/` origin — see `source-epub/AGENTS.md`.
 

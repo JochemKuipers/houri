@@ -912,6 +912,41 @@ class ReaderActivity : BaseActivity() {
         }
         // SY <--
 
+        // KMK --> A book is one library chapter, so the bottom navigator means something different
+        // while one is open. The prev/next buttons step the book's own sections — the same decision
+        // a tap at either edge makes, volumes only at the ends — and the page slider is not offered
+        // at all: the slider is a page navigator, a book's documents are whole chapters, and offering
+        // them as pages was what made the slider double as a chapter navigator. The contents list is
+        // the chapter selector for a book.
+        //
+        // Decided from the loader, the same signal that chose the renderer, the Book settings tab
+        // and the contents buttons — not from the viewer class, so a viewer that is momentarily
+        // missing (a rebuild mid-transition) falls back to the manga behaviour rather than to a
+        // half-wired book one.
+        val bookViewer = state.viewer as? NovelWebViewer
+        val isTextChapter = state.currentChapter?.pageLoader is TextPageLoader
+        val navigateNext: () -> Unit = if (isTextChapter) {
+            { bookViewer?.nextSection() }
+        } else {
+            ::loadNextChapter
+        }
+        val navigatePrevious: () -> Unit = if (isTextChapter) {
+            { bookViewer?.previousSection() }
+        } else {
+            ::loadPreviousChapter
+        }
+        val canGoNext = if (isTextChapter) {
+            bookViewer?.hasNextSection == true
+        } else {
+            state.viewerChapters?.nextChapter != null
+        }
+        val canGoPrevious = if (isTextChapter) {
+            bookViewer?.hasPreviousSection == true
+        } else {
+            state.viewerChapters?.prevChapter != null
+        }
+        // KMK <--
+
         ReaderAppBars(
             visible = state.menuVisible,
 
@@ -926,10 +961,10 @@ class ReaderActivity : BaseActivity() {
             onShare = ::shareChapter.takeIf { isHttpSource },
 
             viewer = state.viewer,
-            onNextChapter = ::loadNextChapter,
-            enabledNext = state.viewerChapters?.nextChapter != null,
-            onPreviousChapter = ::loadPreviousChapter,
-            enabledPrevious = state.viewerChapters?.prevChapter != null,
+            onNextChapter = navigateNext,
+            enabledNext = canGoNext,
+            onPreviousChapter = navigatePrevious,
+            enabledPrevious = canGoPrevious,
             currentPage = state.currentPage,
             totalPages = state.totalPages,
             onPageIndexChange = {
@@ -939,6 +974,9 @@ class ReaderActivity : BaseActivity() {
             // Mihon -->
             onPageIndexChangeFinished = { isScrollingThroughPages = false },
             // Mihon <--
+            // KMK -->
+            showPageNavigator = !isTextChapter,
+            // KMK <--
 
             readingMode = ReadingMode.fromPreference(
                 viewModel.getMangaReadingMode(resolveDefault = false),

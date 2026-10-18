@@ -145,6 +145,12 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
         track.copyPersonalFrom(remoteTrack)
         track.remote_id = remoteTrack.remote_id
         track.title = remoteTrack.title
+        // KMK --> refresh is also how a series' recorded chapter count reaches an entry that was
+        // bound before the field was read: without it the row never learns the total, and
+        // update()'s completion rule — "progress equals the last chapter" — can never fire.
+        // Same line every sibling tracker carries (AniList, Kitsu, Hikka, …).
+        track.total_chapters = remoteTrack.total_chapters
+        // KMK <--
         return track
     }
 

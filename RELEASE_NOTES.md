@@ -56,6 +56,11 @@ files moved. See .github/scripts/release_notes.py.
   chapter transitions, colour filters — none of which do anything to text, and several of which
   were visible for no reason. A book now shows General, trimmed to the options that apply, plus its
   own Reading appearance tab, and nothing it cannot act on.
+- **A book's chapter buttons now step its chapters.** The previous/next chapter buttons skipped a
+  whole book — one library chapter — so inside a novel they were useless. They now move through the
+  book's own sections, and leave for the next volume only at either end of the book. The page slider
+  no longer appears while reading a book: it was serving as the chapter navigator, which is the
+  contents list's job, and its "page 3 of 412" counted whole chapters as pages.
 - **The book reader can be navigated at all.** Taps, swipes and volume keys did nothing in an EPUB, so
   a chapter with no text on the first screen — which is what most books open on, since their first
   file is usually the cover — left you stuck. Tapping an edge now moves, tapping the middle opens the
@@ -159,3 +164,8 @@ files moved. See .github/scripts/release_notes.py.
   book's own text colour standing — which for most books is black text on a black page, i.e.
   invisible. A dark background now colours the page itself and the text switches to the colour
   that reads on it. A page colour you picked yourself in the Reading appearance tab still wins.
+- **MangaBaka knows the last chapter.** The tracker never read how many chapters a series has, so
+  progress showed as a bare number with no total, the chapter picker offered a ten-thousand-entry
+  range with no end in sight, and finishing a series never marked it completed — the reader could
+  not tell which chapter was the last one. The count now comes from MangaBaka's own series data,
+  for newly bound series and existing ones alike.

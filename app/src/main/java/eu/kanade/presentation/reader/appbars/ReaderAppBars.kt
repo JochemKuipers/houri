@@ -72,6 +72,16 @@ fun ReaderAppBars(
     // Mihon -->
     onPageIndexChangeFinished: () -> Unit = {},
     // Mihon <--
+    // KMK -->
+    /**
+     * Whether the page slider part of the bottom navigator is offered.
+     *
+     * False while the open chapter is a book: the slider was being used as its chapter navigator
+     * (a book's "pages" in the reader's own numbering are whole documents), which is a role the
+     * contents list fills properly. The prev/next chapter buttons stay either way.
+     */
+    showPageNavigator: Boolean = true,
+    // KMK <--
 
     readingMode: ReadingMode,
     onClickReadingMode: () -> Unit,
@@ -195,6 +205,9 @@ fun ReaderAppBars(
                         isVerticalSlider = true,
                         currentPageText = currentPageText,
                         // SY <--
+                        // KMK -->
+                        showSlider = showPageNavigator,
+                        // KMK <--
                     )
                 }
             }
@@ -230,6 +243,9 @@ fun ReaderAppBars(
                         isVerticalSlider = true,
                         currentPageText = currentPageText,
                         // SY <--
+                        // KMK -->
+                        showSlider = showPageNavigator,
+                        // KMK <--
                     )
                 }
             }
@@ -262,6 +278,9 @@ fun ReaderAppBars(
                         isVerticalSlider = false,
                         currentPageText = currentPageText,
                         // SY <--
+                        // KMK -->
+                        showSlider = showPageNavigator,
+                        // KMK <--
                     )
                 }
                 ReaderBottomBar(

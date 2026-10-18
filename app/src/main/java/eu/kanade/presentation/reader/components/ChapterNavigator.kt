@@ -66,6 +66,10 @@ fun ChapterNavigator(
     // Mihon -->
     onPageIndexChangeFinished: () -> Unit = {},
     // Mihon <--
+    // KMK -->
+    /** Whether the page slider is offered at all. False for a book: see the caller in ReaderActivity. */
+    showSlider: Boolean = true,
+    // KMK <--
 ) {
     // SY -->
     if (isVerticalSlider) {
@@ -82,6 +86,9 @@ fun ChapterNavigator(
             // Mihon -->
             onPageIndexChangeFinished = onPageIndexChangeFinished,
             // Mihon <--
+            // KMK -->
+            showSlider = showSlider,
+            // KMK <--
         )
         return
     }
@@ -125,7 +132,10 @@ fun ChapterNavigator(
                 )
             }
 
-            if (totalPages > 1) {
+            // KMK --> `showSlider` hides the slider for a book: its documents are whole chapters,
+            // and a slider that offers them as pages is a chapter navigator wearing the wrong label.
+            // The spacer keeps the chapter buttons at the edges either way.
+            if (showSlider && totalPages > 1) {
                 CompositionLocalProvider(LocalLayoutDirection provides layoutDirection) {
                     Row(
                         modifier = Modifier
@@ -215,6 +225,10 @@ fun ChapterNavigatorVert(
     // Mihon -->
     onPageIndexChangeFinished: () -> Unit = {},
     // Mihon <--
+    // KMK -->
+    /** Whether the page slider is offered at all. False for a book: see the caller in ReaderActivity. */
+    showSlider: Boolean = true,
+    // KMK <--
 ) {
     val isTabletUi = isTabletUi()
     val verticalPadding = if (isTabletUi) 24.dp else 8.dp
@@ -252,7 +266,9 @@ fun ChapterNavigatorVert(
             )
         }
 
-        if (totalPages > 1) {
+        // KMK --> Same rule as the horizontal bar: a book's sections are chapters, not pages, so
+        // the slider is not offered and the spacer keeps the buttons at top and bottom.
+        if (showSlider && totalPages > 1) {
             Column(
                 modifier = Modifier
                     .weight(1f)

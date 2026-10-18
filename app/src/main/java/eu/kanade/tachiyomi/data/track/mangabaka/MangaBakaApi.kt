@@ -123,6 +123,10 @@ class MangaBakaApi(
                         finished_reading_date = parseIsoDateAsLocalStartOfDay(userData.finishDate) ?: 0
                         last_chapter_read = userData.progressChapter ?: 0.0
                         private = userData.isPrivate
+                        // KMK --> the series detail is already fetched here; its chapter count is
+                        // the "last chapter" the tracker row and the completion rule both need.
+                        total_chapters = additionalData.totalChaptersCount()
+                        // KMK <--
                     }
                 } catch (e: HttpException) {
                     if (e.code == 404) {
@@ -205,6 +209,11 @@ class MangaBakaApi(
             authors = item.authors.orEmpty()
             artists = item.artists.orEmpty()
             tags = item.tags.orEmpty()
+            // KMK --> search results carry the series' chapter count too; the entry a reader
+            // binds is the one this becomes, and without it "x / y" and the completion rule
+            // both fall back to unknown.
+            total_chapters = item.totalChaptersCount()
+            // KMK <--
         }
     }
 
