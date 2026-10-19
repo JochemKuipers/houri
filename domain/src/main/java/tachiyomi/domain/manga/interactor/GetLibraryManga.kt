@@ -5,6 +5,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.retry
 import logcat.LogPriority
@@ -26,13 +27,20 @@ class GetLibraryManga(
 
     fun subscribe(): Flow<List<LibraryManga>> {
         return merge(
-            mangaRepository.getLibraryMangaAsFlow(),
+            flowOf(Unit),
             // When custom manga info changes (e.g. title cleaning), re-emit
             // the library so the UI picks up the new titles without a restart.
-            customMangaRepository.changes.flatMapLatest {
-                mangaRepository.getLibraryMangaAsFlow()
-            },
+            customMangaRepository.changes,
         )
+            // A single flatMap keeps exactly one live library subscription in flight: it runs
+            // immediately (the seed `flowOf(Unit)`), and re-runs once per custom-info edit.
+            // The merge this replaces ran both branches side by side, and the moment one edit
+            // landed, two live subscriptions of the same query stayed alive for the rest of the
+            // session - every chapter/history invalidation re-ran the full libraryView
+            // aggregation twice and the screen received the whole list twice.
+            .flatMapLatest {
+                mangaRepository.getLibraryMangaAsFlow()
+            }
             .retry {
                 if (it is NullPointerException) {
                     delay(0.5.seconds)

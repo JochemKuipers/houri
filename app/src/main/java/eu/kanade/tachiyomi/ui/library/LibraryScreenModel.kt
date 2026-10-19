@@ -71,10 +71,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.dropWhile
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
@@ -89,9 +91,9 @@ import mihon.core.common.utils.mutate
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.CheckboxState
 import tachiyomi.core.common.preference.TriState
-import tachiyomi.core.common.util.lang.compareToWithCollator
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchNonCancellable
+import tachiyomi.core.common.util.lang.toCollationKey
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.category.interactor.CreateCategoryWithName
@@ -133,6 +135,7 @@ import tachiyomi.i18n.MR
 import tachiyomi.i18n.sy.SYMR
 import tachiyomi.source.local.LocalSource
 import tachiyomi.source.local.isLocal
+import java.text.CollationKey
 import kotlin.random.Random
 import tachiyomi.domain.source.model.Source as DomainSource
 
@@ -210,47 +213,70 @@ class LibraryScreenModel(
                 // KMK <--
                 getLibraryItemPreferencesFlow(),
             ) { (searchQuery, categories, favorites), (tracksMap, trackingFilters, trackedOverall), (includedCategories, excludedCategories, categorySortMode), itemPreferences ->
-                val filteredFavorites = favorites
-                    .applyFilters(
-                        tracksMap,
-                        trackingFilters,
-                        trackedOverall,
-                        itemPreferences,
-                        // KMK -->
-                        includedCategories,
-                        excludedCategories,
-                        // KMK <--
-                    )
-                    .let {
-                        if (searchQuery == null) {
-                            // Don't do anything
-                            it
-                        } else {
-                            // Filter query
-                            // SY -->
-                            // it.filter { m -> m.matches(searchQuery) }
-                            // Filter query
-                            filterLibrary(it, searchQuery, trackingFilters, categories)
-                            // SY <--
-                        }
-                    }
-
-                LibraryData(
-                    isInitialized = true,
-                    // KMK --> display order only; the stored manual order is untouched
-                    categories = categories.sortedForDisplay(categorySortOrderOf(categorySortMode)),
-                    // KMK --> carried alongside so the subcategories the reader sees under a
-                    // category are ordered by the mode they chose, not just the tabs
-                    categorySortOrder = categorySortOrderOf(categorySortMode),
-                    favorites = filteredFavorites,
+                // KMK --> The transform only hands the inputs to the collector; the actual
+                // filtering happens inside collectLatest below, where a batching storm can
+                // cancel it and recompute for the newest inputs instead of queuing passes.
+                LibraryDataRequest(
+                    searchQuery = searchQuery,
+                    categories = categories,
+                    favorites = favorites,
                     tracksMap = tracksMap,
-                    loggedInTrackerIds = trackingFilters.keys,
+                    trackingFilters = trackingFilters,
+                    trackedOverall = trackedOverall,
+                    includedCategories = includedCategories,
+                    excludedCategories = excludedCategories,
+                    categorySortMode = categorySortMode,
+                    itemPreferences = itemPreferences,
                 )
+                // KMK <--
             }
                 .distinctUntilChanged()
-                .collectLatest { libraryData ->
-                    mutableState.update { state ->
-                        state.copy(libraryData = libraryData)
+                // KMK --> conflate: while the collector is busy re-filtering a large library,
+                // superseded requests collapse into the newest one. Nothing is added to the
+                // latency of a single steady emission - the first request always flows straight
+                // through - but N invalidations landing back-to-back cost one pass, not N.
+                .conflate()
+                // KMK <--
+                .collectLatest { (searchQuery, categories, favorites, tracksMap, trackingFilters, trackedOverall, includedCategories, excludedCategories, categorySortMode, itemPreferences) ->
+                    val filteredFavorites = favorites
+                        .applyFilters(
+                            tracksMap,
+                            trackingFilters,
+                            trackedOverall,
+                            itemPreferences,
+                            // KMK -->
+                            includedCategories,
+                            excludedCategories,
+                            // KMK <--
+                        )
+                        .let {
+                            if (searchQuery == null) {
+                                // Don't do anything
+                                it
+                            } else {
+                                // Filter query
+                                // SY -->
+                                // it.filter { m -> m.matches(searchQuery) }
+                                // Filter query
+                                filterLibrary(it, searchQuery, trackingFilters, categories)
+                                // SY <--
+                            }
+                        }
+
+                    LibraryData(
+                        isInitialized = true,
+                        // KMK --> display order only; the stored manual order is untouched
+                        categories = categories.sortedForDisplay(categorySortOrderOf(categorySortMode)),
+                        // KMK --> carried alongside so the subcategories the reader sees under a
+                        // category are ordered by the mode they chose, not just the tabs
+                        categorySortOrder = categorySortOrderOf(categorySortMode),
+                        favorites = filteredFavorites,
+                        tracksMap = tracksMap,
+                        loggedInTrackerIds = trackingFilters.keys,
+                    ).let { libraryData ->
+                        mutableState.update { state ->
+                            state.copy(libraryData = libraryData)
+                        }
                     }
                 }
         }
@@ -293,98 +319,116 @@ class LibraryScreenModel(
                 ),
                 // KMK <--
             ) { (data, groupType, noActiveFilterOrSearch), (sort, showHiddenCategories, showEmptyCategoriesSearch, categorySortMode), (filterCategory, includedCategories, activeSelection) ->
-                // KMK -->
-                val (activeCategoryId, activeSubCategoryId) = activeSelection
-                val subcategoryMangaMap = if (groupType == LibraryGroup.BY_DEFAULT) {
-                    val subCategoryIds = data.categories.filter { it.parentId != 0L }.mapTo(HashSet()) { it.id }
-                    buildMap {
-                        for (item in data.favorites) {
-                            for (categoryId in item.libraryManga.categories) {
-                                if (categoryId in subCategoryIds) getOrPut(categoryId) { mutableListOf() }.add(item.id)
+                // KMK --> Inputs only; the grouping/sorting work runs inside collectLatest
+                // below so superseded recomputations can be cancelled rather than stacked up.
+                LibraryGroupingRequest(
+                    data = data,
+                    groupType = groupType,
+                    noActiveFilterOrSearch = noActiveFilterOrSearch,
+                    sort = sort,
+                    showHiddenCategories = showHiddenCategories,
+                    showEmptyCategoriesSearch = showEmptyCategoriesSearch,
+                    categorySortMode = categorySortMode,
+                    filterCategory = filterCategory,
+                    includedCategories = includedCategories,
+                    activeCategoryId = activeSelection.first,
+                    activeSubCategoryId = activeSelection.second,
+                )
+            }
+                .distinctUntilChanged()
+                // KMK --> Same collapse as the data pipeline: during rapid invalidation only
+                // the newest grouping request is worth a pass.
+                .conflate()
+                // KMK <--
+                .collectLatest { (data, groupType, noActiveFilterOrSearch, sort, showHiddenCategories, showEmptyCategoriesSearch, categorySortMode, filterCategory, includedCategories, activeCategoryId, activeSubCategoryId) ->
+                    // KMK -->
+                    val subcategoryMangaMap = if (groupType == LibraryGroup.BY_DEFAULT) {
+                        val subCategoryIds = data.categories.filter { it.parentId != 0L }.mapTo(HashSet()) { it.id }
+                        buildMap {
+                            for (item in data.favorites) {
+                                for (categoryId in item.libraryManga.categories) {
+                                    if (categoryId in subCategoryIds) getOrPut(categoryId) { mutableListOf() }.add(item.id)
+                                }
                             }
                         }
-                    }
-                } else {
-                    emptyMap()
-                }
-                // KMK <--
-                data.favorites
-                    .applyGrouping(
-                        data.categories,
-                        // KMK -->
-                        if (filterCategory && includedCategories.isNotEmpty()) {
-                            LibraryGroup.UNGROUPED
-                        } else {
-                            groupType
-                        },
-                        showHiddenCategories,
-                        activeCategoryId = activeCategoryId,
-                        activeSubCategoryId = activeSubCategoryId,
-                        // KMK <--
-                    )
-                    .applySort(
-                        data.favoritesById,
-                        data.tracksMap,
-                        data.loggedInTrackerIds,
-                        // SY -->
-                        sort.takeIf { groupType != LibraryGroup.BY_DEFAULT },
-                        // SY <--
-                    )
-                    // KMK -->
-                    .filter {
-                        // Hide empty categories unless the setting is enabled or there are no active filters/search
-                        showEmptyCategoriesSearch || noActiveFilterOrSearch || it.value.isNotEmpty() ||
-                            // Keep the active category visible when a selected subcategory is empty
-                            (it.key.id == activeCategoryId && activeSubCategoryId != null)
-                    }
-                    .let {
-                        // Fall back to default category if no categories are present
-                        it.ifEmpty {
-                            mapOf(
-                                Category(
-                                    0,
-                                    preferences.context.stringResource(MR.strings.default_category),
-                                    0,
-                                    0,
-                                    false,
-                                ) to emptyList(),
-                            )
-                        }
-                    }
-                    .let { map -> map }
-                    // KMK --> The count-based orders. The name and date orders already came in with
-                    // `data.categories`, which this combine receives pre-sorted; the counts only exist
-                    // here, on the groups just built, so they cannot be applied any earlier.
-                    // sortedBy* is stable, so a tie keeps that incoming order rather than whatever the
-                    // grouping happened to produce.
-                    .let { map ->
-                        when (categorySortOrderOf(categorySortMode)) {
-                            CategorySortOrder.MOST_ITEMS ->
-                                map.entries.sortedByDescending { it.value.size }
-                                    .associateTo(LinkedHashMap()) { it.key to it.value }
-
-                            CategorySortOrder.LEAST_ITEMS ->
-                                map.entries.sortedBy { it.value.size }
-                                    .associateTo(LinkedHashMap()) { it.key to it.value }
-
-                            else -> map
-                        }
+                    } else {
+                        emptyMap()
                     }
                     // KMK <--
-                    // KMK -->
-                    .let { it to subcategoryMangaMap }
-                // KMK <--
-            }
-                .collectLatest { (grouped, subMap) ->
-                    mutableState.update { state ->
-                        state.copy(
-                            isLoading = false,
-                            groupedFavorites = grouped,
+                    data.favorites
+                        .applyGrouping(
+                            data.categories,
                             // KMK -->
-                            subcategoryMangaMap = subMap,
+                            if (filterCategory && includedCategories.isNotEmpty()) {
+                                LibraryGroup.UNGROUPED
+                            } else {
+                                groupType
+                            },
+                            showHiddenCategories,
+                            activeCategoryId = activeCategoryId,
+                            activeSubCategoryId = activeSubCategoryId,
                             // KMK <--
                         )
-                    }
+                        .applySort(
+                            data.favoritesById,
+                            data.tracksMap,
+                            data.loggedInTrackerIds,
+                            // SY -->
+                            sort.takeIf { groupType != LibraryGroup.BY_DEFAULT },
+                            // SY <--
+                        )
+                        // KMK -->
+                        .filter {
+                            // Hide empty categories unless the setting is enabled or there are no active filters/search
+                            showEmptyCategoriesSearch || noActiveFilterOrSearch || it.value.isNotEmpty() ||
+                                // Keep the active category visible when a selected subcategory is empty
+                                (it.key.id == activeCategoryId && activeSubCategoryId != null)
+                        }
+                        .let {
+                            // Fall back to default category if no categories are present
+                            it.ifEmpty {
+                                mapOf(
+                                    Category(
+                                        0,
+                                        preferences.context.stringResource(MR.strings.default_category),
+                                        0,
+                                        0,
+                                        false,
+                                    ) to emptyList(),
+                                )
+                            }
+                        }
+                        .let { map -> map }
+                        // KMK --> The count-based orders. The name and date orders already came in with
+                        // `data.categories`, which this combine receives pre-sorted; the counts only exist
+                        // here, on the groups just built, so they cannot be applied any earlier.
+                        // sortedBy* is stable, so a tie keeps that incoming order rather than whatever the
+                        // grouping happened to produce.
+                        .let { map ->
+                            when (categorySortOrderOf(categorySortMode)) {
+                                CategorySortOrder.MOST_ITEMS ->
+                                    map.entries.sortedByDescending { it.value.size }
+                                        .associateTo(LinkedHashMap()) { it.key to it.value }
+
+                                CategorySortOrder.LEAST_ITEMS ->
+                                    map.entries.sortedBy { it.value.size }
+                                        .associateTo(LinkedHashMap()) { it.key to it.value }
+
+                                else -> map
+                            }
+                        }
+                        // KMK <--
+                        .let { grouping ->
+                            mutableState.update { state ->
+                                state.copy(
+                                    isLoading = false,
+                                    groupedFavorites = grouping,
+                                    // KMK -->
+                                    subcategoryMangaMap = subcategoryMangaMap,
+                                    // KMK <--
+                                )
+                            }
+                        }
                 }
         }
 
@@ -626,6 +670,13 @@ class LibraryScreenModel(
      */
     private fun pruneRetainedCovers() {
         screenModelScope.launchIO {
+            // KMK --> Not before the library has landed. This used to fire its own full
+            // libraryView scan alongside the load's - doubling the single most expensive query
+            // per cold start on a large library - and nothing on screen waits on the result,
+            // so waiting for the first emission queues the prune behind the frames the user
+            // is actually waiting on instead.
+            state.first { it.libraryData.isInitialized }
+            // KMK <--
             val referenced = buildSet {
                 getLibraryManga.await().forEach { libraryManga ->
                     val manga = libraryManga.manga
@@ -663,17 +714,24 @@ class LibraryScreenModel(
 
         // KMK -->
         val ignoreArticles = libraryPreferences.ignoreArticlesInSort().get()
+
+        // The alphabetical comparator used to do the whole prep on every comparison: lowercase
+        // plus article removal on both sides, then a full collator pass on top - and every sort
+        // here hangs it on as the tie-break, with the whole method re-running per library
+        // emission. On a large library that is an O(n log n) scan over the entire title list per
+        // sort. Now each entry's title is prepped and collated exactly once per pass and the
+        // comparator compares the cached CollationKey (byte array compare, same ordering as
+        // collator.compare), which turns the sort into O(n) collator passes.
+        val collationKeys = HashMap</* Manga */ Long, CollationKey>(favoritesById.size)
+        fun collationKeyOf(item: LibraryItem): CollationKey = collationKeys.getOrPut(item.libraryManga.manga.id) {
+            var title = item.libraryManga.manga.title.lowercase()
+            if (ignoreArticles) title = title.removeArticles()
+            title.toCollationKey()
+        }
         // KMK <--
+
         val sortAlphabetically: (LibraryItem, LibraryItem) -> Int = { manga1, manga2 ->
-            var title1 = manga1.libraryManga.manga.title.lowercase()
-            var title2 = manga2.libraryManga.manga.title.lowercase()
-            // KMK -->
-            if (ignoreArticles) {
-                title1 = title1.removeArticles()
-                title2 = title2.removeArticles()
-            }
-            // KMK <--
-            title1.compareToWithCollator(title2)
+            collationKeyOf(manga1).compareTo(collationKeyOf(manga2))
         }
 
         val defaultTrackerScoreSortValue = -1.0
@@ -2062,6 +2120,46 @@ class LibraryScreenModel(
     ) {
         val favoritesById by lazy { favorites.associateBy { it.id } }
     }
+
+    // KMK -->
+    /**
+     * The inputs [LibraryData] is built from. The data pipeline emits this instead of the built
+     * result so the expensive filtering lives in the collector, where a superseded request
+     * collapses into the newest one under rapid invalidation (see conflate in init).
+     */
+    @Immutable
+    private data class LibraryDataRequest(
+        val searchQuery: String?,
+        val categories: List<Category>,
+        val favorites: List<LibraryItem>,
+        val tracksMap: Map</* Manga */ Long, List<Track>>,
+        val trackingFilters: Map</* Tracker */ Long, TriState>,
+        val trackedOverall: TriState,
+        val includedCategories: ImmutableSet<Long>,
+        val excludedCategories: ImmutableSet<Long>,
+        val categorySortMode: Int,
+        val itemPreferences: ItemPreferences,
+    )
+
+    /**
+     * The inputs the category grouping/sorting pass needs, for the same reason as
+     * [LibraryDataRequest]: emit cheap, compute heavy, keep only the newest request.
+     */
+    @Immutable
+    private data class LibraryGroupingRequest(
+        val data: LibraryData,
+        val groupType: Int,
+        val noActiveFilterOrSearch: Boolean,
+        val sort: LibrarySort,
+        val showHiddenCategories: Boolean,
+        val showEmptyCategoriesSearch: Boolean,
+        val categorySortMode: Int,
+        val filterCategory: Boolean,
+        val includedCategories: ImmutableSet<Long>,
+        val activeCategoryId: Long?,
+        val activeSubCategoryId: Long?,
+    )
+    // KMK <--
 
     @Immutable
     data class State(
