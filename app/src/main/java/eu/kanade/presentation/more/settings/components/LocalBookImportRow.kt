@@ -24,9 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import eu.kanade.tachiyomi.util.system.toast
+import kotlinx.coroutines.launch
 import mihon.app.di.globalAppGraph
 import tachiyomi.core.common.i18n.stringResource
-import tachiyomi.core.common.util.lang.launchIO
+import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.material.padding
@@ -88,8 +89,12 @@ fun LocalBookImportRow(
                 val uris = pending
                 pending = emptyList()
                 busy = true
-                scope.launchIO {
-                    when (val result = importer.import(name, uris)) {
+                // Launch on this scope's own (main) dispatcher and dip into IO only for the copy.
+                // Toasts need a Looper-prepared thread: launching the whole block with launchIO put
+                // context.toast on an IO worker and crashed
+                // "Can't toast on a thread that has not called Looper.prepare()".
+                scope.launch {
+                    when (val result = withIOContext { importer.import(name, uris) }) {
                         is LocalBookImporter.Result.Imported -> {
                             context.toast(
                                 if (result.skipped.isEmpty()) {

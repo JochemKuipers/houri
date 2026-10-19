@@ -24,6 +24,8 @@ files moved. See .github/scripts/release_notes.py.
 
 ### Fix
 
+- **Local source**: Importing EPUB books no longer crashes the app when the import finishes, because the confirmation toast was shown from a background thread. The toast now appears from the main thread as normal.
+
 - **Backup restore**: A restore could silently skip the last series in the file (up to one internal batch, 249 entries) when no full batch remained before the merged entries were written. The leftover batch is now written, so the restored library matches the backup and the progress bar reaches 100% again.
 
 - **Local source**: Chapters of a folder of imported EPUB books now sort by the volume number recognised in the file name. The list used to be ordered alphabetically by each book's declared title, which set the volumes down out of sequence ("and the Prisoner of Azkaban" before "and the Chamber of Secrets") and printed bogus "Missing N chapters" markers between them.
