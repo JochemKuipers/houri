@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -71,6 +72,14 @@ fun ReaderAppBars(
     onPageIndexChange: (Int) -> Unit,
     // Mihon -->
     onPageIndexChangeFinished: () -> Unit = {},
+    // Mihon <--
+    // Mihon -->
+    /**
+     * The vertical navigator's height, as a fraction (0..1] of the space between the top and bottom
+     * bars — the *Vertical navigator height* preference, which this fork's layout had stopped
+     * consuming, so the slider wrote a value nothing read in any viewer.
+     */
+    verticalNavigatorHeight: Float = 1f,
     // Mihon <--
     // KMK -->
     /**
@@ -193,26 +202,42 @@ fun ReaderAppBars(
                         .weight(1f)
                         .align(Alignment.Start),
                 ) {
-                    ChapterNavigator(
-                        isRtl = isRtl,
-                        onNextChapter = onNextChapter,
-                        enabledNext = enabledNext,
-                        onPreviousChapter = onPreviousChapter,
-                        enabledPrevious = enabledPrevious,
-                        currentPage = currentPage,
-                        totalPages = totalPages,
-                        onPageIndexChange = onPageIndexChange,
-                        onPageIndexChangeFinished = onPageIndexChangeFinished,
-                        // SY -->
-                        isVerticalSlider = true,
-                        currentPageText = currentPageText,
-                        // SY <--
-                        // KMK -->
-                        chapterFraction = chapterFraction,
-                        onChapterFractionChange = onChapterFractionChange,
-                        onChapterFractionChangeFinished = onChapterFractionChangeFinished,
-                        // KMK <--
-                    )
+                    // Mihon --> A full-height slot with the shortened navigator anchored to the
+                    // bottom of it. Shrinking the navigator itself instead would leave the freed
+                    // space *below* the weighted middle — pushing the bottom bar up off the bottom
+                    // of the screen — because the weighted slot sizes itself to its content. The
+                    // Box takes the full slot, keeps the bar where it belongs, and the fraction
+                    // empties into the space above the navigator, where it reads as "the navigator
+                    // is shorter", not as "everything moved".
+                    Box(
+                        modifier = Modifier.fillMaxHeight(),
+                        contentAlignment = Alignment.BottomStart,
+                    ) {
+                        ChapterNavigator(
+                            isRtl = isRtl,
+                            onNextChapter = onNextChapter,
+                            enabledNext = enabledNext,
+                            onPreviousChapter = onPreviousChapter,
+                            enabledPrevious = enabledPrevious,
+                            currentPage = currentPage,
+                            totalPages = totalPages,
+                            onPageIndexChange = onPageIndexChange,
+                            onPageIndexChangeFinished = onPageIndexChangeFinished,
+                            // SY -->
+                            isVerticalSlider = true,
+                            currentPageText = currentPageText,
+                            // SY <--
+                            // KMK -->
+                            chapterFraction = chapterFraction,
+                            onChapterFractionChange = onChapterFractionChange,
+                            onChapterFractionChangeFinished = onChapterFractionChangeFinished,
+                            // KMK <--
+                            // Mihon -->
+                            modifier = Modifier.fillMaxHeight(verticalNavigatorHeight),
+                            // Mihon <--
+                        )
+                    }
+                    // Mihon <--
                 }
             }
 
@@ -233,26 +258,36 @@ fun ReaderAppBars(
                         .weight(1f)
                         .align(Alignment.End),
                 ) {
-                    ChapterNavigator(
-                        isRtl = isRtl,
-                        onNextChapter = onNextChapter,
-                        enabledNext = enabledNext,
-                        onPreviousChapter = onPreviousChapter,
-                        enabledPrevious = enabledPrevious,
-                        currentPage = currentPage,
-                        totalPages = totalPages,
-                        onPageIndexChange = onPageIndexChange,
-                        onPageIndexChangeFinished = onPageIndexChangeFinished,
-                        // SY -->
-                        isVerticalSlider = true,
-                        currentPageText = currentPageText,
-                        // SY <--
-                        // KMK -->
-                        chapterFraction = chapterFraction,
-                        onChapterFractionChange = onChapterFractionChange,
-                        onChapterFractionChangeFinished = onChapterFractionChangeFinished,
-                        // KMK <--
-                    )
+                    // Mihon --> Same full-height, bottom-anchored slot as the left-hand variant.
+                    Box(
+                        modifier = Modifier.fillMaxHeight(),
+                        contentAlignment = Alignment.BottomEnd,
+                    ) {
+                        ChapterNavigator(
+                            isRtl = isRtl,
+                            onNextChapter = onNextChapter,
+                            enabledNext = enabledNext,
+                            onPreviousChapter = onPreviousChapter,
+                            enabledPrevious = enabledPrevious,
+                            currentPage = currentPage,
+                            totalPages = totalPages,
+                            onPageIndexChange = onPageIndexChange,
+                            onPageIndexChangeFinished = onPageIndexChangeFinished,
+                            // SY -->
+                            isVerticalSlider = true,
+                            currentPageText = currentPageText,
+                            // SY <--
+                            // KMK -->
+                            chapterFraction = chapterFraction,
+                            onChapterFractionChange = onChapterFractionChange,
+                            onChapterFractionChangeFinished = onChapterFractionChangeFinished,
+                            // KMK <--
+                            // Mihon -->
+                            modifier = Modifier.fillMaxHeight(verticalNavigatorHeight),
+                            // Mihon <--
+                        )
+                    }
+                    // Mihon <--
                 }
             }
             // KMK <--

@@ -898,6 +898,13 @@ class ReaderActivity : BaseActivity() {
         val forceHorizontalSeekbar by readerPreferences.forceHorizontalSeekbar().collectAsState()
         val landscapeVerticalSeekbar by readerPreferences.landscapeVerticalSeekbar().collectAsState()
         val leftHandedVerticalSeekbar by readerPreferences.leftVerticalSeekbar().collectAsState()
+        // Mihon -->
+        // The vertical navigator's height, as the settings slider stores it (a percentage).
+        // Coerced on the way in: a hand-edited preference of 0 or less would make
+        // fillMaxHeight(fraction) throw in layout, and a value is only ever written by a slider
+        // that cannot produce one.
+        val verticalNavigatorHeight by readerPreferences.verticalNavigatorHeight().collectAsState()
+        // Mihon <--
         val configuration = LocalConfiguration.current
         val verticalSeekbarLandscape =
             configuration.orientation == Configuration.ORIENTATION_LANDSCAPE && landscapeVerticalSeekbar
@@ -973,6 +980,9 @@ class ReaderActivity : BaseActivity() {
             },
             // Mihon -->
             onPageIndexChangeFinished = { isScrollingThroughPages = false },
+            // Mihon <--
+            // Mihon -->
+            verticalNavigatorHeight = (verticalNavigatorHeight / 100f).coerceIn(0.1f, 1f),
             // Mihon <--
             // KMK -->
             chapterFraction = bookViewer?.scrollFraction.takeIf { isTextChapter },

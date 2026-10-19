@@ -81,6 +81,17 @@ fun ChapterNavigator(
     onChapterFractionChange: (Float) -> Unit = {},
     onChapterFractionChangeFinished: () -> Unit = {},
     // KMK <--
+    // Mihon -->
+    /**
+     * Constrains the vertical layout's height when the caller sets it — the *Vertical navigator
+     * height* preference, as a fraction of the space between the top and bottom bars.
+     *
+     * This was exactly where the preference silently died: the slider in General settings wrote it,
+     * and no layout in this fork ever read it, in any viewer. Mihon's navigator takes the same
+     * parameter for the same reason.
+     */
+    modifier: Modifier = Modifier,
+    // Mihon <--
 ) {
     // SY -->
     if (isVerticalSlider) {
@@ -102,6 +113,9 @@ fun ChapterNavigator(
             onChapterFractionChange = onChapterFractionChange,
             onChapterFractionChangeFinished = onChapterFractionChangeFinished,
             // KMK <--
+            // Mihon -->
+            modifier = modifier,
+            // Mihon <--
         )
         return
     }
@@ -127,9 +141,12 @@ fun ChapterNavigator(
     // We explicitly handle direction based on the reader viewer rather than the system direction
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         Row(
-            modifier = Modifier
+            // Mihon --> the caller's modifier leads the chain, so the vertical navigator's height
+            // fraction reaches the layout that honours it; horizontal callers pass the default.
+            modifier = modifier
                 .fillMaxWidth()
                 .padding(horizontal = horizontalPadding),
+            // Mihon <--
             verticalAlignment = Alignment.CenterVertically,
         ) {
             FilledIconButton(
@@ -268,6 +285,10 @@ fun ChapterNavigatorVert(
     onChapterFractionChange: (Float) -> Unit = {},
     onChapterFractionChangeFinished: () -> Unit = {},
     // KMK <--
+    // Mihon -->
+    /** The caller's height constraint for the vertical layout; see the horizontal variant's doc. */
+    modifier: Modifier = Modifier,
+    // Mihon <--
 ) {
     val isTabletUi = isTabletUi()
     val verticalPadding = if (isTabletUi) 24.dp else 8.dp
@@ -275,7 +296,7 @@ fun ChapterNavigatorVert(
     val haptic = LocalHapticFeedback.current
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxHeight()
             .padding(vertical = verticalPadding, horizontal = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -318,7 +339,13 @@ fun ChapterNavigatorVert(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(text = chapterProgressText(chapterFraction), color = textColor)
-                CompositionLocalProvider(LocalLayoutDirection provides if (isRtl) LayoutDirection.Rtl else LayoutDirection.Ltr) {
+                // KMK --> Always LTR here, unlike the page slider below. `isRtl` describes how a
+                // *comic* advances, and mirroring is right for that: page 1 of an RTL manga is on the
+                // right, so the bar counts the other way. A document is not a comic. "How far through
+                // this chapter am I" is measured from its first line downward whatever direction its
+                // text runs, and a book's own stylesheet already lays RTL text out correctly. Mirroring
+                // this bar put 100% at the top and counted down, against labels saying otherwise.
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                     ProgressSlider(
                         modifier = Modifier
                             .padding(vertical = 8.dp)
