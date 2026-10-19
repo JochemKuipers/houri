@@ -44,6 +44,20 @@ object NovelTypographySettingKeys {
     val HYPHENATION = SettingKey("pref_novel_hyphenation", NOVEL_FOLLOW_PUBLISHER)
     val VERTICAL_WRITING = SettingKey("pref_novel_vertical_writing", NOVEL_FOLLOW_PUBLISHER)
 
+    /**
+     * Whether a paragraph after the first is indented.
+     *
+     * Tri-state like the three above, but defaulting to **on** rather than to the publisher. That is
+     * a deliberate exception and the reason is backwards compatibility: the stylesheet forced a 1em
+     * indent unconditionally before the setting existed, so `on` is what every existing reader is
+     * already reading, and defaulting to `follow` would quietly restyle their whole library the
+     * moment this shipped. The other three default to `follow` because they were no-ops before they
+     * were settings, and inventing a value for them would have invented a rendering.
+     *
+     * `follow` is still offered, and is the publisher's answer for anyone who wants it.
+     */
+    val PARAGRAPH_INDENT = SettingKey("pref_novel_paragraph_indent", "true")
+
     val LINE_SPACING = SettingKey("pref_novel_line_spacing", 1.6f)
     val PARAGRAPH_SPACING = SettingKey("pref_novel_paragraph_spacing", 0.0f)
     val FONT_SPACING = SettingKey("pref_novel_font_spacing", 0.0f)
@@ -70,6 +84,7 @@ object NovelTypographySettingKeys {
         JUSTIFIED,
         HYPHENATION,
         VERTICAL_WRITING,
+        PARAGRAPH_INDENT,
         LINE_SPACING,
         PARAGRAPH_SPACING,
         FONT_SPACING,

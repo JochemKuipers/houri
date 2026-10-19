@@ -1655,13 +1655,19 @@ class ReaderViewModel(
             (state.value.dialog as? Dialog.PageActions)?.page
         }
         // SY <--
-        if (page?.status != Page.State.Ready) return
+        // KMK --> The page's bytes are the precondition for every action in this sheet, and a text
+        // chapter's page is a document with no image stream — so the stream, not the page status, is
+        // what decides whether there is anything to act on. `page.stream!!` below used to be the
+        // check, which crashed on the IO worker with a bare NPE the first time a book reached here.
+        val readyPage = page?.takeIf { it.status == Page.State.Ready } ?: return
+        val stream = readyPage.stream ?: return
+        // KMK <--
         val manga = manga ?: return
 
         val notifier = SaveImageNotifier(context)
         notifier.onClear()
 
-        val filename = generateFilename(manga, page)
+        val filename = generateFilename(manga, readyPage)
 
         // Pictures directory.
         val relativePath = if (readerPreferences.folderPerManga().get()) {
@@ -1675,7 +1681,7 @@ class ReaderViewModel(
             try {
                 val uri = imageSaver.save(
                     image = Image.Page(
-                        inputStream = page.stream!!,
+                        inputStream = stream,
                         name = filename,
                         location = Location.Pictures.create(relativePath),
                     ),
@@ -1735,9 +1741,12 @@ class ReaderViewModel(
         location: Location,
         manga: Manga,
     ): Uri {
-        val stream1 = page1.stream!!
+        // KMK --> A missing stream is an error with a message, not a null dereference: this runs on
+        // the IO worker inside a coroutine, so the caller's `try` is long gone and an NPE here takes
+        // the process down with nothing in the log but a type name.
+        val stream1 = page1.stream ?: throw Exception("Page ${page1.number} has no image stream")
         ImageUtil.findImageType(stream1) ?: throw Exception("Not an image")
-        val stream2 = page2.stream!!
+        val stream2 = page2.stream ?: throw Exception("Page ${page2.number} has no image stream")
         ImageUtil.findImageType(stream2) ?: throw Exception("Not an image")
         val imageBitmap = ImageDecoder.newInstance(stream1())?.decode()!!
         val imageBitmap2 = ImageDecoder.newInstance(stream2())?.decode()!!
@@ -1781,24 +1790,34 @@ class ReaderViewModel(
             (state.value.dialog as? Dialog.PageActions)?.page
         }
         // SY <--
-        if (page?.status != Page.State.Ready) return
+        // KMK --> See `saveImage`: the bytes are the precondition, and a document has none. This is
+        // the `stream!!` the crash report pointed at — a long press in a book opened this sheet, and
+        // every option in it died here on the IO worker.
+        val readyPage = page?.takeIf { it.status == Page.State.Ready } ?: return
+        val stream = readyPage.stream ?: return
+        // KMK <--
         val manga = manga ?: return
 
         val destDir = context.cacheImageDir
 
-        val filename = generateFilename(manga, page)
+        val filename = generateFilename(manga, readyPage)
 
         try {
             viewModelScope.launchNonCancellable {
                 destDir.deleteRecursively()
                 val uri = imageSaver.save(
                     image = Image.Page(
-                        inputStream = page.stream!!,
+                        inputStream = stream,
                         name = filename,
                         location = Location.Cache,
                     ),
                 )
-                eventChannel.send(if (copyToClipboard) Event.CopyImage(uri) else Event.ShareImage(uri, page))
+                val event = if (copyToClipboard) {
+                    Event.CopyImage(uri)
+                } else {
+                    Event.ShareImage(uri, readyPage)
+                }
+                eventChannel.send(event)
             }
         } catch (e: Throwable) {
             logcat(LogPriority.ERROR, e)

@@ -2,6 +2,7 @@ package eu.kanade.presentation.browse.components
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -29,6 +30,9 @@ import tachiyomi.presentation.core.util.plus
 @Composable
 fun BrowseSourceList(
     mangaList: LazyPagingItems<StateFlow</* SY --> */Pair<Manga, RaisedSearchMetadata?>/* SY <-- */>>,
+    // KMK --> Owned by the screen, so it survives the branch swaps in `BrowseSourceContent`.
+    listState: LazyListState,
+    // KMK <--
     contentPadding: PaddingValues,
     onMangaClick: (Manga) -> Unit,
     onMangaLongClick: (Manga) -> Unit,
@@ -37,6 +41,7 @@ fun BrowseSourceList(
     // KMK <--
 ) {
     LazyColumn(
+        state = listState,
         contentPadding = contentPadding + PaddingValues(vertical = 8.dp),
     ) {
         item {

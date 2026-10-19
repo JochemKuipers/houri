@@ -47,6 +47,28 @@ Handled that the old parser did not:
 `EpubPaths` is deliberately pure and Android-free so it can be asserted off-device — see
 `scripts/kotlinc-check/harness/PathHarness.kt`.
 
+### `textContent()` must return on the element's OWN end tag
+
+`EpubXmlReader.textContent()` leaves the parser on the closing tag of the element it read, and every
+caller walks on with `next()`. The stop condition is therefore `depth <= startDepth`, and **both halves
+matter**. Stopping at `< startDepth` is one tag too far: the element's own end tag sits exactly at
+`startDepth`, so that test sails past it and keeps consuming.
+
+It was written that way, and the damage was silent and structural rather than visible:
+
+- `EpubTocParser` loses **every other** `<li>`, because `parseListItem` reads a label, steps forward one
+  tag too many, and swallows the next entry's anchor on its way. A contents list came out as every
+  *odd* chapter — which reads like a property of the book, not of the parser.
+- `EpubOpfParser` re-entered its `when` on the END_TAG it had just left, because its Dublin Core
+  branches read text without advancing and `event` was still START_TAG. `matches()` is true of an
+  END_TAG exactly as of a START_TAG, so each branch ran twice and the second run walked out of the
+  element and consumed the rest of `<metadata>`. Any book with more than one `dc:` element — every
+  real book — lost its title, author, publisher, language and date.
+
+The general rule: **a pull-parser walk that calls a consuming helper must advance afterwards**, and the
+helper must stop where its contract says. Either half alone leaves an off-by-one that a well-formed
+document converts into wrong output with no error anywhere.
+
 ### Two spines, two meanings
 
 - `textDocuments()` — the book as prose, one page per spine item. **This is what the reader uses.**

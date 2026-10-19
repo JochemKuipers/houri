@@ -102,6 +102,17 @@ data class NovelTypography(
      * rotates every line and destroys vertical ruby annotations.
      */
     val verticalWriting: Boolean? = null,
+
+    /**
+     * Whether a paragraph after the first is indented.
+     *
+     * Null follows the publisher, the same tri-state as [justified] and [hyphenation]. **Defaults to
+     * true** rather than to null, which is the exception among the tri-states and is deliberate: the
+     * stylesheet forced a 1em indent unconditionally before this was a setting, so true is what every
+     * existing reader is already reading, and null would quietly restyle their whole library on
+     * upgrade. The other three default to null because they did nothing before they were settings.
+     */
+    val paragraphIndent: Boolean? = true,
 ) {
     /**
      * The text size actually used for layout: [fontSizePt] scaled by [fontScale].

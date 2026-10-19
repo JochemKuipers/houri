@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.onStart
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.preference.SettingKey
@@ -105,6 +106,12 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
             NovelTypographySettingKeys.VERTICAL_WRITING.default,
         )
 
+    private val paragraphIndentPref: Preference<String>
+        get() = store.getString(
+            NovelTypographySettingKeys.PARAGRAPH_INDENT.key,
+            NovelTypographySettingKeys.PARAGRAPH_INDENT.default,
+        )
+
     /** True when the reader explicitly chose justify-on or justify-off; null to follow the book. */
     var justified: Boolean?
         get() = triState(justifiedPref.get())
@@ -117,6 +124,11 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
     var verticalWriting: Boolean?
         get() = triState(verticalWritingPref.get())
         set(value) = verticalWritingPref.set(encodeTriState(value))
+
+    /** Whether a paragraph after the first is indented; null to follow the book. */
+    var paragraphIndent: Boolean?
+        get() = triState(paragraphIndentPref.get())
+        set(value) = paragraphIndentPref.set(encodeTriState(value))
 
     // ------------------------------------------------------------ reads / writes
 
@@ -138,6 +150,7 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
         marginTop = marginTop.get(),
         marginBottom = marginBottom.get(),
         verticalWriting = verticalWriting,
+        paragraphIndent = paragraphIndent,
     ).sanitized()
 
     fun setTypography(value: NovelTypography) {
@@ -151,6 +164,7 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
         justified = t.justified
         hyphenation = t.hyphenation
         verticalWriting = t.verticalWriting
+        paragraphIndent = t.paragraphIndent
         paragraphSpacing.set(t.paragraphSpacing)
         lineSpacing.set(t.lineSpacing)
         fontSpacing.set(t.fontSpacing)
@@ -166,11 +180,11 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
      * The settings are separate preferences rather than one aggregate, so a change to any of them has
      * to be funnelled into a single emission of the *complete* value. The reader swaps one stylesheet
      * in the live DOM, and a flow that reported only which field moved would make it re-read and
-     * re-inject sixteen times for one slider drag that touched one of them.
+     * re-inject once per setting for one slider drag that touched one of them.
      *
-     * Each source is flattened to a bare "something moved" signal first. That keeps them sixteen
-     * `Flow<Unit>`s instead of sixteen different types, so `merge` has one type argument to infer
-     * rather than a sixteen-way common supertype to compute — and it leaves the payload read as one
+     * Each source is flattened to a bare "something moved" signal first. That keeps them all
+     * `Flow<Unit>`s instead of a different type each, so `merge` has one type argument to infer
+     * rather than a wide common supertype to compute — and it leaves the payload read as one
      * call to [typography] after the merge, so a value read cannot be torn across two settings.
      */
     fun changes(): Flow<NovelTypography> {
@@ -191,12 +205,34 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
             justifiedPref.changes().asSignal(),
             hyphenationPref.changes().asSignal(),
             verticalWritingPref.changes().asSignal(),
+            paragraphIndentPref.changes().asSignal(),
         )
         // Spread rather than passed as a List: `merge`'s overload set has no `Iterable` + transform
         // form, so a List argument silently binds to the single-argument Iterable overload instead and
         // the call does not compile.
         return merge(*signals).map { typography() }
     }
+
+    /**
+     * The same flow as [changes], but it also emits the value as it stands when it is collected.
+     *
+     * ### Why the two differ
+     *
+     * [changes] drops the synthetic first emission each preference flow makes, so a subscriber is
+     * told only about what moved. That is right for the reader, which already renders with the saved
+     * value and would otherwise re-lay-out the open page on every recomposition for nothing.
+     *
+     * It is wrong for a screen that has to *display* the settings: a fresh collector is handed
+     * nothing at all, so the page falls back to whatever initial value it was given — the defaults.
+     * Every preference then read as unset until the reader touched one, which is what "my settings
+     * show as default unless I change them again" was. The setting was stored correctly the whole
+     * time; the page was only ever looking at the fallback.
+     *
+     * Reading the value up front and then following [changes] is one extra read per collection, and
+     * it is read once rather than per emission, so a settings screen that is open across a drag still
+     * costs one emission per change.
+     */
+    fun values(): Flow<NovelTypography> = changes().onStart { emit(typography()) }
 
     /**
      * This preference's changes as a bare signal.

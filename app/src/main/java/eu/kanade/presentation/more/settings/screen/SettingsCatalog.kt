@@ -38,6 +38,11 @@ object SettingsCatalog {
         SettingsAppearanceScreen,
         SettingsLibraryScreen,
         SettingsReaderScreen,
+        // KMK -->
+        // The book reader's typography. Also reachable as the reader's own *Reading appearance* tab;
+        // this is the copy a reader can find without a book open.
+        SettingsBookReadingScreen,
+        // KMK <--
         SettingsDownloadScreen,
         SettingsTrackingScreen,
         // AM (CONNECTIONS) -->

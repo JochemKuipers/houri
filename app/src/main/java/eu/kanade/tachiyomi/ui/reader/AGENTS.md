@@ -154,6 +154,16 @@ the document's head as a `data:` URI — built into `NovelDocument.build`'s head
 that is not a CSS identifier: `user/My Font` unquoted would drop the whole `font-family` rule and
 the setting would silently do nothing.
 
+**CSS in the head has to be in a `<style>`, and the wrapper belongs to the injector.** `faceCss`
+returns a bare `@font-face` rule and `NovelDocument.build` takes it as `extraHead`. It was emitted
+loose, which is not a place CSS can be: the parser meets a character token in head insertion mode,
+has nothing to do with it, closes the head and opens a body to hold it — so the rule rendered as
+the paragraph of literal text the reader reported seeing, *and* declared a font the document was
+not using, so choosing an imported font silently did nothing either. Two failures from one missing
+tag. `NovelDocument.styleTag` wraps it (and escapes `</`, since the family is a reader-chosen string
+and can carry a closing tag); `DocumentHarness` asserts the rule is inside a `<style>`, inside the
+head, and cannot break out of one.
+
 **Progress is a character offset, not a page index.** A page index in a reflowable document means
 something different on every device and at every font size; `NovelProgress.Position`
 (`documentIndex:characterOffset:characterLength`) is stable across all of them. Chapters are weighted

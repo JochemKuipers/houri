@@ -75,17 +75,51 @@ internal object EpubOpfParser {
                     event = xml.next()
                 }
 
-                xml.matches(EpubXmlReader.NS_DC, "title") -> titles += xml.textContent()
-                xml.matches(EpubXmlReader.NS_DC, "creator") -> authors += xml.textContent()
-                xml.matches(EpubXmlReader.NS_DC, "publisher") -> publisher = xml.textContent().ifBlank { publisher }
-                xml.matches(EpubXmlReader.NS_DC, "language") -> language = xml.textContent().ifBlank { language }
-                xml.matches(EpubXmlReader.NS_DC, "description") -> description = xml.textContent().ifBlank { description }
-                xml.matches(EpubXmlReader.NS_DC, "date") -> date = xml.textContent().ifBlank { date }
-                xml.matches(EpubXmlReader.NS_DC, "rights") -> rights = xml.textContent().ifBlank { rights }
-                xml.matches(EpubXmlReader.NS_DC, "subject") -> subjects += xml.textContent()
+                // KMK --> Every Dublin Core branch steps past the tag it just read, and that step is
+                // load-bearing rather than tidy. `textContent()` leaves the parser on the element's
+                // closing tag; a branch that returns without advancing leaves `event` still saying
+                // START_TAG, so the loop re-enters `when` *on that closing tag*. `matches()` is true
+                // of an END_TAG exactly as it is of a START_TAG, so the same branch ran a second time
+                // — and the second read starts from an end tag and walks out of the element,
+                // consuming every sibling up to the end of `<metadata>`. Any book with more than one
+                // `dc:` element, which is every real book, therefore lost its title, author,
+                // publisher, language and date, and the file name stood in for all of them.
+                xml.matches(EpubXmlReader.NS_DC, "title") -> {
+                    titles += xml.textContent()
+                    event = xml.next()
+                }
+                xml.matches(EpubXmlReader.NS_DC, "creator") -> {
+                    authors += xml.textContent()
+                    event = xml.next()
+                }
+                xml.matches(EpubXmlReader.NS_DC, "publisher") -> {
+                    publisher = xml.textContent().ifBlank { publisher }
+                    event = xml.next()
+                }
+                xml.matches(EpubXmlReader.NS_DC, "language") -> {
+                    language = xml.textContent().ifBlank { language }
+                    event = xml.next()
+                }
+                xml.matches(EpubXmlReader.NS_DC, "description") -> {
+                    description = xml.textContent().ifBlank { description }
+                    event = xml.next()
+                }
+                xml.matches(EpubXmlReader.NS_DC, "date") -> {
+                    date = xml.textContent().ifBlank { date }
+                    event = xml.next()
+                }
+                xml.matches(EpubXmlReader.NS_DC, "rights") -> {
+                    rights = xml.textContent().ifBlank { rights }
+                    event = xml.next()
+                }
+                xml.matches(EpubXmlReader.NS_DC, "subject") -> {
+                    subjects += xml.textContent()
+                    event = xml.next()
+                }
                 xml.matches(EpubXmlReader.NS_DC, "identifier") -> {
                     val id = xml.attr("id") ?: identifiers.size.toString()
                     identifiers[id] = xml.textContent()
+                    event = xml.next()
                 }
 
                 xml.matches(EpubXmlReader.NS_OPF, "item") -> {

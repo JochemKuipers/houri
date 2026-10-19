@@ -7,10 +7,12 @@ import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelInline
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelReaderTheme
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelScrollBridge
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypographyCss
 import mihon.core.archive.EpubArchiveUrls
 import mihon.core.archive.EpubDoctype
 import mihon.core.archive.EpubMimeSniff
 import mihon.core.archive.MAX_SEARCH_HITS
+import tachiyomi.source.local.io.LocalBookFolder
 import mihon.core.archive.indexesOf
 import mihon.core.archive.plainTextOf
 import mihon.core.archive.stripImages
@@ -125,6 +127,40 @@ fun main() {
     contains("relative image kept", built, """src="../images/plate.jpg"""")
     contains("publisher stylesheet kept", built, """href="../style/main.css"""")
 
+    // ---------------- the reader-imported font ----------------
+    // A font the reader brought is declared with @font-face and reaches the document as stylesheet
+    // source. Bare text in the <head> is not a place CSS can be: the parser meets a character token
+    // in head insertion mode, closes the head and opens a body to hold it, so the rule rendered as
+    // the paragraph of literal text it is - and declared a font the document was not using either.
+    val faceCss =
+        """@font-face { font-family: "user/Inter-VariableFont_opsz,wght"; """ +
+            """src: url(data:font/ttf;base64,AAA); }"""
+    val withFace = NovelDocument.build(REAL_SPINE_ITEM, t, BASE, extraHead = faceCss)
+    val faceAt = withFace.indexOf("@font-face")
+    checkTrue("font face present", faceAt > 0)
+    checkTrue(
+        "font face inside a style element",
+        withFace.lastIndexOf("<style", faceAt) in 0 until faceAt &&
+            withFace.indexOf("</style>", faceAt) > faceAt,
+    )
+    checkTrue(
+        "font face inside the head",
+        faceAt > withFace.indexOf("<head>") && faceAt < withFace.indexOf("</head>"),
+    )
+    // A family name is reader-chosen, so it is arbitrary text — and a closing tag inside a
+    // stylesheet ends it before any CSS is read, taking every later rule with it.
+    val breakOut = NovelDocument.build(
+        REAL_SPINE_ITEM,
+        t,
+        BASE,
+        extraHead = """@font-face { font-family: "x</style><script>1</script><style>"; }""",
+    )
+    absent("font face cannot close its style element", breakOut, "</style><script>")
+    checkTrue("font face kept after escaping", breakOut.contains("""<\/style>"""))
+    // No font chosen is the common case, and it must not leave an empty element behind.
+    val noFace = NovelDocument.build(REAL_SPINE_ITEM, t, BASE, extraHead = "")
+    absent("no empty style element without a font", noFace, "kmk-reader-font")
+
     // ---------------- the continuous-reading segment marker ----------------
     // The live document's sections each sit in one marker the probe walks; the marker for the
     // section the document was loaded with is part of the document itself.
@@ -145,6 +181,36 @@ fun main() {
 
     check("fragment extracted", NovelContinuous.bodyFragment("<html><body>HELLO</body></html>"), "HELLO")
     check("fragment without a body is itself", NovelContinuous.bodyFragment("just text"), "just text")
+
+    // A section's own <style> has to travel with it. Dropped, an appended section is laid out in the
+    // *previous* section's type - a different line count for the same text, so the section is not the
+    // height the scroll arithmetic assumed and the compensation lands the reader somewhere else.
+    check(
+        "head styles travel with the fragment",
+        NovelContinuous.bodyFragment(
+            "<html><head><style>p{font-size:2em}</style><title>t</title></head><body><p>x</p></body></html>",
+        ),
+        "<style>p{font-size:2em}</style><p>x</p>",
+    )
+    check(
+        "nothing but styles is carried out of the head",
+        NovelContinuous.bodyFragment(
+            "<html><head><title>t</title><base href='x'/></head><body><p>x</p></body></html>",
+        ),
+        "<p>x</p>",
+    )
+    check(
+        "a style already in the body is not collected twice",
+        NovelContinuous.bodyFragment(
+            "<html><head><style>a{}</style></head><body><style>b{}</style><p>x</p></body></html>",
+        ).split("<style>").size - 1,
+        2,
+    )
+    check(
+        "an empty body is still passed through whole",
+        NovelContinuous.bodyFragment("<html><head><style>a{}</style></head><body></body></html>"),
+        "<html><head><style>a{}</style></head><body></body></html>",
+    )
     checkTrue(
         "wrapper carries the position",
         NovelContinuous.wrap(3, "a b.xhtml", "X").startsWith("""<div class="kmk-seg" data-i="3" data-u="a b.xhtml">"""),
@@ -154,6 +220,21 @@ fun main() {
         "append script carries the fragment quoted",
         NovelContinuous.appendScript("<p>x</p>", 4, "u.xhtml").contains(NovelScrollBridge.quoteForJs("<p>x</p>")),
     )
+
+    // The prepend compensation used to measure the new section in the same tick as the insert, which
+    // is short by the height of every image in it - NovelInline writes no width/height, so an image
+    // is zero-height until it decodes. An illustrated book therefore jumped, which is the whole of
+    // "epubs work but scrolling is so buggy".
+    val prepend = NovelContinuous.prependScript("<p>x</p>", 4, "u.xhtml")
+    checkTrue("prepend returns synchronously", prepend.contains("return true;"))
+    checkTrue("prepend hides the new section while it measures", prepend.contains("visibility = 'hidden'"))
+    checkTrue("prepend waits for images", prepend.contains("decode()"))
+    checkTrue("prepend measures again after they land", prepend.indexOf("decode()") < prepend.indexOf("function reveal"))
+    checkTrue("reveal clears the hiding", prepend.contains("div.style.visibility = '';"))
+    // A publisher stylesheet asking for smooth scrolling turns scrollBy into an animation, and a
+    // compensation that animates defeats itself.
+    checkTrue("prepend compensation is instant", prepend.contains("scrollBehavior = 'auto'"))
+    checkTrue("trim compensation is instant", NovelContinuous.trimScript(1, true).contains("scrollBehavior = 'auto'"))
 
     // ---------------- inlining: the book's resources travel inside the document ----------------
     // A fetcher that knows the archive: plate.jpg and main.css resolve (the css in turn names
@@ -265,6 +346,27 @@ fun main() {
     checkTrue("bridge no longer scrolls", !script.contains("scrollViewport"))
     checkTrue("bridge no longer probes edges", !script.contains("edge"))
 
+    // ---------------- tapping a figure ----------------
+    // In place rather than in a viewer: the engine already holds the decoded bitmap, so a transform
+    // costs nothing, cannot OOM on a long illustrated book, and works on an inline <svg>.
+    checkTrue("bridge zooms images", script.contains("zoomImage"))
+    checkTrue("only images answer a tap", script.contains("el.nodeName !== 'IMG'"))
+    checkTrue("the tap is consumed, not also scrolled", script.contains("stopPropagation"))
+    // Capture phase, so a publisher's own listener cannot claim the tap first and leave the figure
+    // doing nothing — which would look exactly like the feature not existing.
+    checkTrue("listener is capture-phase", script.contains("}, true);"))
+    // Zooming to the element's own corner throws away whatever the reader was looking at.
+    checkTrue("zoom origin is the tapped point", script.contains("getBoundingClientRect()"))
+    checkTrue("zoomed class is used", script.contains(NovelScrollBridge.ZOOMED_CLASS))
+    // The lift is the stylesheet's job, not the bridge's - assert it where it actually lives.
+    checkTrue(
+        "zoomed figure is lifted out of the text",
+        NovelTypographyCss.stylesheet(NovelTypography()).contains("img.${NovelScrollBridge.ZOOMED_CLASS}"),
+    )
+    // Every failure mode has to land on the behaviour that already worked.
+    checkTrue("missing bridge reads as not-a-figure", NovelScrollBridge.TAKE_IMAGE_TAP.contains(": false"))
+    checkTrue("the flag is read and cleared", script.contains("takeImageTap") && script.contains("self.imageTap = false"))
+
     // evaluateJavascript hands back the JSON encoding, so a script returning NaN arrives as "null".
     // Reading that as anything but "no value" breaks the position save on every document.
     check("parses a number", NovelScrollBridge.number("42.5"), 42.5)
@@ -321,7 +423,25 @@ fun main() {
         NovelScrollBridge.scrollToAnchor("100%d", 8).endsWith("(\"100%d\",8)"),
     )
 
-    // ---------------- XXE: the doctype never reaches a parser ----------------
+    // ---------------- the folder an import lands in ----------------
+    // The name arrives from a text field and is about to become a path segment. `..` is a folder
+    // name in a text field and a way out of the local directory on disk.
+    check("a plain name survives", LocalBookFolder.sanitize("Youngest Son 01"), "Youngest Son 01")
+    check("trailing space is dropped", LocalBookFolder.sanitize("  Warlock  "), "Warlock")
+    check("parent directory refused", LocalBookFolder.sanitize(".."), null)
+    check("current directory refused", LocalBookFolder.sanitize("."), null)
+    check("empty refused", LocalBookFolder.sanitize(""), null)
+    check("whitespace only refused", LocalBookFolder.sanitize("   "), null)
+    check("separators become spaces, not holes", LocalBookFolder.sanitize("a/b\\c"), "a b c")
+    check("a leading separator does not escape", LocalBookFolder.sanitize("/etc"), "etc")
+    // A name that is only separators reduces to nothing, which is the case that would otherwise
+    // create a folder called "" and quietly fail at the filesystem instead of here.
+    check("separators alone refused", LocalBookFolder.sanitize("///"), null)
+    check("control characters dropped", LocalBookFolder.sanitize("a\u0001b"), "ab")
+    check("a long name is capped", LocalBookFolder.sanitize("x".repeat(200))?.length, LocalBookFolder.MAX_LENGTH)
+    check("a non-ascii name survives", LocalBookFolder.sanitize("転生王子"), "転生王子")
+
+// ---------------- XXE: the doctype never reaches a parser ----------------
     // The defence is on the input rather than on the parser's class name, precisely so that it can be
     // checked here. An assertion about which implementation we got could not fail usefully; the
     // absence of a SYSTEM identifier in these bytes is the property that actually matters.

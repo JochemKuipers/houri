@@ -2,7 +2,11 @@ package eu.kanade.presentation.browse
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Public
@@ -66,6 +70,22 @@ fun BrowseSourceContent(
     // KMK <--
 ) {
     val context = LocalContext.current
+
+    // KMK --> Created here, above every branch below, and handed to whichever one renders.
+    //
+    // A `rememberLazyGridState()` written inside a branch belongs to that branch's composition
+    // group, so the moment the branch stops being taken the state leaves the composition and is
+    // discarded — the grid comes back with a fresh state and scrolls to the top. Two branches in
+    // this function swap on conditions that flip routinely: the first page loading, and the display
+    // mode. A `rememberSaveable` is restored only if the value is re-registered before the restored
+    // one is asked for, which a branch that is not composed never does.
+    //
+    // Owning it at the top of the screen makes the swap irrelevant: whichever branch renders, it
+    // renders with the state that was already there. Both kinds exist because the grid layouts and
+    // the list layouts do not share a state type, and only one is ever composed.
+    // KMK <--
+    val gridState = rememberLazyGridState()
+    val listState = rememberLazyListState()
 
     val errorState = mangaList.loadState.refresh.takeIf { it is LoadState.Error }
         ?: mangaList.loadState.append.takeIf { it is LoadState.Error }
@@ -159,6 +179,7 @@ fun BrowseSourceContent(
     if (source?.isEhBasedSource() == true && ehentaiBrowseDisplayMode) {
         BrowseSourceEHentaiList(
             mangaList = mangaList,
+            listState = listState,
             contentPadding = contentPadding,
             onMangaClick = onMangaClick,
             onMangaLongClick = onMangaLongClick,
@@ -174,6 +195,7 @@ fun BrowseSourceContent(
         LibraryDisplayMode.ComfortableGrid -> {
             BrowseSourceComfortableGrid(
                 mangaList = mangaList,
+                gridState = gridState,
                 columns = columns,
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,
@@ -187,6 +209,7 @@ fun BrowseSourceContent(
         LibraryDisplayMode.ComfortableGridPanorama -> {
             BrowseSourceComfortableGrid(
                 mangaList = mangaList,
+                gridState = gridState,
                 columns = columns,
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,
@@ -200,6 +223,7 @@ fun BrowseSourceContent(
         LibraryDisplayMode.StaggeredGrid -> {
             BrowseSourceComfortableGrid(
                 mangaList = mangaList,
+                gridState = gridState,
                 columns = columns,
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,
@@ -211,6 +235,7 @@ fun BrowseSourceContent(
         LibraryDisplayMode.List -> {
             BrowseSourceList(
                 mangaList = mangaList,
+                listState = listState,
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,
                 onMangaLongClick = onMangaLongClick,
@@ -222,6 +247,7 @@ fun BrowseSourceContent(
         LibraryDisplayMode.CompactGrid, LibraryDisplayMode.CoverOnlyGrid -> {
             BrowseSourceCompactGrid(
                 mangaList = mangaList,
+                gridState = gridState,
                 columns = columns,
                 contentPadding = contentPadding,
                 onMangaClick = onMangaClick,

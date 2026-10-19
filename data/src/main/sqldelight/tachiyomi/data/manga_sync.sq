@@ -30,6 +30,13 @@ delete:
 DELETE FROM manga_sync
 WHERE manga_id = :mangaId AND sync_id = :syncId;
 
+-- KMK: logout drops a tracker's whole local record, not one entry's. Without this, logging out of
+-- e.g. MyAnimeList left every score and status it had written behind, and logging back in showed a
+-- populated list the user believed they had signed out of.
+deleteByTrackerId:
+DELETE FROM manga_sync
+WHERE sync_id = :trackerId;
+
 getTracks:
 SELECT *
 FROM manga_sync;

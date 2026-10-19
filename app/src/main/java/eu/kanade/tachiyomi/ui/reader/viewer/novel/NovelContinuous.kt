@@ -79,13 +79,30 @@ object NovelContinuous {
      * to the whole document, which for sections of the same book is what their author intended.
      * Anything before `<body>` that is not a style is dropped: the live document already has its
      * charset, its base and the reader's own rules.
+     *
+     * ### Why this was measured wrong, and the text jumped
+     *
+     * The first version took the body alone, which is not what the paragraph above describes, and
+     * for a book whose sections carry their own stylesheet — a web-novel source hands over one HTML
+     * document per chapter, and each has its own — an appended section rendered in the *previous*
+     * section's type. Different font size means a different line count for the same text, so the
+     * section was not the height the scroll arithmetic had assumed, and the compensation landed the
+     * reader somewhere other than where they were.
+     *
+     * Styles are read from the markup **before** `<body>` only, so a `<style>` the publisher put in
+     * the body is not collected twice.
      */
     fun bodyFragment(markup: String): String {
-        val match = BODY.find(markup) ?: return markup
-        return match.groupValues[1].ifBlank { markup }
+        val body = BODY.find(markup) ?: return markup
+        val inner = body.groupValues[1].ifBlank { return markup }
+        val head = markup.substring(0, body.range.first)
+        return HEAD_STYLE.findAll(head).joinToString("") { it.value } + inner
     }
 
     private val BODY = Regex("""<body\b[^>]*>([\s\S]*)</body\s*>""", RegexOption.IGNORE_CASE)
+
+    /** A complete `<style>` element, closing tag included — a self-closing form is not a thing. */
+    private val HEAD_STYLE = Regex("""<style\b[^>]*>[\s\S]*?</style\s*>""", RegexOption.IGNORE_CASE)
 
     // ---------------------------------------------------------------- scripts
 
@@ -146,9 +163,26 @@ object NovelContinuous {
     /**
      * Prepends one section's [html] as the segment at [position].
      *
-     * The scroll compensation shares the script: both land before the next frame paints, so the
-     * reader's viewport never shows the content shifting underneath it — an insert without the
-     * compensation would jump them to the new section's top.
+     * ### Why this is not a synchronous insert
+     *
+     * The obvious version inserts and compensates by `div.offsetHeight` in one go, and it is wrong
+     * in a way that only shows in an illustrated book. [NovelInline] rewrites every `<img>` to a
+     * `data:` URI and deliberately leaves no `width`/`height` behind, so an image occupies **zero
+     * height until it has decoded**. Read in the same tick as the insert, a section with plates in
+     * it measures short by the height of all of them.
+     *
+     * So the insert is compensated twice. The node goes in hidden and is measured immediately,
+     * which holds the painted text exactly where it is; its images are then decoded and it is
+     * measured again, and the difference is compensated too. Revealing only after that means the
+     * growth the reader would otherwise watch happen above them happens behind `visibility: hidden`,
+     * and by the time anything is painted the offset has been made good.
+     *
+     * Compensation is also forced to `scroll-behavior: auto` for its duration. A publisher
+     * stylesheet that asks for smooth scrolling turns `scrollBy` into an animation, and a
+     * compensation that animates is the opposite of what it is for.
+     *
+     * The script still returns `true` synchronously, because the host takes its callback from that
+     * return value and must not wait on a book's images to update its window bookkeeping.
      */
     fun prependScript(html: String, position: Int, url: String): String = """
         (function(){
@@ -157,9 +191,29 @@ object NovelContinuous {
           div.setAttribute('data-i', '$position');
           div.setAttribute('data-u', ${NovelScrollBridge.quoteForJs(url)});
           div.innerHTML = ${NovelScrollBridge.quoteForJs(html)};
+          div.style.visibility = 'hidden';
           document.body.insertBefore(div, document.body.firstChild);
-          window.scrollBy(0, div.offsetHeight);
+          jump(div.offsetHeight);
+          var imgs = div.querySelectorAll('img');
+          var waits = [];
+          for (var i = 0; i < imgs.length; i++) {
+            if (imgs[i].decode) waits.push(imgs[i].decode());
+          }
+          Promise.all(waits).then(reveal, reveal);
           return true;
+
+          function jump(px) {
+            if (!px) return;
+            var root = document.documentElement;
+            var was = root.style.scrollBehavior;
+            root.style.scrollBehavior = 'auto';
+            window.scrollBy(0, px);
+            root.style.scrollBehavior = was;
+          }
+          function reveal() {
+            jump(div.offsetHeight);
+            div.style.visibility = '';
+          }
         })()
     """
 
@@ -174,7 +228,15 @@ object NovelContinuous {
           if (!el || !el.parentNode) return false;
           var h = el.offsetHeight;
           el.parentNode.removeChild(el);
-          if ($compensate) window.scrollBy(0, -h);
+          if ($compensate) {
+            // Same reasoning as the prepend: a publisher asking for smooth scrolling would animate
+            // a jump that exists only to hold the reader still.
+            var root = document.documentElement;
+            var was = root.style.scrollBehavior;
+            root.style.scrollBehavior = 'auto';
+            window.scrollBy(0, -h);
+            root.style.scrollBehavior = was;
+          }
           return true;
         })()
     """

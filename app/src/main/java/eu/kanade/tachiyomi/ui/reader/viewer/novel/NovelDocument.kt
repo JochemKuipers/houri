@@ -43,8 +43,13 @@ object NovelDocument {
      * its body content is wrapped in the marker `NovelContinuous` probes. Null for callers that
      * are not the reader — the harness among them.
      *
-     * [extraHead] is emitted after the base and the charset — the reader font's `@font-face`,
-     * which is CSS and so cares about the cascade but not about the base.
+     * [extraHead] is stylesheet source, emitted after the base and the charset — the reader font's
+     * `@font-face`, which is CSS and so cares about the cascade but not about the base. It is
+     * wrapped in a `<style>` here rather than by the caller, because CSS sitting loose in the
+     * `<head>` is not CSS: the parser meets a character token in head insertion mode, has nothing
+     * to do with it, closes the head and opens a body to hold it. The rule then renders as the
+     * paragraph of literal text it is — which is what picking a font from the reader's own list
+     * used to do, and it declared a font the document was still not using.
      *
      * The head content is injected at **two** points, and the split is not cosmetic:
      *
@@ -68,7 +73,7 @@ object NovelDocument {
         // KMK <--
     ): String {
         val document = wrapBody(normalize(source), segment)
-        val prologue = prologue(baseUrl) + extraHead
+        val prologue = prologue(baseUrl) + styleTag(extraHead)
         val epilogue = epilogue(typography)
 
         val headOpen = HEAD_OPEN.find(document)
@@ -158,6 +163,19 @@ object NovelDocument {
         // that wins — so a book that got its encoding wrong is corrected rather than left alone.
         appendLine("""<meta http-equiv="Content-Type" content="text/html; charset=utf-8">""")
     }
+
+    /**
+     * Wraps [css] in a `<style>` for the head, or returns nothing for nothing.
+     *
+     * Bare text is not a place CSS can be, so this is not decoration. See [build].
+     *
+     * `</` is escaped the way [NovelTypographyCss.styleTag] escapes it, and for the same reason it
+     * matters there: a closing tag inside a stylesheet ends it in the parser before any CSS is read.
+     * A reader-imported font's family is an arbitrary reader-chosen string, so the one thing these
+     * rules carry is exactly the kind of text that can contain it.
+     */
+    private fun styleTag(css: String): String =
+        if (css.isBlank()) "" else """<style id="kmk-reader-font">${css.replace("</", "<\\/")}</style>"""
 
     /** Goes at the very end of the head, so it outranks the publisher's rules on source order. */
     private fun epilogue(typography: NovelTypography): String = buildString {

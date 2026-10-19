@@ -91,8 +91,13 @@ object NovelTypographyCss {
             appendLine("  margin-bottom: var(--kmk-para) !important;")
             appendLine("}")
             // Paragraph indent is the publisher's; spacing is ours. Keeping both is what stops the
-            // page looking like a wall of unindented lines.
-            appendLine("p + p { text-indent: 1em !important; }")
+            // page looking like a wall of unindented lines - so `on` emits the indent and `off` has to
+            // emit `0` rather than nothing, or a publisher that indents would keep indenting and the
+            // setting would read as having done nothing. `null` omits the rule entirely, which is the
+            // only way to say "follow the publisher" once the reader has seen both answers.
+            t.paragraphIndent?.let {
+                appendLine("""p + p { text-indent: ${if (it) "1em" else "0"} !important; }""")
+            }
 
             // Headings keep the publisher's scale but inherit the colour choice.
             textColor?.let { appendLine("h1, h2, h3, h4, h5, h6 { color: $it !important; }") }
@@ -101,6 +106,13 @@ object NovelTypographyCss {
             if (t.marginLeft > 0f || t.marginRight > 0f) {
                 appendLine("img, svg, video { max-width: 100% !important; height: auto !important; }")
             }
+            // A figure the reader has tapped open. Lifted out of the text so it reads as magnified
+            // rather than as a stretched picture, and `!important` because the publisher's own
+            // `position` on an image would otherwise win on specificity and leave it in the line.
+            appendLine(
+                "${NovelScrollBridge.ZOOMED_CLASS.let { "img.$it" }} " +
+                    "{ position: relative !important; z-index: 2 !important; cursor: zoom-out !important; }",
+            )
             appendLine("/* end komikku typography */")
         }
     }
