@@ -1,6 +1,7 @@
 // KMK -->
 package eu.kanade.presentation.more.settings.screen
 
+import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import eu.kanade.presentation.more.settings.Preference
@@ -55,7 +56,12 @@ object SettingsBookReadingScreen : SearchableSettings {
         ),
         Preference.PreferenceItem.CustomPreference(
             title = stringResource(KMR.strings.novel_reader_typography),
-            content = { NovelTypographyPage() },
+            // The page emits its rows bare and relies on the host for horizontal stacking — in the
+            // reader that is the scrolled Column at ReaderSettingsDialog. A LazyColumn item is a
+            // single measurement slot, not a Column, so here the same bare rows would all land in
+            // that one slot and draw on top of each other. Every other CustomPreference content in
+            // this codebase is likewise a container; wrap instead of relying on the host again.
+            content = { Column { NovelTypographyPage() } },
         ),
     )
 }

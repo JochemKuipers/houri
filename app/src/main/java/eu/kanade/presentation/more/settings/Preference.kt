@@ -275,6 +275,9 @@ sealed class Preference {
             override val ramGated: Boolean = false,
             override val grayOut: Boolean = false,
             // KMK <--
+            // Rendered inside a LazyColumn item, which is a single measurement slot, not a Column:
+            // content that emits more than one root composable must wrap them in a container
+            // (see SettingsBookReadingScreen), or every root draws on top of the first.
             val content: @Composable () -> Unit,
         ) : PreferenceItem<Unit, Unit>() {
             override val enabled: Boolean = true
