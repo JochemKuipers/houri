@@ -179,6 +179,8 @@
     <string name="sync_progress_from_trackers_up_to_chapter">Sync progress from Trackers up to chapter %d</string>
     <string name="pref_track_on_add_library">Open track menu on adding to library</string>
     <string name="pref_priority_tracker">Priority tracker</string>
+    <string name="pref_delete_track_records_on_logout">Delete tracking records on logout</string>
+    <string name="pref_delete_track_records_on_logout_summary">When signing out of a service, also delete every score and status it synced to your library. Leave it off to keep the records so the next login re-links them without re-syncing from scratch</string>
     <!-- Sync section -->
     <string name="pref_show_restoring_progress_banner">Show restoring progress banner</string>
     <string name="pref_show_syncing_progress_banner">Show syncing progress banner</string>

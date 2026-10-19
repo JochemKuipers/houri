@@ -16,6 +16,8 @@ files moved. See .github/scripts/release_notes.py.
 
 ### Improve
 
+- **Tracking**: Logging out of a tracker now keeps your library's tracking records (scores and statuses) by default, so re-logging in re-links them without re-syncing from scratch. A new "Delete tracking records on logout" toggle in *Settings → Tracking* (off by default) restores the old behavior, where signing out also wiped those records from the database.
+
 - **Backup restore**: The restore screen stays responsive while a large backup is validated, and the database folds its write-ahead log when a restore finishes so the restored data is fully settled on disk instead of sitting in a large log file.
 
 - **Local source**: When a book's own title is only the volume half of a series title (an EPUB whose OPF is filled with "and the Prisoner of Azkaban" in a "Harry Potter" folder), chapter names now lead with the series title, so every row says which volume it belongs to. Book tables of contents that carry markup inside their labels no longer show it either.

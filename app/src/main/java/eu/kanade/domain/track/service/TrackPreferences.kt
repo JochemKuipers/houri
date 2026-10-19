@@ -64,6 +64,13 @@ class TrackPreferences(
     fun autoSyncProgressFromTrackers() = preferenceStore.getBoolean("pref_auto_sync_progress_from_trackers_key", true)
 
     /**
+     * Whether logging out of a tracker also deletes every local track record for
+     * that service (all of its `manga_sync` rows). Off by default — `logout()`
+     * drops only the credentials unless the user opts into the wipe.
+     */
+    fun deleteTrackRecordsOnLogout() = preferenceStore.getBoolean("pref_delete_track_records_on_logout_key", false)
+
+    /**
      * Appwide priority tracker for tracker-backed metadata (sequels/prequels).
      * 0 (default) means none — callers fall back to logged-in trackers in order.
      * Set by long-pressing a logged-in tracker in the tracking settings.

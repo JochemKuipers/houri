@@ -150,6 +150,11 @@ object SettingsTrackingScreen : SearchableSettings {
                 preference = trackPreferences.autoSyncProgressFromTrackers(),
                 title = stringResource(KMR.strings.pref_auto_sync_progress_from_trackers),
             ),
+            Preference.PreferenceItem.SwitchPreference(
+                preference = trackPreferences.deleteTrackRecordsOnLogout(),
+                title = stringResource(KMR.strings.pref_delete_track_records_on_logout),
+                subtitle = stringResource(KMR.strings.pref_delete_track_records_on_logout_summary),
+            ),
             // KMK <--
             // SY -->
             Preference.PreferenceItem.SwitchPreference(
@@ -375,18 +380,23 @@ object SettingsTrackingScreen : SearchableSettings {
                             // `logout()` only drops the credentials, so every score and status the
                             // service had written stayed in `manga_sync` and came straight back on the
                             // next login — a signed-out account that still looked fully tracked.
-                            // Ordered after the logout so the credential state is already settled
-                            // whether or not the delete succeeds, and off the main thread because it
-                            // is one statement per tracked entry on a large library.
-                            scope.launchIO {
-                                // `try`/`catch`, not `runCatching`: its block is not a suspend
-                                // lambda, so wrapping the delete in it does not compile.
-                                try {
-                                    globalAppGraph.trackRepository.deleteAllByTrackerId(tracker.id)
-                                } catch (e: Exception) {
-                                    withUIContext { context.toast(e.message.toString()) }
+                            // Opt-in: the wipe runs only when the tracking-settings toggle is on,
+                            // read at click time so a just-flipped switch takes effect without a
+                            // screen reload. Ordered after the logout so the credential state is
+                            // already settled whether or not the delete succeeds, and off the main
+                            // thread because it is one statement per tracked entry on a large library.
+                            if (globalAppGraph.trackPreferences.deleteTrackRecordsOnLogout().get()) {
+                                scope.launchIO {
+                                    // `try`/`catch`, not `runCatching`: its block is not a suspend
+                                    // lambda, so wrapping the delete in it does not compile.
+                                    try {
+                                        globalAppGraph.trackRepository.deleteAllByTrackerId(tracker.id)
+                                    } catch (e: Exception) {
+                                        withUIContext { context.toast(e.message.toString()) }
+                                    }
                                 }
                             }
+                            // KMK <--
                             onDismissRequest()
                             context.toast(MR.strings.logout_success)
                         },
