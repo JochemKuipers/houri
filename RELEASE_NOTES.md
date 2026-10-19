@@ -16,6 +16,8 @@ files moved. See .github/scripts/release_notes.py.
 
 ### Improve
 
+- **Reader (EPUB books)**: The book's contents list now has a scrollbar, so a long table of contents can be jumped through instead of only flick-scrolled.
+
 - **Tracking**: Logging out of a tracker now keeps your library's tracking records (scores and statuses) by default, so re-logging in re-links them without re-syncing from scratch. A new "Delete tracking records on logout" toggle in *Settings → Tracking* (off by default) restores the old behavior, where signing out also wiped those records from the database.
 
 - **Backup restore**: The restore screen stays responsive while a large backup is validated, and the database folds its write-ahead log when a restore finishes so the restored data is fully settled on disk instead of sitting in a large log file.

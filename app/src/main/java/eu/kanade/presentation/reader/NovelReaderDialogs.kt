@@ -35,6 +35,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelSearchScreenModel
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTocEntry
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTocScreenModel
 import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
 
@@ -94,7 +95,7 @@ fun NovelTocDialog(
                             },
                         )
                     } else {
-                        LazyColumn(
+                        ScrollbarLazyColumn(
                             state = listState,
                             contentPadding = PaddingValues(vertical = 8.dp),
                         ) {
