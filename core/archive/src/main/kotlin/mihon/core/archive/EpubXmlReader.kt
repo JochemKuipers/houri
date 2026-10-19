@@ -93,8 +93,21 @@ internal class EpubXmlReader private constructor(private val parser: XmlPullPars
      *
      * Bounded because both callers are exposed to hostile input: a book's TOC can nest a label
      * containing anything, and a `dc:description` is unbounded markup re-serialised into a
-     * `StringBuilder` before anybody decides whether it is worth showing. The parser is left
-     * mid-subtree, which is safe — every caller's loop terminates on `END_DOCUMENT`.
+     * `StringBuilder` before anybody decides whether it is worth showing.
+     *
+     * Returns at the element's **own** closing tag, leaving the parser there, which is the contract
+     * [textContent] documents and the only one a caller walking with `next()` can build on.
+     *
+     * The stopping condition used to be `depth < startDepth`, which is one tag *too far*: the
+     * element's own end tag sits at `startDepth`, so that test sailed past it and kept consuming —
+     * a `dc:description` holding `<p>` elements ran on through its siblings to the end of
+     * `<metadata>`, swallowing every field declared after it. Worse, it left the parser past the end
+     * tag the caller then advanced from, so a label followed by a nested `<ol>` lost its children
+     * and every Dublin Core field after the first came back empty for any real book.
+     *
+     * When the ceiling is hit the parser is left mid-subtree rather than on the end tag. That is safe
+     * for every caller — each one's loop terminates on `END_DOCUMENT` — and the alternative,
+     * rescanning to find the end tag, is exactly the unbounded walk this method exists to prevent.
      */
     private fun appendTextContentTo(out: StringBuilder) {
         val startDepth = parser.depth
@@ -122,8 +135,9 @@ internal class EpubXmlReader private constructor(private val parser: XmlPullPars
                     }
                     out.append('>')
                 }
-                // A self-closing element re-emits as <x></x> rather than <x/>; both parse identically.
-                XmlPullParser.END_TAG -> if (parser.depth < startDepth) return
+                // The element's own closing tag, or one of its ancestors' — either way, this text
+                // content is over.
+                XmlPullParser.END_TAG -> if (parser.depth <= startDepth) return
                 XmlPullParser.END_DOCUMENT -> return
                 else -> Unit
             }

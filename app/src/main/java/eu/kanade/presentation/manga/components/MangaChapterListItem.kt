@@ -161,11 +161,21 @@ fun MangaChapterListItem(
                     Text(
                         text = title,
                         style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
+                        // KMK --> Two lines, not one. A book's own `dc:title` replaces the file name
+                        // as the chapter name (see EpubReaderExtensions.fillMetadata), and a title
+                        // like "Harry Potter and the Prisoner of Azkaban" does not survive a single
+                        // line in a split pane — the row showed a fragment with no way to tell which
+                        // volume it was. Two lines shows enough of it to identify the book.
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        onTextLayout = { textHeight = it.size.height },
+                        // One line's height, however many lines it took: the bookmark icon sizes itself
+                        // to the text, and a two-line title would otherwise give it a two-line icon.
+                        onTextLayout = {
+                            textHeight = it.size.height / it.lineCount.coerceAtLeast(1)
+                        },
                         color = LocalContentColor.current.copy(alpha = if (read) DISABLED_ALPHA else 1f),
                     )
+                    // KMK <--
                 }
 
                 Row {

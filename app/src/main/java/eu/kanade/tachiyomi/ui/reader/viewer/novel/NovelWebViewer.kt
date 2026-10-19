@@ -114,10 +114,9 @@ internal class NovelWebViewer(
      * The document asked for but perhaps not yet read.
      *
      * Separate from [currentPage] because the two answer different questions while a document is in
-     * flight: `currentPage` is what is on the screen, and it is what a long press and the reading
-     * position belong to. Navigation needs the one the reader is heading for, or a second tap while
-     * the first is still loading would resolve its neighbour against the document they just left and
-     * send them back.
+     * flight: `currentPage` is what is on the screen, and it is what the reading position belongs to.
+     * Navigation needs the one the reader is heading for, or a second tap while the first is still
+     * loading would resolve its neighbour against the document they just left and send them back.
      */
     private var pendingPage: ReaderPage? = null
 
@@ -337,9 +336,15 @@ internal class NovelWebViewer(
                 return true
             }
 
-            override fun onLongPress(e: MotionEvent) {
-                currentPage?.let { activity.onPageLongTap(it) }
-            }
+            // KMK --> Deliberately no `onLongPress`. In an image chapter a long press opens the
+            // page-actions sheet — Set as cover, Share, Save — because that is the only thing a long
+            // press can mean there. In a book it means "select text", and the WebView already answers
+            // it with its own selection toolbar. Opening our sheet as well put an image toolbar on
+            // top of the selection one (reported as "this shows up when I select text"), and every
+            // action in it then crashed: those actions act on `ReaderPage.stream`, and a document has
+            // no image stream, so the stream was null. Selecting text is the gesture a book has; the
+            // sheet has nothing to offer one.
+            // KMK <--
 
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
                 if (abs(dy) > MIN_SCROLL_TO_HIDE_MENU && activity.viewModel.state.value.menuVisible) {
@@ -650,6 +655,26 @@ internal class NovelWebViewer(
     }
 
     private fun handleTap(x: Float) {
+        val width = webView.width
+        if (width <= 0) return
+
+        // A figure answers its own tap, so ask before doing anything else with it. One round trip,
+        // and the whole tap waits on it - which is the trade for not scrolling a screen away from a
+        // picture the reader was trying to look at. The answer is false whenever the document cannot
+        // answer at all, and the tap then falls through to exactly what it did before.
+        webView.evaluateJavascript(NovelScrollBridge.TAKE_IMAGE_TAP) { answer ->
+            if (answer == "true") return@evaluateJavascript
+            scrollTap(x)
+        }
+    }
+
+    /**
+     * A tap that was not a figure: menu in the middle, scroll at either edge.
+     *
+     * Split out of [handleTap] so the figure check can sit in front of it without either half
+     * having to know the other exists.
+     */
+    private fun scrollTap(x: Float) {
         val width = webView.width
         if (width <= 0) return
 

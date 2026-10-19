@@ -16,6 +16,7 @@ import mihon.core.archive.EpubTextSource
 import mihon.core.archive.epubReader
 import tachiyomi.core.common.storage.extension
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.source.local.io.Archive
 import tachiyomi.source.local.io.LocalSourceFileSystem
 import java.io.InputStream
 
@@ -84,9 +85,9 @@ internal class LocalEpubTextAdapter(
             logcat(LogPriority.ERROR) { "LocalSource: refusing epub chapter url ${chapter.url}" }
             return null
         }
-        return fileSystem.getBaseDirectory()
-            ?.findFile(series)
-            ?.findFile(file)
+        // Not `findFile(series)?.findFile(file)`: an entry that is a single book file has no folder
+        // to descend into, and there the two halves of the url name the same file.
+        return fileSystem.findChapterFile(series, file)
             ?.takeIf { isEpub(it) }
             ?.epubReader(context)
     }
@@ -149,15 +150,22 @@ internal class LocalEpubTextAdapter(
         openEpub(chapter)?.use { it.readsAsProse() } ?: false
 
     private fun allChaptersAreEpub(seriesUrl: String): Boolean {
-        val dir = seriesDirectory(seriesUrl) ?: return false
-        val files = dir.listFiles().orEmpty()
+        val entry = seriesEntry(seriesUrl) ?: return false
+        // A single book file in the base directory is the whole entry, so there is nothing to weigh
+        // it against - but only an `.epub` is a book. A lone `.cbz` is a comic.
+        if (!entry.isDirectory) return isEpub(entry)
+        val files = entry.listFiles().orEmpty()
             .filter { !it.isDirectory && !it.name.orEmpty().startsWith('.') }
         return files.isNotEmpty() && files.all { isEpub(it) }
     }
 
-    private fun seriesDirectory(seriesUrl: String): UniFile? {
+    /**
+     * The entry a series url names: its folder, or the single book file it consists of.
+     */
+    private fun seriesEntry(seriesUrl: String): UniFile? {
         if (!isEntryName(seriesUrl)) return null
-        return fileSystem.getBaseDirectory()?.findFile(seriesUrl)?.takeIf { it.isDirectory }
+        val entry = fileSystem.getBaseDirectory()?.findFile(seriesUrl) ?: return null
+        return entry.takeIf { it.isDirectory || Archive.isSupportedSingleFile(it) }
     }
 
     private companion object {

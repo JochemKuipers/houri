@@ -17,6 +17,7 @@ import androidx.compose.material.icons.outlined.GetApp
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Security
@@ -225,6 +226,14 @@ object SettingsMainScreen : Screen() {
             icon = Icons.Outlined.GetApp,
             screen = SettingsDownloadScreen,
         ),
+        // KMK -->
+        Item(
+            titleRes = KMR.strings.pref_category_book_reading,
+            subtitleRes = KMR.strings.pref_book_reading_summary,
+            icon = Icons.Outlined.MenuBook,
+            screen = SettingsBookReadingScreen,
+        ),
+        // KMK <--
         Item(
             titleRes = MR.strings.pref_category_tracking,
             subtitleRes = MR.strings.pref_tracking_summary,

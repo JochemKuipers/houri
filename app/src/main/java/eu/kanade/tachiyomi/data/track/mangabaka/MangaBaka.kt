@@ -87,7 +87,11 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
         didReadChapter: Boolean,
     ): Track {
         if (track.status != COMPLETED && didReadChapter) {
-            if (track.total_chapters > 0 && track.last_chapter_read.toLong() == track.total_chapters) {
+            if (
+                track.total_chapters > 0 &&
+                track.last_chapter_read.toLong() == track.total_chapters &&
+                isSeriesFinished(track)
+            ) {
                 track.status = COMPLETED
                 track.finished_reading_date = System.currentTimeMillis()
             } else if (track.status != REREADING) {
@@ -99,6 +103,43 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
         }
 
         return api.updateLibManga(track)
+    }
+
+    /**
+     * Whether the series itself is finished, as MangaBaka reports it.
+     *
+     * ### Why catching up is not the same as finishing
+     *
+     * The rule above fires on `last_chapter_read == total_chapters`, and for a series that is still
+     * running that equality is temporary: the chapter count grows with every release, so the reader
+     * hits it again a few weeks later. Each time they did, the entry was flipped to Completed — and
+     * the moment it was next touched, `update()`'s own `status != COMPLETED` guard stopped it ever
+     * going back to Reading. A reader keeping up with a monthly series therefore ended up with a wall
+     * of wrongly-completed entries they had to fix by hand.
+     *
+     * So the count is now necessary but not sufficient, and MangaBaka's own publishing status decides.
+     * `releasing`, `hiatus`, `upcoming` and `cancelled` all mean there is more to come, or that the
+     * author intends to come back to it; only `completed` means the count is the end.
+     *
+     * Fetched here rather than kept on the track because that is the only moment it can change the
+     * answer: `didReadChapter` and the count are already checked before this runs, so a reader who is
+     * behind never pays for the request. The domain `Track` carries no publishing status — it is one
+     * model for fourteen services, and a MangaBaka-only column on it would be that service's business
+     * in everyone else's table — and it changes server-side between sessions, so caching it would make
+     * the rule wrong in the other direction.
+     *
+     * **Any failure answers false.** An unreachable API or an unparseable response must not be able to
+     * mark a series finished; the cost of being wrong that way is a status the reader set by hand being
+     * overwritten, while the cost of the other way is one missed auto-completion they can also do by
+     * hand.
+     */
+    private suspend fun isSeriesFinished(track: Track): Boolean {
+        // `remote_id` is already the series id `getSeriesItem` takes — there is nothing to parse, and
+        // a row that never synced carries 0 rather than a string that would need reading.
+        val remoteId = track.remote_id
+        if (remoteId <= 0L) return false
+        val status = runCatching { api.getSeriesItem(remoteId)?.status }.getOrNull()
+        return status?.trim()?.equals(FINISHED_STATUS, ignoreCase = true) == true
     }
 
     override suspend fun bind(
@@ -313,5 +354,14 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
         private val STEP_25_SCORES = IntRange(0, 100).step(25)
 
         private const val SEARCH_ID_PREFIX = "id:"
+
+        /**
+         * The only publishing status that means the chapter count is the end of the series.
+         *
+         * Deliberately an allow-list rather than a "not still releasing" check: `upcoming`, `hiatus`
+         * and `cancelled` are all states a series can leave the count open in, and a status this
+         * client has not seen before should not silently count as finished. See [isSeriesFinished].
+         */
+        private const val FINISHED_STATUS = "completed"
     }
 }

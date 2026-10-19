@@ -99,6 +99,17 @@ fun main() {
     check("text-align omitted when null", inherited.contains("text-align"), false)
     check("hyphens omitted when null", inherited.contains("-webkit-hyphens"), false)
 
+    // Paragraph indent is the one tri-state that does not default to "follow the book": it used to
+    // indent unconditionally, so `on` is what every existing reader is reading and the default had
+    // to stay there. `off` has to emit `0` rather than nothing, or a publisher that indents would
+    // keep indenting and the setting would read as having done nothing.
+    contains("indent on by default", inherited, "p + p { text-indent: 1em !important; }")
+    val noIndent = NovelTypographyCss.stylesheet(NovelTypography(paragraphIndent = false))
+    contains("indent off emits zero", noIndent, "p + p { text-indent: 0 !important; }")
+    check("indent off is not the on value", noIndent.contains("text-indent: 1em"), false)
+    val followIndent = NovelTypographyCss.stylesheet(NovelTypography(paragraphIndent = null))
+    check("indent omitted when following the publisher", followIndent.contains("text-indent"), false)
+
     // generic family must not be quoted; a real name with a space must be
     contains("generic unquoted", NovelTypographyCss.stylesheet(NovelTypography(fontFamily = "serif")), "font-family: serif !important")
     contains("spaced name quoted", NovelTypographyCss.stylesheet(NovelTypography(fontFamily = "Noto Serif JP")), "\"Noto Serif JP\"")

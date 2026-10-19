@@ -18,12 +18,13 @@ import tachiyomi.domain.category.repository.CategoryRepository
 @Execution(ExecutionMode.CONCURRENT)
 class SyncCategoriesWithTrackStatusTest {
 
-    private fun category(id: Long, trackStatus: Int?) = Category(
+    private fun category(id: Long, trackStatus: Int?, parentId: Long = 0L) = Category(
         id = id,
         name = "cat$id",
         order = id,
         flags = 0,
         hidden = false,
+        parentId = parentId,
         trackStatus = trackStatus,
     )
 
@@ -119,6 +120,113 @@ class SyncCategoriesWithTrackStatusTest {
         )
 
         result shouldContainExactlyInAnyOrder listOf(2L)
+    }
+
+    // ---------------- subcategories are scoped to the branch the entry is in ----------------
+    // The issue's scenario, verbatim: Shounen and Josei are siblings, each with Reading and
+    // Completed bound to the same two statuses. Filing something under Shounen is the statement that
+    // it is not under Josei, so Josei's subcategories are not candidates for it.
+
+    private val shounen = 1L
+    private val josei = 2L
+    private val shounenReading = 11L
+    private val shounenCompleted = 12L
+    private val joseiReading = 21L
+    private val joseiCompleted = 22L
+    private val completed = 2
+
+    private val twoBranches = listOf(
+        category(shounen, trackStatus = null, parentId = 0L),
+        category(shounenReading, reading, shounen),
+        category(shounenCompleted, completed, shounen),
+        category(josei, trackStatus = null, parentId = 0L),
+        category(joseiReading, reading, josei),
+        category(joseiCompleted, completed, josei),
+    )
+
+    @Test
+    fun `a subcategory in another branch is not added`() {
+        val result = update(current = setOf(shounen), bound = twoBranches, trackStatus = reading)
+
+        // Shounen's Reading joins; Josei's does not, even though it is bound to the same status.
+        result shouldContainExactlyInAnyOrder listOf(shounen, shounenReading)
+    }
+
+    @Test
+    fun `both branches are updated when the entry is in both`() {
+        val result = update(current = setOf(shounen, josei), bound = twoBranches, trackStatus = reading)
+
+        result shouldContainExactlyInAnyOrder listOf(shounen, josei, shounenReading, joseiReading)
+    }
+
+    @Test
+    fun `the entry is moved between subcategories of its own branch`() {
+        val result = update(
+            current = setOf(shounen, shounenReading),
+            bound = twoBranches,
+            trackStatus = completed,
+        )
+
+        // Reading out, Completed in - and Josei's Completed, matching the same status, untouched.
+        result shouldContainExactlyInAnyOrder listOf(shounen, shounenCompleted)
+    }
+
+    @Test
+    fun `an entry filed only in a subcategory still answers for that branch`() {
+        // Not in Shounen itself, only in Shounen/Reading. The scope is the entry's *reachable* set,
+        // so Shounen/Completed is still a candidate and Josei's are still not.
+        val result = update(
+            current = setOf(shounenReading),
+            bound = twoBranches,
+            trackStatus = completed,
+        )
+
+        result shouldContainExactlyInAnyOrder listOf(shounenCompleted)
+    }
+
+    @Test
+    fun `an uncategorised entry reaches no subcategory at all`() {
+        val result = update(current = emptySet(), bound = twoBranches, trackStatus = reading)
+
+        // Nothing to scope against, so no branch claims it. A top-level binding still would.
+        result shouldContainExactlyInAnyOrder emptyList<Long>()
+    }
+
+    @Test
+    fun `a top-level binding is not scoped`() {
+        val result = update(
+            current = emptySet(),
+            bound = listOf(category(1, reading), category(2, completed)),
+            trackStatus = reading,
+        )
+
+        result shouldContainExactlyInAnyOrder listOf(1L)
+    }
+
+    @Test
+    fun `a three-deep branch is scoped through its grandparent`() {
+        val tree = listOf(
+            category(1, trackStatus = null, parentId = 0L),
+            category(2, trackStatus = null, parentId = 1L),
+            category(3, reading, parentId = 2L),
+            category(4, reading, parentId = 1L),
+        )
+        val result = update(current = setOf(4L), bound = tree, trackStatus = reading)
+
+        // 4's parent is 1, so 3 - a sibling two levels down - is out of scope.
+        result shouldContainExactlyInAnyOrder listOf(4L)
+    }
+
+    @Test
+    fun `a parent cycle does not hang`() {
+        // A tree that points at itself is not something the UI can build, but a restored backup can
+        // carry one and this walks parents on every status change.
+        val cyclic = listOf(
+            category(1, reading, parentId = 2L),
+            category(2, completed, parentId = 1L),
+        )
+        val result = update(current = setOf(1L), bound = cyclic, trackStatus = reading)
+        result shouldContainExactlyInAnyOrder listOf(1L)
     }
 
     // The cases below drive await() rather than updateMembership(), because the early-return that

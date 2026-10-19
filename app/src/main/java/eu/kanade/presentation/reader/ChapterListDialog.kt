@@ -2,7 +2,6 @@ package eu.kanade.presentation.reader
 
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
@@ -28,6 +27,7 @@ import kotlinx.coroutines.flow.map
 import mihon.app.di.globalAppGraph
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.library.service.LibraryPreferences
+import tachiyomi.presentation.core.components.FastScrollLazyColumn
 import tachiyomi.source.local.isLocal
 import java.time.Instant
 import java.time.LocalDate
@@ -55,7 +55,10 @@ fun ChapterListDialog(
     AdaptiveSheet(
         onDismissRequest = onDismissRequest,
     ) {
-        LazyColumn(
+        // KMK --> The draggable fast scroller, like every other long list in the app. A reader with
+        // hundreds of chapters had no way to move through them but flicking, and the one list where
+        // that hurts most is the one you open to get *out* of the current chapter.
+        FastScrollLazyColumn(
             state = state,
             modifier = Modifier.heightIn(min = 200.dp, max = 500.dp),
             contentPadding = PaddingValues(vertical = 16.dp),
@@ -135,5 +138,6 @@ fun ChapterListDialog(
                 )
             }
         }
+        // KMK <--
     }
 }

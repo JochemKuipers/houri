@@ -66,6 +66,9 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     # here directly. EpubTextSource cannot be - it needs EpubReader, and therefore the whole archive
     # chain - which is exactly why these transforms were split out of it.
     SOURCES+=("$REPO_ROOT/core/archive/src/main/kotlin/mihon/core/archive/EpubMarkup.kt")
+    # LocalBookFolder is pure string handling on a name that is about to become a path segment, which
+    # is exactly the kind of rule that is cheap to assert and expensive to discover on a device.
+    SOURCES+=("$REPO_ROOT/source-local/src/commonMain/kotlin/tachiyomi/source/local/io/LocalBookFolder.kt")
     # Only TextSearchHit: it is a plain data class with no serialization plugin and no SChapter, which
     # is what lets an offline check assert on a hit at all.
     SOURCES+=("$REPO_ROOT/source-api/src/commonMain/kotlin/eu/kanade/tachiyomi/source/text/TextSearchHit.kt")

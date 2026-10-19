@@ -67,7 +67,11 @@ import kotlin.math.roundToInt
 internal fun NovelTypographyPage(
     novelPrefs: NovelTypographyPreferences = globalAppGraph.novelTypographyPreferences,
 ) {
-    val typography by novelPrefs.changes().collectAsState(NovelTypography.DEFAULT)
+    // `values()`, not `changes()`: the page has to show what is stored, and `changes()` deliberately
+    // drops its first emission so the reader is not told about a value it already has. Without the
+    // leading value this screen opens on the defaults and only corrects itself once a preference is
+    // touched - which reads as "my settings did not save" rather than as a display bug.
+    val typography by novelPrefs.values().collectAsState(NovelTypography.DEFAULT)
 
     HeadingItem(stringResource(KMR.strings.novel_reader_typography))
 
@@ -217,6 +221,16 @@ internal fun NovelTypographyPage(
         label = stringResource(KMR.strings.pref_novel_vertical_writing),
         state = typography.verticalWriting.toTriState(),
         onClick = { novelPrefs.verticalWriting = typography.verticalWriting.next() },
+    )
+
+    // A fourth, and the only one whose default is not "follow the book": it used to indent
+    // unconditionally, so "on" is what every existing reader is reading. See
+    // NovelTypographySettingKeys.PARAGRAPH_INDENT for why defaulting it the other way would have
+    // restyled everyone's library on upgrade.
+    TriStateItem(
+        label = stringResource(KMR.strings.pref_novel_paragraph_indent),
+        state = typography.paragraphIndent.toTriState(),
+        onClick = { novelPrefs.paragraphIndent = typography.paragraphIndent.next() },
     )
 }
 

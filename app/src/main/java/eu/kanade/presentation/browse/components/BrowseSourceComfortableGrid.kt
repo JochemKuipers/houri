@@ -3,8 +3,8 @@ package eu.kanade.presentation.browse.components
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -33,6 +33,11 @@ import tachiyomi.presentation.core.util.plus
 @Composable
 fun BrowseSourceComfortableGrid(
     mangaList: LazyPagingItems<StateFlow</* SY --> */Pair<Manga, RaisedSearchMetadata?>/* SY <-- */>>,
+    // KMK --> Owned by the screen, not here: a state created inside this composable belongs to its
+    // composition group, and the shimmer below returns before it is ever created. See
+    // `BrowseSourceContent`.
+    gridState: LazyGridState,
+    // KMK <--
     columns: GridCells,
     contentPadding: PaddingValues,
     onMangaClick: (Manga) -> Unit,
@@ -55,7 +60,6 @@ fun BrowseSourceComfortableGrid(
 
     // Read through a derivedStateOf so the count changing is the only thing that recomposes this
     // grid; reading layoutInfo directly would recompose on every scroll.
-    val gridState = rememberLazyGridState()
     val loadingCellCount by remember(gridState) { derivedStateOf { gridState.layoutInfo.maxSpan } }
 
     LazyVerticalGrid(

@@ -6,6 +6,7 @@ import eu.kanade.tachiyomi.data.coil.MangaCoverMetadata.setRatioAndColors
 import eu.kanade.tachiyomi.ui.manga.MangaScreenModel
 import mihon.app.di.globalAppGraph
 import okio.BufferedSource
+import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.model.MangaCover
 import java.io.File
@@ -151,6 +152,8 @@ object MangaCoverMetadata {
             ?: coverCache.getCustomCoverFile(mangaCover.mangaId).takeIf { it.exists() }
             ?: coverCache.getCoverFile(mangaCover.url)
 
+        if (!bitmapFactoryCanRead(file, bufferedSource)) return
+
         val bitmap = when {
             bufferedSource != null -> BitmapFactory.decodeStream(bufferedSource.inputStream(), null, options)
             file?.exists() == true -> BitmapFactory.decodeFile(file.path, options)
@@ -196,6 +199,45 @@ object MangaCoverMetadata {
         MangaCover.coverRatioMap.remove(mangaId)
         MangaCover.dominantCoverColorMap.remove(mangaId)
     }
+
+    /**
+     * Whether [BitmapFactory] can decode the cover [file] or [bufferedSource] points at.
+     *
+     * `BitmapFactory` has no JXL or JP2 decoder at any API level - the app reads those through
+     * libvips instead. Handed one it opens the file, recognises nothing and returns null, and since
+     * the dominant colour it was meant to produce never arrives, the guard that skips an
+     * already-sampled cover never fires either. Every later bind tries the same doomed decode
+     * again: for a library of such covers that was one wasted read-and-sniff per cover per scroll,
+     * queued on the shared IO dispatcher right alongside the Coil requests it was competing with.
+     * On a library of them the covers that should have loaded first were the ones held up.
+     *
+     * Answered from a 32-byte header read, which is exactly what the decode attempt used to do
+     * before giving up, so the check costs a fraction of the work it replaces rather than adding
+     * to it. An unreadable or unrecognised cover answers true, leaving the outcome to the decode
+     * as it was before this existed.
+     *
+     * AVIF and HEIF are deliberately not listed: the platform decodes both on the API levels that
+     * realistically meet them, so excluding them would drop colours that are obtainable.
+     */
+    private fun bitmapFactoryCanRead(file: File?, bufferedSource: BufferedSource?): Boolean {
+        val type = try {
+            when {
+                bufferedSource != null -> ImageUtil.findImageType(bufferedSource.peek().inputStream())
+                file?.exists() == true -> ImageUtil.findImageType(file.inputStream())
+                // Nothing to read either way; the decode below answers this with its own `return`.
+                else -> return true
+            }
+        } catch (_: Throwable) {
+            null
+        }
+        return type !in NOT_DECODABLE_BY_BITMAP_FACTORY
+    }
+
+    /** Types `BitmapFactory` cannot decode on any API level. See [bitmapFactoryCanRead]. */
+    private val NOT_DECODABLE_BY_BITMAP_FACTORY = setOf(
+        ImageUtil.ImageType.JXL,
+        ImageUtil.ImageType.JP2,
+    )
 
     /**
      * Persists the ratio and colour maps, but only when something actually changed since the last

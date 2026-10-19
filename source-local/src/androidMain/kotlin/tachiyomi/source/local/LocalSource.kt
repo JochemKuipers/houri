@@ -174,9 +174,11 @@ class LocalSource(
         // SY <--
 
         var mangaDirs = fileSystem.getFilesInBaseDirectory()
-            // Filter out files that are hidden and is not a folder
+            // A folder of chapters, or a book that is a single archive with no folder around it.
+            // The second shape was listed by nothing, so a novel dropped straight into the base
+            // directory was simply invisible here.
             .filter {
-                it.isDirectory &&
+                (it.isDirectory || Archive.isSupportedSingleFile(it)) &&
                     // SY -->
                     (
                         !it.name.orEmpty().startsWith('.') ||
@@ -221,7 +223,14 @@ class LocalSource(
             .map { mangaDir ->
                 async {
                     SManga.create().apply {
-                        title = mangaDir.name.orEmpty()
+                        // `url` keeps the extension: it is what the folder/file is resolved by, and
+                        // a series' folder and its loose book file are different entries that would
+                        // otherwise collide. Only the display title drops it.
+                        title = if (mangaDir.isDirectory) {
+                            mangaDir.name.orEmpty()
+                        } else {
+                            mangaDir.nameWithoutExtension.orEmpty()
+                        }
                         url = mangaDir.name.orEmpty()
 
                         // Try to find the cover
@@ -295,7 +304,14 @@ class LocalSource(
 
         // Augment manga details based on metadata files
         try {
-            val mangaDir = fileSystem.getMangaDirectory(manga.url) ?: error("${manga.url} is not a valid directory")
+            val mangaDir = fileSystem.getMangaDirectory(manga.url)
+            if (mangaDir == null) {
+                // An entry that is a single book file has no folder, so there is no ComicInfo.xml
+                // beside it to read - and writing one would mean writing into the base directory,
+                // where it would then describe every other entry in it as well. The chapter pass
+                // fills title and author from the book's own metadata instead.
+                return@withIOContext manga
+            }
             val mangaDirFiles = mangaDir.listFiles().orEmpty()
 
             val comicInfoFile = mangaDirFiles
@@ -445,7 +461,7 @@ class LocalSource(
         val chapters = fileSystem.getFilesInMangaDirectory(manga.url)
             // Only keep supported formats
             .filterNot { it.name.orEmpty().startsWith('.') }
-            .filter { it.isDirectory || Archive.isSupported(it) || it.extension.equals("epub", true) }
+            .filter { it.isDirectory || Archive.isSupportedSingleFile(it) }
             .map { chapterFile ->
                 SChapter.create().apply {
                     url = "${manga.url}/${chapterFile.name}"
@@ -494,9 +510,7 @@ class LocalSource(
     fun getFormat(chapter: SChapter): Format {
         try {
             val (mangaDirName, chapterName) = chapter.url.split('/', limit = 2)
-            return fileSystem.getBaseDirectory()
-                ?.findFile(mangaDirName)
-                ?.findFile(chapterName)
+            return fileSystem.findChapterFile(mangaDirName, chapterName)
                 ?.let(Format.Companion::valueOf)
                 ?: throw Exception(context.stringResource(MR.strings.chapter_not_found))
         } catch (_: Format.UnknownFormatException) {

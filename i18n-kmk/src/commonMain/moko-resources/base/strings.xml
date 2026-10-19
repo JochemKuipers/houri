@@ -686,6 +686,8 @@
     <string name="pref_cloudflare_bypass_banner_summary">Show a banner naming the host and method while a Cloudflare challenge is being bypassed</string>
     <!-- KMK: EPUB library source + novel reader -->
     <string name="local_epub_source">EPUB library</string>
+    <string name="pref_category_book_reading">Book reading</string>
+    <string name="pref_book_reading_summary">Font, colours, spacing and margins for books (EPUB)</string>
     <string name="novel_reader_typography">Reading appearance</string>
     <string name="pref_novel_font_size">Font size</string>
     <string name="pref_novel_font_scale">Font scale</string>
@@ -703,6 +705,14 @@
     <string name="pref_novel_hyphenation_summary">Break words across lines to reduce gaps when the text is justified</string>
     <string name="pref_novel_vertical_writing">Vertical writing</string>
     <string name="pref_novel_vertical_writing_summary">Top-to-bottom, right-to-left. Japanese and Chinese novels often expect this</string>
+    <string name="pref_novel_paragraph_indent">Paragraph indent</string>
+    <string name="local_book_import">Import books</string>
+    <string name="local_book_import_summary">Pick one or more EPUB files off this device. They are copied into a new folder in your local source, named by you, and show up as one series.</string>
+    <string name="local_book_import_name">Series name</string>
+    <string name="local_book_import_name_summary">%d picked file(s) will be copied into one new folder. Give the folder a name.</string>
+    <string name="local_book_import_confirm">Import</string>
+    <string name="local_book_import_done">Added %2$d books to %1$s</string>
+    <string name="local_book_import_done_partial">Added %2$d books to %1$s; %3$d were not EPUBs and were skipped</string>
     <string name="pref_novel_line_spacing">Line spacing</string>
     <string name="pref_novel_paragraph_spacing">Paragraph spacing</string>
     <string name="pref_novel_font_spacing">Font spacing</string>

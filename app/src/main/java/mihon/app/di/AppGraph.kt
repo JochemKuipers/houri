@@ -309,6 +309,8 @@ interface AppGraph : ViewModelGraph {
     val appEventBus: AppEventBus
     val appDispatchers: AppDispatchers
     val getSequelPrequel: GetSequelPrequel
+    // Picking books off the device and filing them into the local source.
+    val localBookImporter: tachiyomi.source.local.io.LocalBookImporter
     // KMK <--
 
     // KMK -->
@@ -319,6 +321,11 @@ interface AppGraph : ViewModelGraph {
     val databaseHandler: DatabaseHandler
     val database: Database
     val mangaRepository: MangaRepository
+    // KMK -->
+    // Logout needs to drop the tracker's whole local record, and the only caller is a composable,
+    // which cannot be constructor-injected.
+    val trackRepository: tachiyomi.domain.track.repository.TrackRepository
+    // KMK <--
     val preferenceStore: PreferenceStore
     val backupRestoreStatus: BackupRestoreStatus
     val achievementPreferences: tachiyomi.domain.achievement.service.AchievementPreferences

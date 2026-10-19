@@ -61,6 +61,14 @@ class TrackRepositoryImpl(
         }
     }
 
+    // KMK -->
+    override suspend fun deleteAllByTrackerId(trackerId: Long) {
+        handler.await {
+            manga_syncQueries.deleteByTrackerId(trackerId = trackerId)
+        }
+    }
+    // KMK <--
+
     override suspend fun insert(track: Track) {
         insertValues(track)
     }

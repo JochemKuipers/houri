@@ -349,6 +349,7 @@ object SettingsTrackingScreen : SearchableSettings {
         onDismissRequest: () -> Unit,
     ) {
         val context = LocalContext.current
+        val scope = rememberCoroutineScope()
         AlertDialog(
             onDismissRequest = onDismissRequest,
             title = {
@@ -370,6 +371,22 @@ object SettingsTrackingScreen : SearchableSettings {
                         modifier = Modifier.weight(1f),
                         onClick = {
                             tracker.logout()
+                            // KMK --> Signing out has to take the tracker's local record with it.
+                            // `logout()` only drops the credentials, so every score and status the
+                            // service had written stayed in `manga_sync` and came straight back on the
+                            // next login — a signed-out account that still looked fully tracked.
+                            // Ordered after the logout so the credential state is already settled
+                            // whether or not the delete succeeds, and off the main thread because it
+                            // is one statement per tracked entry on a large library.
+                            scope.launchIO {
+                                // `try`/`catch`, not `runCatching`: its block is not a suspend
+                                // lambda, so wrapping the delete in it does not compile.
+                                try {
+                                    globalAppGraph.trackRepository.deleteAllByTrackerId(tracker.id)
+                                } catch (e: Exception) {
+                                    withUIContext { context.toast(e.message.toString()) }
+                                }
+                            }
                             onDismissRequest()
                             context.toast(MR.strings.logout_success)
                         },

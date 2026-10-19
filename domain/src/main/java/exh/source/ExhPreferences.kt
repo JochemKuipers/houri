@@ -89,4 +89,66 @@ class ExhPreferences(
     )
 
     fun enhancedEHentaiView() = preferenceStore.getBoolean("enhanced_e_hentai_view", true)
+
+    // KMK -->
+
+    /**
+     * The E-Hentai languages the user has switched on, as the language codes the source ids use.
+     *
+     * Every language the source supports is a **separate source** with its own id, and
+     * [eu.kanade.tachiyomi.source.AndroidSourceManager] instantiates all of them whenever the
+     * source is on. So a library that has an entry filed under a language the user turned off still
+     * has a perfectly live source behind it, and it turns up in the migration picker beside the ones
+     * actually in use — which is what "I only have English enabled, why are all the languages
+     * showing" was.
+     *
+     * A language counts as on when **any** of its row's flags is set. The three columns are which
+     * title fields E-Hentai may search in that language, and a language with all three off is one
+     * the user has not asked for at all; requiring any particular one of the three would hide a
+     * language they search by its original title.
+     *
+     * "all" — the catch-all source, shown as *Multi* — is always in. It has no row of its own in the
+     * settings UI, so its stored flags are never written and reading them would hide a source the
+     * user cannot switch back on.
+     *
+     * A value too short to index is a value that cannot be read, and the safe direction for that is
+     * to report **every** language: a parse failure must not silently take sources out of the list.
+     */
+    fun enabledEHentaiLanguages(): Set<String> {
+        val languages = ehLanguageCodes
+        val rows = exhSettingsLanguages().get().split("\n")
+        if (rows.size < languages.size) return languages.toSet()
+        return buildSet {
+            languages.forEachIndexed { index, code ->
+                if (code == MULTI_LANGUAGE || rows[index].split("*").any { it.trim() == "true" }) {
+                    add(code)
+                }
+            }
+        }
+    }
+
+    /**
+     * Whether [sourceId] is an E-Hentai source whose language the user has switched on.
+     *
+     * False only for an E-Hentai source in a disabled language; a source of any other kind is never
+     * filtered by this, which is why the caller does not have to know what it is asking about.
+     */
+    fun isEHentaiSourceEnabled(sourceId: Long): Boolean {
+        val language = EHENTAI_EXT_SOURCES[sourceId] ?: EXHENTAI_EXT_SOURCES[sourceId] ?: return true
+        return language in enabledEHentaiLanguages()
+    }
+
+    /**
+     * Language codes in the order `eh_settings_languages` stores them.
+     *
+     * Taken from [EHENTAI_EXT_SOURCES] rather than written out, because that map is already the one
+     * that decides which id a language gets and a second list could drift from it silently. Its
+     * order has to agree with `EhUConfigBuilder.LanguageSystem.getLanguages`, which reads the same
+     * preference by position.
+     */
+    private val ehLanguageCodes = EHENTAI_EXT_SOURCES.values.toList()
+    // KMK <--
 }
+
+/** The catch-all E-Hentai source, labelled *Multi*; has no row in the language settings. */
+private const val MULTI_LANGUAGE = "all"

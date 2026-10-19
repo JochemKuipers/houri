@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
@@ -64,6 +65,9 @@ import java.time.ZoneId
 @Composable
 fun BrowseSourceEHentaiList(
     mangaList: LazyPagingItems<StateFlow</* SY --> */Pair<Manga, RaisedSearchMetadata?>/* SY <-- */>>,
+    // KMK --> Owned by the screen, so it survives the branch swaps in `BrowseSourceContent`.
+    listState: LazyListState,
+    // KMK <--
     contentPadding: PaddingValues,
     onMangaClick: (Manga) -> Unit,
     onMangaLongClick: (Manga) -> Unit,
@@ -72,6 +76,7 @@ fun BrowseSourceEHentaiList(
     // KMK <--
 ) {
     LazyColumn(
+        state = listState,
         contentPadding = contentPadding,
     ) {
         item {
