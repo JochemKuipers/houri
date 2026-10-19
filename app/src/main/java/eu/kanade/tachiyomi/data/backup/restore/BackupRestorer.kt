@@ -95,7 +95,19 @@ class BackupRestorer(
     suspend fun restore(uri: Uri, options: RestoreOptions) {
         val startTime = System.currentTimeMillis()
 
-        restoreFromFile(uri, options)
+        try {
+            restoreFromFile(uri, options)
+        } finally {
+            // KMK --> A library-sized restore has just pushed every series, chapter and history
+            // row into the write-ahead log, where they stay until something folds it. Doing it
+            // here - outside the restore body only because a checkpoint must not run inside a
+            // transaction - leaves the next process, the startup integrity probe and the next
+            // backup snapshot a file that is already self-contained instead of one that has to
+            // replay hundreds of megabytes of WAL. Safe either way: a busy checkpoint simply
+            // leaves the fold to the next maintenance pass.
+            runCatching { mihon.app.di.globalAppGraph.databaseHandler.checkpoint() }
+            // KMK <--
+        }
 
         val time = System.currentTimeMillis() - startTime
 
@@ -234,7 +246,13 @@ class BackupRestorer(
             // single-writer database the restore is using, so for a large backup the two
             // spent their time contending rather than the restore finishing first.
             if (options.libraryEntries) {
-                LibraryUpdateJob.startNow(context)
+                // KMK --> The follow-up refresh was unconditional; it is now the
+                // "Update library after restore" toggle, so restoring into a finished
+                // library can skip hours of background updates.
+                if (options.updateLibrary) {
+                    LibraryUpdateJob.startNow(context)
+                }
+                // KMK <--
             }
             // KMK <--
         } finally {
@@ -355,6 +373,13 @@ class BackupRestorer(
                 restoreEntry(it)
                 restoredEntries++
             }
+        // KMK --> Whatever the passes left under one chunk is written now. Merged entries are
+        // already after this on purpose, but restoreEntries clears [pendingEntries] in its
+        // finally, so feeding it merged chunks with a partial buffer still pending dropped the
+        // last entries of the library on the floor: they were never written and the progress
+        // bar stopped short of 100%.
+        if (pendingEntries.isNotEmpty()) restoreEntries(pendingEntries.toList())
+        // KMK <--
         mergedEntries.chunked(MANGA_CHUNK_SIZE)
             .forEach { restoreEntries(it) }
 

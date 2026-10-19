@@ -604,6 +604,7 @@
     <string name="category_manager_delete_many_title">Delete selected</string>
     <!-- Backup -->
     <string name="backup_included_categories">Included categories</string>
+    <string name="restore_update_library">Update library after restore</string>
     <string name="pref_yakuyomi_prompt_title">Translation prompts</string>
     <string name="pref_yakuyomi_prompt_custom_instructions">Custom translation instructions</string>
     <string name="pref_yakuyomi_prompt_custom_instructions_summary">Additional style, tone, or terminology guidance applied to every provider</string>

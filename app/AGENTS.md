@@ -76,6 +76,17 @@ Code in `eu.kanade.tachiyomi.data.backup.{create,restore}`:
   `LibraryPreferences`/`DownloadPreferences` category key sets + `SourcePreferences.PINNED_SOURCES_PREF_KEY`.
 - Key renames require a `mihon.core.migration.Migration` (`MigrateUtils.replacePreferences`);
   backup files match on raw key strings, so framework `SettingKey` values must stay stable.
+- Post-restore bookkeeping: `LibraryUpdateJob.startNow` is gated on `RestoreOptions.updateLibrary`
+  (default **on**; UI row is `RestoreOptions.updateLibraryEntry`, rendered in its own section
+  because it is a follow-up, not backup content — it never counts towards `canRestore()`).
+  `restore()` folds the WAL in a `finally` (`DatabaseHandler.checkpoint()` — outside any
+  transaction), `fromBooleanArray` reads WorkManager input with `getOrNull` fallbacks so stale
+  input from an older build resumes instead of crashing, and the restore screen validates on
+  `screenModelScope.launchIO` because the validation decodes the whole file.
+- `restoreManga` flushes the partial `pendingEntries` chunk **after the second pass, before the
+  merged entries**: `restoreEntries` clears the buffer in its `finally`, so a merged chunk
+  written with a partial buffer still pending used to silently drop the tail of the library
+  (everything when `entries.size % 250 != 0`) and stop the progress bar short of 100%.
 
 ## Theme system
 

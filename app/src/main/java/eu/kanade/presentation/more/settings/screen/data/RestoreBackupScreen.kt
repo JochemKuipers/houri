@@ -22,6 +22,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.core.net.toUri
 import cafe.adriel.voyager.core.model.StateScreenModel
 import cafe.adriel.voyager.core.model.rememberScreenModel
+import cafe.adriel.voyager.core.model.screenModelScope
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.components.AppBar
@@ -32,6 +33,7 @@ import eu.kanade.tachiyomi.data.backup.restore.BackupRestoreJob
 import eu.kanade.tachiyomi.data.backup.restore.RestoreOptions
 import eu.kanade.tachiyomi.util.system.DeviceUtil
 import kotlinx.coroutines.flow.update
+import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.LabeledCheckbox
 import tachiyomi.presentation.core.components.LazyColumnWithAction
@@ -89,6 +91,22 @@ class RestoreBackupScreen(
                             }
                         }
                     }
+                    // KMK -->
+                    // Follow-up action rather than restore content, so it sits in its own
+                    // section below what is being read from the backup.
+                    item {
+                        val entry = RestoreOptions.updateLibraryEntry
+                        SectionCard {
+                            LabeledCheckbox(
+                                label = stringResource(entry.label),
+                                checked = entry.getter(state.options),
+                                onCheckedChange = {
+                                    model.toggle(entry.setter, it)
+                                },
+                            )
+                        }
+                    }
+                    // KMK <--
                 }
 
                 if (state.error != null) {
@@ -170,7 +188,14 @@ private class RestoreBackupScreenModel(
 ) : StateScreenModel<RestoreBackupScreenModel.State>(State()) {
 
     init {
-        validate(uri.toUri())
+        // KMK --> Validation decodes the whole backup file, which for a large library is a
+        // multi-hundred-megabyte read plus a protobuf parse; doing it here ran on the thread
+        // that draws the screen and froze it until the decode answered. The screen model scope
+        // cancels the work if the screen goes away first; the state publishes when it finishes.
+        screenModelScope.launchIO {
+            validate(uri.toUri())
+        }
+        // KMK <--
     }
 
     fun toggle(setter: (RestoreOptions, Boolean) -> RestoreOptions, enabled: Boolean) {

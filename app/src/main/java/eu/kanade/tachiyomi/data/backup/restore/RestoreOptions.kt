@@ -14,6 +14,14 @@ data class RestoreOptions(
     // SY -->
     val savedSearchesFeeds: Boolean = true,
     // SY <--
+    // KMK -->
+    /**
+     * Whether a restore that wrote library entries is followed by a full library update.
+     * Default on: the follow-up refresh is usually wanted (new chapters, fetch intervals).
+     * Restoring into a finished library can skip it here instead of stopping the job.
+     */
+    val updateLibrary: Boolean = true,
+    // KMK <--
 ) {
 
     fun asBooleanArray() = booleanArrayOf(
@@ -25,6 +33,9 @@ data class RestoreOptions(
         // SY -->
         savedSearchesFeeds,
         // SY <--
+        // KMK -->
+        updateLibrary,
+        // KMK <--
     )
 
     fun canRestore() =
@@ -74,15 +85,34 @@ data class RestoreOptions(
         )
 
         fun fromBooleanArray(array: BooleanArray) = RestoreOptions(
-            libraryEntries = array[0],
-            categories = array[1],
-            appSettings = array[2],
-            extensionStores = array[3],
-            sourceSettings = array[4],
+            // getOrNull rather than indexing: the array travels as WorkManager input data, and a
+            // restart of a queued restore from a build that wrote fewer fields must not crash -
+            // defaulting to true resumes with the pre-toggle behavior.
+            libraryEntries = array.getOrNull(0) ?: true,
+            categories = array.getOrNull(1) ?: true,
+            appSettings = array.getOrNull(2) ?: true,
+            extensionStores = array.getOrNull(3) ?: true,
+            sourceSettings = array.getOrNull(4) ?: true,
             // SY -->
-            savedSearchesFeeds = array[5],
+            savedSearchesFeeds = array.getOrNull(5) ?: true,
             // SY <--
+            // KMK -->
+            updateLibrary = array.getOrNull(6) ?: true,
+            // KMK <--
         )
+
+        // KMK -->
+        /**
+         * The one entry that is a follow-up to the restore rather than content from it, so it does
+         * not belong in [options]: checking nothing but this must still leave a backup with
+         * [canRestore] false. Rendered by the restore screen in its own section.
+         */
+        val updateLibraryEntry = Entry(
+            label = KMR.strings.restore_update_library,
+            getter = RestoreOptions::updateLibrary,
+            setter = { options, enabled -> options.copy(updateLibrary = enabled) },
+        )
+        // KMK <--
     }
 
     data class Entry(
