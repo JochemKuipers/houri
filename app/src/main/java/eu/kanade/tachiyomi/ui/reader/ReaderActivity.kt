@@ -73,6 +73,7 @@ import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.reader.ChapterListDialog
 import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.MtlTranslationOverlay
+import eu.kanade.presentation.reader.NovelImageActionsDialog
 import eu.kanade.presentation.reader.NovelSearchDialog
 import eu.kanade.presentation.reader.NovelTocDialog
 import eu.kanade.presentation.reader.OrientationSelectDialog
@@ -611,6 +612,22 @@ class ReaderActivity : BaseActivity() {
                             },
                         )
                     }
+                }
+
+                is ReaderViewModel.Dialog.NovelImageActions -> {
+                    // The image URL arrives from the WebView's hit test, and its stream is resolved
+                    // by the model from the loader when the user confirms — so a viewer rebuild
+                    // between the press and the tap cannot orphan the action. `state` is a delegated
+                    // property, so the dialog cannot be smart-cast here; the clicked action reads
+                    // the URL off the sheet's own state rather than off a stale capture.
+                    NovelImageActionsDialog(
+                        onDismissRequest = onDismissRequest,
+                        onSetAsCover = {
+                            (state.dialog as? ReaderViewModel.Dialog.NovelImageActions)
+                                ?.imageUrl
+                                ?.let(viewModel::setBookImageAsCover)
+                        },
+                    )
                 }
                 // KMK <--
 

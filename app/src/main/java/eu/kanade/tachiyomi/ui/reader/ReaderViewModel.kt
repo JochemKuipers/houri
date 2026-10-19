@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.ui.reader
 
 import android.content.Context
 import android.net.Uri
+import android.util.Base64
 import androidx.annotation.ColorInt
 import androidx.annotation.IntRange
 import androidx.compose.runtime.Immutable
@@ -50,6 +51,7 @@ import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.ui.reader.chapter.ReaderChapterItem
 import eu.kanade.tachiyomi.ui.reader.loader.ChapterLoader
 import eu.kanade.tachiyomi.ui.reader.loader.DownloadPageLoader
+import eu.kanade.tachiyomi.ui.reader.loader.TextPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
@@ -89,6 +91,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import logcat.LogPriority
+import mihon.core.archive.EpubArchiveUrls
 import tachiyomi.core.common.preference.toggle
 import tachiyomi.core.common.storage.UniFileTempFileManager
 import tachiyomi.core.common.util.lang.launchIO
@@ -118,7 +121,9 @@ import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.source.local.image.LocalCoverManager
 import tachiyomi.source.local.isLocal
+import java.io.ByteArrayInputStream
 import java.io.File
+import java.io.InputStream
 import java.time.Instant
 import java.util.Date
 
@@ -1633,6 +1638,11 @@ class ReaderViewModel(
     fun openNovelSearchDialog() {
         mutableState.update { it.copy(dialog = Dialog.NovelSearch) }
     }
+
+    /** Actions for an illustration the reader long-pressed on inside the open book. */
+    fun openNovelImageDialog(imageUrl: String) {
+        mutableState.update { it.copy(dialog = Dialog.NovelImageActions(imageUrl)) }
+    }
     // KMK <--
 
     fun closeDialog() {
@@ -1925,6 +1935,66 @@ class ReaderViewModel(
             eventChannel.send(Event.SetCoverResult(result))
         }
     }
+
+    /**
+     * Sets the image [imageUrl] names — an illustration of the open book, long-pressed in the
+     * viewer — as cover, and notifies the UI of the result.
+     *
+     * The stream is resolved from the loader rather than from the viewer on purpose: the dialog
+     * outlives a viewer that an orientation change may already have rebuilt, and the loader is the
+     * object whose lifetime *is* the open chapter. [launchNonCancellable] for the same reason the
+     * other cover paths use it — a write that a cancelled flow would interrupt halfway is a cover
+     * the user believed was set.
+     */
+    fun setBookImageAsCover(imageUrl: String) {
+        val currentManga = manga ?: return
+        viewModelScope.launchNonCancellable {
+            val result = try {
+                if (!currentManga.isLocal() && !currentManga.favorite) {
+                    SetAsCoverResult.AddToLibraryFirst
+                } else {
+                    val stream = withIOContext { bookImageStream(imageUrl) }
+                    if (stream == null) {
+                        SetAsCoverResult.Error
+                    } else {
+                        stream.use { currentManga.editCover(coverManager, it, updateManga, coverCache) }
+                        SetAsCoverResult.Success
+                    }
+                }
+            } catch (_: Exception) {
+                SetAsCoverResult.Error
+            }
+            eventChannel.send(Event.SetCoverResult(result))
+        }
+    }
+
+    /**
+     * Opens an image inside the open book, or null when the URL is not one the chapter can answer.
+     *
+     * The hit test hands over exactly two spellings: a `book.internal` reference, which the
+     * chapter's [eu.kanade.tachiyomi.source.text.TextResourceSource] streams out of the archive,
+     * and a `data:` URI the document inliner embedded in the markup, which decodes into the bytes
+     * the engine drew. Everything else — a plate the book links at from a real server — is not
+     * this book's art to copy, and comes back as null.
+     */
+    private fun bookImageStream(imageUrl: String): InputStream? {
+        val loader = state.value.currentChapter?.pageLoader as? TextPageLoader ?: return null
+        return when {
+            EpubArchiveUrls.isArchiveUrl(imageUrl) -> loader.resourceSource?.openResource(imageUrl)
+            imageUrl.startsWith(DATA_URI_PREFIX, ignoreCase = true) -> dataUriStream(imageUrl)
+            else -> null
+        }
+    }
+
+    /** Decodes a `data:` URI into the bytes it carries, or null when it is not one this reads. */
+    private fun dataUriStream(dataUri: String): InputStream? {
+        val payload = dataUri.substringAfter(',', "").trim()
+        val header = dataUri.substringBefore(',').removePrefix("data:").lowercase()
+        if (payload.isEmpty() || !header.endsWith(";base64")) return null
+        val bytes = runCatching { Base64.decode(payload, Base64.DEFAULT) }.getOrNull() ?: return null
+        if (bytes.isEmpty()) return null
+        return ByteArrayInputStream(bytes)
+    }
     // KMK <--
 
     enum class SetAsCoverResult {
@@ -2037,11 +2107,18 @@ class ReaderViewModel(
         data object ChapterList : Dialog
         // SY <--
 
-        // KMK --> Text-chapter surfaces. Model-free: what they act on is the open chapter, which the
-        // activity reads off the viewer when the sheet opens, so a dialog state that has to be built
-        // per chapter would need invalidating on every chapter change for no benefit.
+        // KMK --> Text-chapter surfaces. Model-free where they can be: what they act on is the open
+        // chapter, which the activity reads off the viewer when the sheet opens, so a dialog state
+        // that has to be built per chapter would need invalidating on every chapter change for no
+        // benefit. The image dialog carries the one thing the chapter cannot answer on its own —
+        // which image the long press landed on.
         data object NovelContents : Dialog
         data object NovelSearch : Dialog
+
+        data class NovelImageActions(
+            /** URL of the pressed illustration, spelled as the engine's hit test handed it over. */
+            val imageUrl: String,
+        ) : Dialog
         // KMK <--
 
         data class PageActions(
@@ -2078,5 +2155,8 @@ class ReaderViewModel(
     private companion object {
         /** Whole minutes only: see [updateHistory]'s reading-time banking. */
         const val MINUTE_MS = 60_000L
+
+        /** Opening form of a `data:` URI — the spelling the document inliner embeds with. */
+        private const val DATA_URI_PREFIX = "data:"
     }
 }

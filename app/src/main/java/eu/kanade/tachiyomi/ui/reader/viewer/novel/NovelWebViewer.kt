@@ -4,6 +4,9 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import android.os.Message
 import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -336,14 +339,16 @@ internal class NovelWebViewer(
                 return true
             }
 
-            // KMK --> Deliberately no `onLongPress`. In an image chapter a long press opens the
+            // KMK --> Deliberately no `onLongPress` here. In an image chapter a long press opens the
             // page-actions sheet — Set as cover, Share, Save — because that is the only thing a long
-            // press can mean there. In a book it means "select text", and the WebView already answers
-            // it with its own selection toolbar. Opening our sheet as well put an image toolbar on
-            // top of the selection one (reported as "this shows up when I select text"), and every
-            // action in it then crashed: those actions act on `ReaderPage.stream`, and a document has
-            // no image stream, so the stream was null. Selecting text is the gesture a book has; the
-            // sheet has nothing to offer one.
+            // press can mean there. In a book, long-pressing *text* means "select text", and the
+            // WebView already answers it with its own selection toolbar; opening our sheet as well
+            // put an image toolbar on top of the selection one, and every action in it then
+            // crashed: those actions act on `ReaderPage.stream`, and a document has no image
+            // stream, so the stream was null. So a book's action sheet arrives only through the
+            // WebView's own long-click hit test below (setOnLongClickListener) — offered when, and
+            // only when, the finger is on an illustration, and acting on that image's own stream,
+            // never on the page's.
             // KMK <--
 
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
@@ -382,9 +387,71 @@ internal class NovelWebViewer(
         // moment to ask where the reader now is: the probe updates the page counter, the saved
         // position and the progress slider, and decides whether the window should grow.
         setOnScrollChangeListener { _, _, _, _, _ -> scheduleContinuousProbe() }
+        // KMK --> The long press is split on what the finger is on, which only the engine answers.
+        // Anything that is not an illustration answers false here, and the WebView's own text
+        // selection follows exactly as it did before this existed. `IMAGE_TYPE` carries the image's
+        // src in `extra` — either a `https://book.internal/…` reference this archive still streams
+        // or a `data:` URI the inliner embedded into the document, both resolvable from the
+        // chapter's lease later, when the user confirms. `SRC_IMAGE_ANCHOR_TYPE` is a *linked*
+        // illustration, where `extra` names the link's target rather than the picture; the async
+        // `requestFocusNodeHref` reply carries the src instead. An external image — a CDN plate the
+        // publisher linked in — is not this book's art, so it opens no sheet at all.
+        setOnLongClickListener { _ ->
+            when (hitTestResult.type) {
+                WebView.HitTestResult.IMAGE_TYPE -> hitTestResult.extra?.let(::openImageSheet) ?: false
+                WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
+                    // Consumed even when the reply names no image: a selection dragging across a
+                    // linked picture would otherwise start underneath the same gesture.
+                    requestFocusNodeHref(Message.obtain(focusNodeReply))
+                    true
+                }
+                else -> false
+            }
+        }
+        // KMK <--
     }
 
     override fun getView(): View = webView
+
+    // KMK -->
+    // ---------------------------------------------------------------- image actions
+
+    /**
+     * Replies to `requestFocusNodeHref` for a long press that landed on a **linked** illustration.
+     *
+     * The WebView answers that call asynchronously, on this handler, bundling the focus node's
+     * `src` — the picture itself, which the synchronous hit test's `extra` does not carry for an
+     * image inside a link (there it holds the link's target). A blank or absent src means nothing
+     * worth acting on: the press simply did nothing, the same outcome a hit test that could not
+     * name an image produces.
+     */
+    private val focusNodeReply = Handler(Looper.getMainLooper()) { message ->
+        message.data?.getString("src")?.let(::openImageSheet)
+        true
+    }
+
+    /**
+     * Opens the actions sheet for [imageUrl] — the long-pressed illustration — when it is one this
+     * feature can act on.
+     *
+     * Two spellings count, and both resolve later from the chapter's own lease: the reserved
+     * [EpubArchiveUrls] space, and the `data:` URIs [NovelInline] embedded into the markup. An
+     * external image is the publisher's business and its action would only ever fail, so refusing
+     * here keeps the sheet off a press that could never do anything.
+     *
+     * @return whether the press was claimed, so a selection does not also start underneath it.
+     */
+    private fun openImageSheet(imageUrl: String): Boolean {
+        if (!EpubArchiveUrls.isArchiveUrl(imageUrl) &&
+            !imageUrl.startsWith(INLINED_DATA_IMAGE, ignoreCase = true)
+        ) {
+            return false
+        }
+        activity.viewModel.openNovelImageDialog(imageUrl)
+        return true
+    }
+
+    // KMK <--
 
     // ---------------------------------------------------------------- containment
 
@@ -1337,6 +1404,9 @@ internal class NovelWebViewer(
 
         /** Last resort for a resource no extension table and no signature could classify. */
         const val OCTET_STREAM = "application/octet-stream"
+
+        /** What a `data:` URI the [NovelInline] inliner embeds always opens with. */
+        private const val INLINED_DATA_IMAGE = "data:image"
 
         /**
          * How often the document may be asked where the reader is.

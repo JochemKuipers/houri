@@ -224,6 +224,20 @@ image-reader rows (long-tap page actions, chapter transitions, page flash, auto 
 remains — background theme, page number, navigator layout, fullscreen, keep-screen-on, completion
 sounds — is everything a book can act on, beside its own Reading appearance tab.
 
+**Long-press is split on what the finger is on, and only the WebView's hit test knows.** On text it
+answers false and the engine's own selection proceeds; on an `IMAGE_TYPE`/`SRC_IMAGE_ANCHOR_TYPE`
+hit (`NovelWebViewer.setOnLongClickListener`) the `NovelImageActionsDialog` sheet opens, whose one
+action sets the series cover. This is the revival of the page-actions sheet that was removed because
+it crashed on books — with the two halves of that crash designed out: the sheet is offered *only*
+for an illustration (never on a text press) and its action acts on that image's own stream, resolved
+by `ReaderViewModel.setBookImageAsCover` from the loader (`resourceSource` for a `book.internal`
+URL, base64 decode for a `data:` URI `NovelInline` embedded), never on `ReaderPage.stream`, which a
+text page does not have. The URL comes from the hit test, which is either of those two spellings;
+an external image opens no sheet at all. Known gaps: an inline-SVG `<image>` and a CSS background
+are not hit-tested as images, so no sheet appears for them — the extra `Message`-based
+`requestFocusNodeHref` hop exists because for an image inside a link the synchronous hit test's
+`extra` names the link's target, not the picture.
+
 ## Contents and search
 
 `TextTocSource` and `TextSearchSource` are implemented by the EPUB source and had no UI at all. The

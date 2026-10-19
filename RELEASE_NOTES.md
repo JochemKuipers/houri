@@ -10,6 +10,8 @@ files moved. See .github/scripts/release_notes.py.
 
 ### New
 
+- **Reader (EPUB books)**: Long-pressing an illustration inside a book now offers "Set as cover", so any image carried in the EPUB can become the cover art of its library entry. Long-pressing text still selects text, as before.
+
 - **Backup restore**: A new "Update library after restore" toggle (on by default) controls whether a restored library immediately kicks off a full background refresh. Previously this always ran and could not be turned off.
 
 ### Improve

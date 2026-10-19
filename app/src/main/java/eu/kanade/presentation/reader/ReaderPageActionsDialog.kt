@@ -248,8 +248,9 @@ fun ReaderPageActionsDialog(
     // KMK <--
 }
 
+/** Shared with the novel image dialog; one wording for every "set as cover" confirmation. */
 @Composable
-private fun SetCoverDialog(
+internal fun SetCoverDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
