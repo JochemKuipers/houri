@@ -31,6 +31,7 @@ ANNOTATIONS=$(find_jar org.jetbrains annotations)
 COMPILER_CP="$COMPILER:$STDLIB:$REFLECT:$COROUTINES:$ANNOTATIONS"
 
 FILTER="${1:-}"
+MATCHED=0
 FAILED=0
 RAN=0
 
@@ -38,6 +39,7 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     [ -e "$MAIN" ] || continue
     NAME=$(basename "$MAIN" .kt)
     if [ -n "$FILTER" ] && [[ "$NAME" != *"$FILTER"* ]]; then continue; fi
+    MATCHED=$((MATCHED + 1))
 
     # Project sources the harnesses link against. Every one of these files is deliberately free of
     # Android imports so it compiles and runs on a plain JVM.
@@ -69,6 +71,21 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     # LocalBookFolder is pure string handling on a name that is about to become a path segment, which
     # is exactly the kind of rule that is cheap to assert and expensive to discover on a device.
     SOURCES+=("$REPO_ROOT/source-local/src/commonMain/kotlin/tachiyomi/source/local/io/LocalBookFolder.kt")
+
+    # The OPF metadata harness drives the real pull parser — kxml2, the library Android ships
+    # behind `Xml.newPullParser` — so `EpubXmlReader`/`EpubOpfParser`/`EpubTocParser` can run on a
+    # plain JVM. `OpfPlatformParser` stands in for `android.util.Xml` inside this harness only; the
+    # offline stub in ../stubs throws and is never compiled here. The parser jar is needed both
+    # when compiling (the org.xmlpull interfaces) and at runtime.
+    OPF_SOURCES=()
+    KXML_CP=""
+    if [ "$NAME" = "OpfMetadataHarness" ]; then
+        OPF_SOURCES+=("$REPO_ROOT/core/archive/src/main/kotlin/mihon/core/archive/EpubXmlReader.kt")
+        OPF_SOURCES+=("$REPO_ROOT/core/archive/src/main/kotlin/mihon/core/archive/EpubOpfParser.kt")
+        OPF_SOURCES+=("$REPO_ROOT/core/archive/src/main/kotlin/mihon/core/archive/EpubTocParser.kt")
+        OPF_SOURCES+=("$HARNESS_DIR/OpfPlatformParser.kt")
+        KXML_CP=":$(find_jar net.sf.kxml kxml2)"
+    fi
     # Only TextSearchHit: it is a plain data class with no serialization plugin and no SChapter, which
     # is what lets an offline check assert on a hit at all.
     SOURCES+=("$REPO_ROOT/source-api/src/commonMain/kotlin/eu/kanade/tachiyomi/source/text/TextSearchHit.kt")
@@ -88,7 +105,7 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     echo "== $NAME =="
     # A hard compile error must fail the run, not fall through to "class not found".
     if ! java -cp "$COMPILER_CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
-            -no-stdlib -nowarn -cp "$STDLIB" -d "$OUT/classes" "${SOURCES[@]}" 2>&1 \
+            -no-stdlib -nowarn -cp "$STDLIB$KXML_CP" -d "$OUT/classes" "${SOURCES[@]}" "${OPF_SOURCES[@]}" "$MAIN" 2>&1 \
             | grep -E 'error:' | grep -vE 'unresolved reference'; then
         :
     else
@@ -99,17 +116,23 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     fi
 
     # Kotlin file-facade class for a top-level main() is the file name plus "Kt".
-    if java -cp "$OUT/classes:$STDLIB" "${NAME}Kt" 2>/dev/null; then
+    if java -cp "$OUT/classes:$STDLIB$KXML_CP" "${NAME}Kt" 2> "$OUT/run.err"; then
         RAN=$((RAN + 1))
     else
+        # A runtime crash must name the crash: everything above succeeds and passes silently
+        # until some environment the desktop JVM does not give us surfaces here (a parser
+        # feature, a missing class), so the hidden stderr said "exited non-zero" and nothing else.
         echo "  !! $NAME exited non-zero"
+        sed -n '1,20p' "$OUT/run.err"
         FAILED=$((FAILED + 1))
     fi
     rm -rf "$OUT"
 done
 
-if [ "$RAN" -eq 0 ]; then
+if [ "$MATCHED" -eq 0 ]; then
     die "no harness matched '${FILTER}' in $HARNESS_DIR"
+elif [ "$RAN" -eq 0 ]; then
+    die "$MATCHED harness(es) matched '${FILTER}' but all failed — see FAIL lines above"
 fi
 
 echo
