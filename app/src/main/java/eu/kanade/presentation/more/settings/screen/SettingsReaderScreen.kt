@@ -773,8 +773,7 @@ object SettingsReaderScreen : SearchableSettings {
                 // KMK -->
                 Preference.PreferenceItem.SliderPreference(
                     value = controllerScrollSpeed,
-                    valueRange = ReaderPreferences.CONTROLLER_SCROLL_SPEED_MIN..
-                        ReaderPreferences.CONTROLLER_SCROLL_SPEED_MAX,
+                    valueRange = ReaderPreferences.CONTROLLER_SCROLL_SPEED_MIN..ReaderPreferences.CONTROLLER_SCROLL_SPEED_MAX,
                     title = stringResource(KMR.strings.pref_controller_scroll_speed),
                     valueString = controllerScrollSpeed.toString(),
                     onValueChanged = { controllerScrollSpeedPref.set(it) },
