@@ -84,20 +84,27 @@ internal object EpubOpfParser {
                 // consuming every sibling up to the end of `<metadata>`. Any book with more than one
                 // `dc:` element, which is every real book, therefore lost its title, author,
                 // publisher, language and date, and the file name stood in for all of them.
+                //
+                // Every field here except `dc:description` is what a book *displays as text* — its
+                // title, its author line — and reads as plain text (`textContentAsPlainText`):
+                // producers nest markup inside these elements, and serialising it preserved junk a
+                // user can see (`<creator>J.K. Rowling` rendered in a subtitle`). `dc:description`
+                // is authored HTML on purpose and keeps `textContent()` so the round-trip to the
+                // description renderer stays lossless.
                 xml.matches(EpubXmlReader.NS_DC, "title") -> {
-                    titles += xml.textContent()
+                    titles += xml.textContentAsPlainText()
                     event = xml.next()
                 }
                 xml.matches(EpubXmlReader.NS_DC, "creator") -> {
-                    authors += xml.textContent()
+                    authors += xml.textContentAsPlainText()
                     event = xml.next()
                 }
                 xml.matches(EpubXmlReader.NS_DC, "publisher") -> {
-                    publisher = xml.textContent().ifBlank { publisher }
+                    publisher = xml.textContentAsPlainText().ifBlank { publisher }
                     event = xml.next()
                 }
                 xml.matches(EpubXmlReader.NS_DC, "language") -> {
-                    language = xml.textContent().ifBlank { language }
+                    language = xml.textContentAsPlainText().ifBlank { language }
                     event = xml.next()
                 }
                 xml.matches(EpubXmlReader.NS_DC, "description") -> {
@@ -105,20 +112,20 @@ internal object EpubOpfParser {
                     event = xml.next()
                 }
                 xml.matches(EpubXmlReader.NS_DC, "date") -> {
-                    date = xml.textContent().ifBlank { date }
+                    date = xml.textContentAsPlainText().ifBlank { date }
                     event = xml.next()
                 }
                 xml.matches(EpubXmlReader.NS_DC, "rights") -> {
-                    rights = xml.textContent().ifBlank { rights }
+                    rights = xml.textContentAsPlainText().ifBlank { rights }
                     event = xml.next()
                 }
                 xml.matches(EpubXmlReader.NS_DC, "subject") -> {
-                    subjects += xml.textContent()
+                    subjects += xml.textContentAsPlainText()
                     event = xml.next()
                 }
                 xml.matches(EpubXmlReader.NS_DC, "identifier") -> {
                     val id = xml.attr("id") ?: identifiers.size.toString()
-                    identifiers[id] = xml.textContent()
+                    identifiers[id] = xml.textContentAsPlainText()
                     event = xml.next()
                 }
 

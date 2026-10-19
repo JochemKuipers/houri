@@ -54,6 +54,12 @@ caller walks on with `next()`. The stop condition is therefore `depth <= startDe
 matter**. Stopping at `< startDepth` is one tag too far: the element's own end tag sits exactly at
 `startDepth`, so that test sails past it and keeps consuming.
 
+`textContentAsPlainText()` is the second reading mode of the same walk: for the display fields that
+are simple literals by spec (Dublin Core title/creator/publisher/date/…, TOC labels) it drops child
+markup to a separating space, strips tag-shaped sequences that arrived hand-escaped as text, and
+collapses whitespace to one line. `dc:description` is authored HTML and keeps `textContent()`, which
+re-serialises it losslessly.
+
 It was written that way, and the damage was silent and structural rather than visible:
 
 - `EpubTocParser` loses **every other** `<li>`, because `parseListItem` reads a label, steps forward one

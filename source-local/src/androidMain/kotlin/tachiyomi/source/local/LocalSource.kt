@@ -463,13 +463,19 @@ class LocalSource(
             .filterNot { it.name.orEmpty().startsWith('.') }
             .filter { it.isDirectory || Archive.isSupportedSingleFile(it) }
             .map { chapterFile ->
-                SChapter.create().apply {
-                    url = "${manga.url}/${chapterFile.name}"
-                    name = if (chapterFile.isDirectory) {
+                // The file name is sort input, not display: `fillMetadata` replaces the chapter
+                // name with the book's own title, and from then on the file name exists only as
+                // the comparator's fallback below.
+                val fileName = (
+                    if (chapterFile.isDirectory) {
                         chapterFile.name
                     } else {
                         chapterFile.nameWithoutExtension
-                    }.orEmpty()
+                    }
+                    ).orEmpty()
+                val chapter = SChapter.create().apply {
+                    url = "${manga.url}/${chapterFile.name}"
+                    name = fileName
                     date_upload = chapterFile.lastModified()
                     chapter_number = ChapterRecognition
                         .parseChapterNumber(manga.title, this.name, this.chapter_number.toDouble())
@@ -486,10 +492,25 @@ class LocalSource(
                         }
                     }
                 }
+                fileName to chapter
             }
-            .sortedWith { c1, c2 ->
-                c2.name.compareToCaseInsensitiveNaturalOrder(c1.name)
-            }
+            // KMK --> The parsed volume number — recognised out of the file name above and kept
+            // untouched by the syncer afterward — is the reading order for a numbered series. This
+            // list used to be sorted by chapter *name*, which the EPUB pass above has already
+            // replaced with each book's own dc:title: an alphabetical order of titles, which set a
+            // series' volumes down out of sequence ("Prisoner of Azkaban" before "Chamber of
+            // Secrets", "Half-Blood Prince" before "Goblet of Fire") with the missing-chapter
+            // markers to prove it. Files whose name carries no number all share the 0 floor, where
+            // the file-name order — the comparison this replaces — decides among them as before.
+            // KMK <--
+            .sortedWith(
+                compareByDescending<Pair<String, SChapter>> { (_, chapter) ->
+                    chapter.chapter_number.coerceAtLeast(0f)
+                }.thenComparator { (name1, _), (name2, _) ->
+                    name2.compareToCaseInsensitiveNaturalOrder(name1)
+                },
+            )
+            .map(Pair<String, SChapter>::second)
 
         // Copy the cover from the first chapter found if not available
         if (manga.thumbnail_url.isNullOrBlank()) {

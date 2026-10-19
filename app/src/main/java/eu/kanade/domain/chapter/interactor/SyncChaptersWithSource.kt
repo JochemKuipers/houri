@@ -9,6 +9,7 @@ import eu.kanade.domain.manga.model.toSManga
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.DownloadProvider
 import eu.kanade.tachiyomi.source.Source
+import eu.kanade.tachiyomi.source.model.EntryType
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.online.HttpSource
 import exh.source.isEhBasedManga
@@ -23,6 +24,7 @@ import tachiyomi.domain.chapter.repository.ChapterRepository
 import tachiyomi.domain.chapter.service.ChapterRecognition
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.model.Manga
+import tachiyomi.domain.manga.model.entryType
 import tachiyomi.source.local.isLocal
 import java.lang.Long.max
 import java.time.ZonedDateTime
@@ -68,7 +70,21 @@ class SyncChaptersWithSource(
             .mapIndexed { i, sChapter ->
                 Chapter.create()
                     .copyFromSChapter(sChapter)
-                    .copy(name = with(ChapterSanitizer) { sChapter.name.sanitize(manga.title) })
+                    // KMK --> A book entry's chapter name *is* the book's own title, and a book
+                    // title BEGINS with its series title — the fourth volume under "Harry Potter"
+                    // is "Harry Potter and the Goblet of Fire", not a chapter-shaped name. The
+                    // sanitizer below exists for chapter-shaped names ("One Piece Ch. 1000" under
+                    // manga "One Piece"), where dropping the series prefix is de-noising; applied
+                    // to a book it ate the series half off every title and named six volumes
+                    // "and the Prisoner of Azkaban". Comic entries keep the strip.
+                    // KMK <--
+                    .copy(
+                        name = if (manga.entryType() == EntryType.BOOK) {
+                            sChapter.name
+                        } else {
+                            with(ChapterSanitizer) { sChapter.name.sanitize(manga.title) }
+                        },
+                    )
                     .copy(mangaId = manga.id, sourceOrder = i.toLong())
             }
 

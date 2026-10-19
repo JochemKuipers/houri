@@ -37,7 +37,30 @@ fun EpubReader.fillMetadata(manga: SManga, chapter: SChapter) {
     metadata.authors.takeIf { it.isNotEmpty() }?.let { manga.author = it.joinToString(", ") }
     metadata.description?.takeIf { it.isNotBlank() }?.let { manga.description = it }
 
-    metadata.title?.takeIf { it.isNotBlank() }?.let { chapter.name = it }
+    // KMK --> The chapter name is the book's own title. `displayTitle` joins every `dc:title` the
+    // OPF declares, so a title the producer wrote as two elements ("Harry Potter" / "and the
+    // Prisoner of Azkaban") reads whole instead of reading as its bare first part.
+    //
+    // The series prefix is the second repair. Producers filing a numbered series as one folder
+    // keep the series title on the folder and the OPF holds only the volume's half — a "Harry
+    // Potter" folder whose books are all titled "and the Prisoner of Azkaban" — and a bare
+    // fragment cannot tell one row from another. When the book's title does not already open with
+    // the series title and the file name carried a recognised volume number — the two facts every
+    // file of a numbered series has, and no folder of separate works does — the series title
+    // leads, and the row again reads as a book. The lowercase test keeps the prefix away from
+    // whole titles that merely share a folder with numbered files: a real book title starts with
+    // a capital.
+    metadata.title?.takeIf { it.isNotBlank() }?.let {
+        val seriesTitle = manga.title.trim()
+        val bookTitle = metadata.displayTitle.orEmpty().trim()
+        val isSeriesFragment = seriesTitle.isNotEmpty() &&
+            chapter.chapter_number >= 0f &&
+            !bookTitle.startsWith(seriesTitle, ignoreCase = true) &&
+            bookTitle.firstOrNull()?.isLowerCase() == true
+
+        chapter.name = if (isSeriesFragment) "$seriesTitle $bookTitle" else bookTitle
+    }
+    // KMK <--
 
     // The publisher is the scanlator-shaped field an epub actually has; a creator stands in
     // when the book names none, which is the same precedence the old OPF walk used.

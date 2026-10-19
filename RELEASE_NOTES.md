@@ -16,9 +16,15 @@ files moved. See .github/scripts/release_notes.py.
 
 - **Backup restore**: The restore screen stays responsive while a large backup is validated, and the database folds its write-ahead log when a restore finishes so the restored data is fully settled on disk instead of sitting in a large log file.
 
+- **Local source**: When a book's own title is only the volume half of a series title (an EPUB whose OPF is filled with "and the Prisoner of Azkaban" in a "Harry Potter" folder), chapter names now lead with the series title, so every row says which volume it belongs to. Book tables of contents that carry markup inside their labels no longer show it either.
+
 ### Fix
 
 - **Backup restore**: A restore could silently skip the last series in the file (up to one internal batch, 249 entries) when no full batch remained before the merged entries were written. The leftover batch is now written, so the restored library matches the backup and the progress bar reaches 100% again.
+
+- **Local source**: Chapters of a folder of imported EPUB books now sort by the volume number recognised in the file name. The list used to be ordered alphabetically by each book's declared title, which set the volumes down out of sequence ("and the Prisoner of Azkaban" before "and the Chamber of Secrets") and printed bogus "Missing N chapters" markers between them.
+
+- **Local source**: EPUB book chapter names no longer have the series title peeled off the front ("and the Prisoner of Azkaban" instead of "Harry Potter and the Prisoner of Azkaban"), and XML markup left inside a book's metadata no longer leaks into chapter titles and the author line.
 
 - **Library**: Large libraries load noticeably faster and stay responsive while updating. Cover-cleanup work no longer runs a second full library scan at the same moment the library is first built, duplicate background library queries were collapsed into one, and title sorting now prepares each title once instead of on every comparison.
 

@@ -83,8 +83,36 @@ internal class EpubXmlReader private constructor(private val parser: XmlPullPars
      */
     fun textContent(): String {
         val out = StringBuilder()
-        appendTextContentTo(out)
+        appendTextContentTo(out, plainText = false)
         return out.toString()
+    }
+
+    /**
+     * Reads the text content of the current element as a single line of plain text.
+     *
+     * The Dublin Core fields a book *displays as text* — its title, author, publisher — are simple
+     * literals by spec, but real OPFs carry markup inside them two ways: child elements
+     * (`<dc:creator>` wrapping a bare `<creator>`), and tags hand-escaped into text
+     * (`&lt;creator&gt;`). [textContent] preserved both, and the escapes came back out through
+     * every name and author the app renders — literal `<creator>J.K. Rowling</…>` in a subtitle
+     * field, visibly broken. Child markup is dropped to a separating space so an inline element
+     * still reads as a word boundary, and tag-shaped sequences that arrived as text are stripped
+     * (bounded to a plausible tag; a stray, unclosed `<` in a title survives). Whitespace runs
+     * collapse: these are single-line display fields, not prose.
+     *
+     * Selection belongs to the caller: `dc:description` is authored HTML on purpose and keeps
+     * [textContent].
+     *
+     * Same walk contract as [textContent] — entered on a START_TAG, returned on the element's own
+     * END_TAG — and the same [MAX_TEXT_CHARS] ceiling.
+     */
+    fun textContentAsPlainText(): String {
+        val out = StringBuilder()
+        appendTextContentTo(out, plainText = true)
+        return out.toString()
+            .replace(TAG_SHAPED_TEXT, " ")
+            .trim()
+            .replace(WHITESPACE_RUN, " ")
     }
 
     /**
@@ -109,7 +137,7 @@ internal class EpubXmlReader private constructor(private val parser: XmlPullPars
      * for every caller — each one's loop terminates on `END_DOCUMENT` — and the alternative,
      * rescanning to find the end tag, is exactly the unbounded walk this method exists to prevent.
      */
-    private fun appendTextContentTo(out: StringBuilder) {
+    private fun appendTextContentTo(out: StringBuilder, plainText: Boolean) {
         val startDepth = parser.depth
         while (out.length < MAX_TEXT_CHARS) {
             when (parser.next()) {
@@ -120,20 +148,28 @@ internal class EpubXmlReader private constructor(private val parser: XmlPullPars
                     if (out.length > MAX_TEXT_CHARS) out.setLength(MAX_TEXT_CHARS)
                 }
                 XmlPullParser.START_TAG -> {
-                    out.append('<').append(parser.name)
-                    for (i in 0 until parser.attributeCount) {
-                        out.append(' ')
-                            .append(parser.getAttributeName(i))
-                            .append("=\"")
-                            .append(
-                                parser.getAttributeValue(i).orEmpty()
-                                    .replace("&", "&amp;")
-                                    .replace("\"", "&quot;")
-                                    .replace("<", "&lt;"),
-                            )
-                            .append('"')
+                    if (plainText) {
+                        // An inline element marks a word boundary, not content: separating the
+                        // text around it keeps "Harry <i>Potter</i>" reading as one phrase. The
+                        // leading space is suppressed so a nested wrapper does not space out a
+                        // lone value (`<dc:creator><creator>…`).
+                        if (out.isNotEmpty() && !out[out.length - 1].isWhitespace()) out.append(' ')
+                    } else {
+                        out.append('<').append(parser.name)
+                        for (i in 0 until parser.attributeCount) {
+                            out.append(' ')
+                                .append(parser.getAttributeName(i))
+                                .append("=\"")
+                                .append(
+                                    parser.getAttributeValue(i).orEmpty()
+                                        .replace("&", "&amp;")
+                                        .replace("\"", "&quot;")
+                                        .replace("<", "&lt;"),
+                                )
+                                .append('"')
+                        }
+                        out.append('>')
                     }
-                    out.append('>')
                 }
                 // The element's own closing tag, or one of its ancestors' — either way, this text
                 // content is over.
@@ -180,6 +216,16 @@ internal class EpubXmlReader private constructor(private val parser: XmlPullPars
 
         /** XHTML vocabulary used by EPUB content and navigation documents. */
         const val NS_XHTML = "http://www.w3.org/1999/xhtml"
+
+        /**
+         * A complete tag-shaped sequence, as [textContentAsPlainText] strips it out of text that
+         * arrived with the markup escaped into it. Bounded to a plausible tag (name + attributes);
+         * a bare, unclosed `<` in a title does not match, so it survives.
+         */
+        private val TAG_SHAPED_TEXT = Regex("</?[A-Za-z][^>]{0,127}>")
+
+        /** Runs of any whitespace, collapsed to the single space [textContentAsPlainText] asks for. */
+        private val WHITESPACE_RUN = Regex("\\s+")
     }
 }
 

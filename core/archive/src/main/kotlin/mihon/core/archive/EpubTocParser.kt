@@ -140,7 +140,7 @@ internal object EpubTocParser {
                             href = EpubPaths.resolve(baseDir, path)
                             fragment = frag
                         }
-                        if (label == null) label = xml.textContent().ifBlank { null }
+                        if (label == null) label = xml.textContentAsPlainText().ifBlank { null }
                         event = xml.next()
                         continue
                     }
@@ -282,7 +282,7 @@ internal object EpubTocParser {
         while (event != XmlPullParser.END_DOCUMENT) {
             if (event == XmlPullParser.END_TAG && xml.matches(EpubXmlReader.NS_NCX, "navLabel")) break
             if (event == XmlPullParser.START_TAG && xml.matches(EpubXmlReader.NS_NCX, "text")) {
-                return xml.textContent()
+                return xml.textContentAsPlainText()
             }
             event = xml.next()
         }
