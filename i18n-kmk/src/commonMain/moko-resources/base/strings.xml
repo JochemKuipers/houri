@@ -749,4 +749,10 @@
     <string name="novel_search_hint">Search this chapter</string>
     <string name="novel_search_idle">Type to search this chapter</string>
     <string name="novel_search_no_results">Nothing in this chapter matches that</string>
+    <!-- KMK: the book's own navigator layout. Scoped so setting it while a book is open never
+         moves the manga reader's (long-strip) seekbar, which keeps the shared settings. -->
+    <string name="pref_book_force_horz_seekbar">Force horizontal seekbar for books</string>
+    <string name="pref_book_show_vert_seekbar_landscape">Show vertical seekbar in landscape for books</string>
+    <string name="pref_book_left_handed_vertical_seekbar">Left-handed vertical seekbar for books</string>
+    <string name="pref_book_vertical_navigator_height">Book vertical navigator height</string>
 </resources>

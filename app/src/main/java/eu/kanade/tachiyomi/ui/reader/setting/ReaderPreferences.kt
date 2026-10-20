@@ -297,6 +297,19 @@ class ReaderPreferences(
     fun verticalNavigatorHeight() = preferenceStore.getInt("pref_vertical_navigator_height", 100)
     // Mihon <--
 
+    // KMK --> The book's navigator layout is scoped to books: reading a book is a chapter-progress
+    // navigator over text, and a manga's (long-strip) page seekbar over images, so each keeps its
+    // own switches and height slider instead of sharing the SY/Mihon ones — setting one while a
+    // book is open used to move the manga one at the same time. Keys echo the SY pattern.
+    fun bookForceHorizontalSeekbar() = preferenceStore.getBoolean("pref_book_force_horz_seekbar", false)
+
+    fun bookLandscapeVerticalSeekbar() = preferenceStore.getBoolean("pref_book_show_vert_seekbar_landscape", false)
+
+    fun bookLeftVerticalSeekbar() = preferenceStore.getBoolean("pref_book_left_handed_vertical_seekbar", false)
+
+    fun bookVerticalNavigatorHeight() = preferenceStore.getInt("pref_book_vertical_navigator_height", 100)
+    // KMK <--
+
     fun readerBottomButtons() = preferenceStore.getStringSet("reader_bottom_buttons", ReaderBottomButton.BUTTONS_DEFAULTS)
 
     fun pageLayout() = preferenceStore.getInt("page_layout", PagerConfig.PageLayout.AUTOMATIC)

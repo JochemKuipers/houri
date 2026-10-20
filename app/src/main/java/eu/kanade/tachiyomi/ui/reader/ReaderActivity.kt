@@ -912,15 +912,33 @@ class ReaderActivity : BaseActivity() {
             .collectAsState(persistentSetOf())
         val dualPageSplitPaged by readerPreferences.dualPageSplitPaged().collectAsState()
 
-        val forceHorizontalSeekbar by readerPreferences.forceHorizontalSeekbar().collectAsState()
-        val landscapeVerticalSeekbar by readerPreferences.landscapeVerticalSeekbar().collectAsState()
-        val leftHandedVerticalSeekbar by readerPreferences.leftVerticalSeekbar().collectAsState()
+        val mangaForceHorizontalSeekbar by readerPreferences.forceHorizontalSeekbar().collectAsState()
+        val mangaLandscapeVerticalSeekbar by readerPreferences.landscapeVerticalSeekbar().collectAsState()
+        val mangaLeftVerticalSeekbar by readerPreferences.leftVerticalSeekbar().collectAsState()
+        // KMK --> The navigator layout is scoped to what is on screen. A book is one library
+        // chapter that carries its own chapter-progress navigator, and a manga's (long-strip)
+        // vertical seekbar is a page seekbar over images, so the two keep separate switches:
+        // the SY preferences only ever decide the manga layout, and a book reads its own
+        // book_* preferences instead — setting one while a book is open no longer moves the
+        // other. Decided from the loader, the same signal every other book/manga fork in this
+        // file uses.
+        val bookForceHorizontalSeekbar by readerPreferences.bookForceHorizontalSeekbar().collectAsState()
+        val bookLandscapeVerticalSeekbar by readerPreferences.bookLandscapeVerticalSeekbar().collectAsState()
+        val bookLeftVerticalSeekbar by readerPreferences.bookLeftVerticalSeekbar().collectAsState()
+        val isTextChapter = state.currentChapter?.pageLoader is TextPageLoader
+        val forceHorizontalSeekbar = if (isTextChapter) bookForceHorizontalSeekbar else mangaForceHorizontalSeekbar
+        val landscapeVerticalSeekbar = if (isTextChapter) bookLandscapeVerticalSeekbar else mangaLandscapeVerticalSeekbar
+        val leftHandedVerticalSeekbar = if (isTextChapter) bookLeftVerticalSeekbar else mangaLeftVerticalSeekbar
+        // KMK <--
         // Mihon -->
         // The vertical navigator's height, as the settings slider stores it (a percentage).
         // Coerced on the way in: a hand-edited preference of 0 or less would make
         // fillMaxHeight(fraction) throw in layout, and a value is only ever written by a slider
-        // that cannot produce one.
-        val verticalNavigatorHeight by readerPreferences.verticalNavigatorHeight().collectAsState()
+        // that cannot produce one. Scoped the same way as the switches above: a book has its own
+        // slider, so resizing one while a book is open does not resize the manga's.
+        val mangaVerticalNavigatorHeight by readerPreferences.verticalNavigatorHeight().collectAsState()
+        val bookVerticalNavigatorHeight by readerPreferences.bookVerticalNavigatorHeight().collectAsState()
+        val verticalNavigatorHeight = if (isTextChapter) bookVerticalNavigatorHeight else mangaVerticalNavigatorHeight
         // Mihon <--
         val configuration = LocalConfiguration.current
         val verticalSeekbarLandscape =
@@ -946,9 +964,9 @@ class ReaderActivity : BaseActivity() {
         // Decided from the loader, the same signal that chose the renderer, the Book settings tab
         // and the contents buttons — not from the viewer class, so a viewer that is momentarily
         // missing (a rebuild mid-transition) falls back to the manga behaviour rather than to a
-        // half-wired book one.
+        // half-wired book one. The loader signal itself is decided above, where the navigator
+        // layout has to branch on it.
         val bookViewer = state.viewer as? NovelWebViewer
-        val isTextChapter = state.currentChapter?.pageLoader is TextPageLoader
         val navigateNext: () -> Unit = if (isTextChapter) {
             { bookViewer?.nextSection() }
         } else {

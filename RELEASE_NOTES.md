@@ -26,6 +26,8 @@ files moved. See .github/scripts/release_notes.py.
 
 ### Fix
 
+- **Reader**: The vertical seekbar layout is now separate for books and manga. Setting it (side, landscape, or force-horizontal) while reading a book (EPUB) no longer also moves the seekbar for long-strip content (manhwa), and the reverse — each reader keeps its own navigator layout.
+
 - **Book reading (EPUB)**: Clicking a chapter in the contents list now opens at the section it names. Before, a jump into a section that had not been opened in the current reading session could find itself halfway through that section, near its end, or inside the following one: the destination was lost while the section's text was being read, and a freshly rendered page could start from the scroll position of the page it replaced.
 
 - **Local source**: Importing EPUB books no longer crashes the app when the import finishes, because the confirmation toast was shown from a background thread. The toast now appears from the main thread as normal.

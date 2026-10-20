@@ -100,37 +100,78 @@ internal fun GeneralPage(screenModel: ReaderSettingsScreenModel) {
         pref = screenModel.preferences.showPageNumber(),
     )
 
-    // SY -->
-    val forceHorizontalSeekbar by screenModel.preferences.forceHorizontalSeekbar().collectAsState()
-    CheckboxItem(
-        label = stringResource(SYMR.strings.pref_force_horz_seekbar),
-        pref = screenModel.preferences.forceHorizontalSeekbar(),
-    )
-
-    if (!forceHorizontalSeekbar) {
+    // KMK --> The navigator-layout switches are scoped by content type, mirroring the reader:
+    // a book's chapter navigator and a manga's (long-strip) page seekbar each keep their own
+    // layout, so setting the seekbar while a book is open does not move the manga one, or the
+    // reverse. While a book is open this page shows the book's own switches; the manga branch
+    // keeps the shared SY settings untouched. Decided from the same loader signal as the other
+    // book/manga forks in this page.
+    if (isTextChapter) {
+        val bookForceHorizontalSeekbar by screenModel.preferences.bookForceHorizontalSeekbar().collectAsState()
         CheckboxItem(
-            label = stringResource(SYMR.strings.pref_show_vert_seekbar_landscape),
-            pref = screenModel.preferences.landscapeVerticalSeekbar(),
+            label = stringResource(KMR.strings.pref_book_force_horz_seekbar),
+            pref = screenModel.preferences.bookForceHorizontalSeekbar(),
         )
 
+        if (!bookForceHorizontalSeekbar) {
+            CheckboxItem(
+                label = stringResource(KMR.strings.pref_book_show_vert_seekbar_landscape),
+                pref = screenModel.preferences.bookLandscapeVerticalSeekbar(),
+            )
+
+            CheckboxItem(
+                label = stringResource(KMR.strings.pref_book_left_handed_vertical_seekbar),
+                pref = screenModel.preferences.bookLeftVerticalSeekbar(),
+            )
+
+            // Mihon -->
+            // The book's vertical navigator's height, as the settings slider stores it (a
+            // percentage). The same slider the manga row uses; its own preference key.
+            val bookVerticalNavigatorHeight by screenModel.preferences.bookVerticalNavigatorHeight().collectAsState()
+            SliderItem(
+                label = stringResource(KMR.strings.pref_book_vertical_navigator_height),
+                value = bookVerticalNavigatorHeight,
+                valueRange = 65..100,
+                steps = 6,
+                onChange = { screenModel.preferences.bookVerticalNavigatorHeight().set(it) },
+                pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            )
+            // Mihon <--
+        }
+    } else {
+        // SY -->
+        val forceHorizontalSeekbar by screenModel.preferences.forceHorizontalSeekbar().collectAsState()
         CheckboxItem(
-            label = stringResource(SYMR.strings.pref_left_handed_vertical_seekbar),
-            pref = screenModel.preferences.leftVerticalSeekbar(),
+            label = stringResource(SYMR.strings.pref_force_horz_seekbar),
+            pref = screenModel.preferences.forceHorizontalSeekbar(),
         )
 
-        // Mihon -->
-        val verticalNavigatorHeight by screenModel.preferences.verticalNavigatorHeight().collectAsState()
-        SliderItem(
-            label = stringResource(MR.strings.pref_vertical_navigator_height),
-            value = verticalNavigatorHeight,
-            valueRange = 65..100,
-            steps = 6,
-            onChange = { screenModel.preferences.verticalNavigatorHeight().set(it) },
-            pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-        )
-        // Mihon <--
+        if (!forceHorizontalSeekbar) {
+            CheckboxItem(
+                label = stringResource(SYMR.strings.pref_show_vert_seekbar_landscape),
+                pref = screenModel.preferences.landscapeVerticalSeekbar(),
+            )
+
+            CheckboxItem(
+                label = stringResource(SYMR.strings.pref_left_handed_vertical_seekbar),
+                pref = screenModel.preferences.leftVerticalSeekbar(),
+            )
+
+            // Mihon -->
+            val verticalNavigatorHeight by screenModel.preferences.verticalNavigatorHeight().collectAsState()
+            SliderItem(
+                label = stringResource(MR.strings.pref_vertical_navigator_height),
+                value = verticalNavigatorHeight,
+                valueRange = 65..100,
+                steps = 6,
+                onChange = { screenModel.preferences.verticalNavigatorHeight().set(it) },
+                pillColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+            )
+            // Mihon <--
+        }
+        // SY <--
     }
-    // SY <--
+    // KMK <--
 
     CheckboxItem(
         label = stringResource(MR.strings.pref_fullscreen),
