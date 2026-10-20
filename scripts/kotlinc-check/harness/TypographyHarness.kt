@@ -1,5 +1,6 @@
 // Assertions for NovelTypography CSS generation and NovelProgress. Pure JVM by design:
 // neither file imports Android, so both link directly. Run via run-harness.sh or kotlinc-check.
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelBuiltinFonts
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelProgress
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypographyCss
@@ -219,6 +220,90 @@ fun main() {
     check("decode blank", NovelProgress.Position.decode(""), null)
     check("decode partial", NovelProgress.Position.decode("1:0"), null)
     check("decode negative", NovelProgress.Position.decode("-1:0:10"), null)
+
+    // ---------------- custom hex entry ----------------
+    // The free-form colour field's only gate. Accept what the palette chips accept (`#rgb` /
+    // `#rrggbb`, `#` optional) and return the one canonical spelling, so "is this the chip's colour"
+    // stays a string comparison everywhere; anything else is refused, not guessed.
+    check("custom hex canonicalises", NovelTypography.normalizedColor("#0099EE"), "#0099ee")
+    check("custom hex accepts without hash", NovelTypography.normalizedColor("0099ee"), "#0099ee")
+    check("custom hex expands 3 digits", NovelTypography.normalizedColor("#9e3"), "#99ee33")
+    check("custom hex trims", NovelTypography.normalizedColor("  #ffaa11 "), "#ffaa11")
+    check("custom hex rejects short", NovelTypography.normalizedColor("#12"), null)
+    check("custom hex rejects long", NovelTypography.normalizedColor("#1234567"), null)
+    check("custom hex rejects non-hex", NovelTypography.normalizedColor("#gggggg"), null)
+    check("custom hex rejects words", NovelTypography.normalizedColor("chartreuse"), null)
+    check("custom hex rejects empty", NovelTypography.normalizedColor(""), null)
+
+    // ---------------- bold text ----------------
+    // On and off both emit a weight under `!important` — a publisher that set the whole body bold
+    // must be overridable by "off" or "off" reads as doing nothing. The targets are the text-bearing
+    // set only: a heading's weight is the book's own hierarchy, and the emphasis elements carry
+    // meaning a blanket rule would flatten.
+    val boldOn = NovelTypographyCss.stylesheet(NovelTypography(boldText = true))
+    contains("bold text emits 700", boldOn, "font-weight: 700 !important")
+    check("bold text skips the headings", boldOn.contains("h1, h2, h3, h4, h5, h6 { font-weight"), false)
+    val boldOff = NovelTypographyCss.stylesheet(NovelTypography(boldText = false))
+    contains("bold text off emits 400", boldOff, "font-weight: 400 !important")
+    check("bold text off is not bold", boldOff.contains("font-weight: 700"), false)
+    check("bold follow emits nothing", NovelTypographyCss.stylesheet(NovelTypography()).contains("font-weight"), false)
+
+    // ---------------- force dark ----------------
+    // Resolve-in-place: the canvas paints even when no background chip was touched, the text colour
+    // is *derived* from it (an explicit one chosen for a light page is exactly dark-on-dark), and the
+    // publisher's own classed backgrounds are neutralised — the one route a palette override cannot
+    // reach otherwise.
+    val forced = NovelTypographyCss.stylesheet(NovelTypography(forceDark = true))
+    contains("force dark paints the canvas", forced, "background-color: #121212 !important")
+    contains("force dark derives the text colour", forced, "color: #ffffff !important")
+    check(
+        "force dark ignores an explicit font colour",
+        NovelTypographyCss.stylesheet(NovelTypography(fontColor = "#ff00ff", forceDark = true)).contains("color: #ff00ff"),
+        false,
+    )
+    contains(
+        "force dark neutralises flow backgrounds",
+        forced,
+        "*:not(html):not(body):not(img):not(svg):not(video):not(picture):not(source) " +
+            "{ background-color: transparent !important; }",
+    )
+    check("force dark off leaves the book's palette", NovelTypography(forceDark = false).effectiveBackgroundColor, null)
+    check("force dark supplies a canvas", NovelTypography(forceDark = true).effectiveBackgroundColor, "#121212")
+    check(
+        "an explicit background outranks the forced canvas",
+        NovelTypography(backgroundColor = "#f5f2e8", forceDark = true).effectiveBackgroundColor,
+        "#f5f2e8",
+    )
+
+    // ---------------- bundled font table ----------------
+    // The picker stores and loads through these values; one wrong suffix and a family silently
+    // stops existing. Asserted off-device because the file is pure.
+    checkTrue("font bundle is not empty", NovelBuiltinFonts.all.isNotEmpty())
+    checkTrue(
+        "font bundle values are prefixed",
+        NovelBuiltinFonts.familyValues.all { it.startsWith(NovelBuiltinFonts.PREFIX) },
+    )
+    checkTrue(
+        "font bundle values are unique",
+        NovelBuiltinFonts.familyValues.toSet().size == NovelBuiltinFonts.familyValues.size,
+    )
+    checkTrue(
+        "font bundle assets are ttf under novel-fonts/",
+        NovelBuiltinFonts.all.all { it.asset.startsWith("novel-fonts/") && it.asset.endsWith(".ttf") },
+    )
+    // A bundle value that *were* a generic keyword would reach quoteFamily as one — quoted as an
+    // arbitrary string rather than resolved as the keyword, and the row's face would be wrong.
+    val cssGenerics = setOf("serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui")
+    checkTrue(
+        "font bundle names are not css generics",
+        NovelBuiltinFonts.all.none { it.name.lowercase() in cssGenerics },
+    )
+    check("byValue matches without case", NovelBuiltinFonts.byValue("builtin/literata")?.name, "Literata")
+    check("byValue rejects a bare keyword", NovelBuiltinFonts.byValue("serif"), null)
+    checkTrue(
+        "categories carry the generic fallbacks",
+        NovelBuiltinFonts.Category.entries.map { it.cssFallback } == listOf("serif", "sans-serif", "monospace", "cursive"),
+    )
 
     println(if (failures == 0) "\nALL PASS" else "\n$failures FAILURES")
     if (failures > 0) kotlin.system.exitProcess(1)

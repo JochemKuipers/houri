@@ -4,13 +4,16 @@ package eu.kanade.tachiyomi.ui.reader.viewer.novel
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import mihon.core.archive.EpubArchiveUrls
+import mihon.core.archive.EpubMimeSniff
 import java.io.File
 import java.util.Base64
 import java.util.Locale
 
 /**
- * Fonts the reader brought themselves, kept in the app's own storage and offered next to the
- * built-in families.
+ * The fonts a document can be set in: the [built-in][NovelBuiltinFonts] families the app ships,
+ * and the ones [imported][PREFIX] by the reader, each reaching the page the same way every other
+ * byte of it does — inside the markup, as a `data:` URI.
  *
  * ### Why the files are copied rather than referenced
  *
@@ -27,7 +30,9 @@ import java.util.Locale
  * user fonts from colliding with CSS's generic keywords (`serif`, `monospace`…), and the whole
  * value is also the CSS family name, quoted by [NovelTypographyCss.quoteFamily] — a CSS family
  * name is an arbitrary string, so the prefix costs nothing and the `@font-face` declaration and
- * the `font-family` rule cannot disagree about what the chosen font is called.
+ * the `font-family` rule cannot disagree about what the chosen font is called. The bundled
+ * families follow the same convention (`builtin/<Family>`, see [NovelBuiltinFonts]), so both
+ * answers to "which font" are one spelling apart and `load` is a two-way switch.
  */
 object NovelFonts {
 
@@ -50,29 +55,56 @@ object NovelFonts {
             ?.sorted()
             .orEmpty()
 
+    /** Why an import did not happen. Each value answers its own toast, so "no" says *why*. */
+    enum class ImportResult {
+        /** Copied into the reader's storage; offered as `user/<name>`. */
+        Success,
+
+        /**
+         * Readable, inside the size limit, and not a font by its bytes — the signatures
+         * [EpubMimeSniff] already knows for the four shipping font formats.
+         *
+         * Validating the bytes rather than the picked file's extension is the point: providers
+         * hand files over with names (`user-font`, `download (1)`) that say nothing, and this used
+         * to import anything that fit — a text file named `my-font.ttf` arrived, displayed, was
+         * chosen, and then silently did nothing, because the engine cannot load what is not a
+         * font. Refusing at the door turns "the setting does nothing" into a toast.
+         */
+        NotAFont,
+
+        /** Larger than [MAX_FONT_BYTES]. Real fonts are small; nothing legitimate hits this. */
+        TooLarge,
+
+        /** Unreadable through the picker, or a name that cannot safely become a file. */
+        Unreadable,
+    }
+
     /**
      * Copies the picked [uri] in, named after the document it names.
      *
      * The name is sanitised rather than trusted: it came from another app, and it is about to
-     * become both a file name and part of a CSS string. False — not an exception — for anything
-     * the picker handed over that cannot be read within the ceiling: a failed import is a toast,
-     * not a crash.
+     * become both a file name and part of a CSS string. The result is not an exception — for
+     * anything the picker hands over that cannot become a font the reader will use, this is a
+     * toast, not a crash.
      */
-    fun import(context: Context, uri: Uri): Boolean {
-        val display = displayName(context, uri) ?: "font"
+    fun import(context: Context, uri: Uri): ImportResult {
+        val display = displayName(context, uri) ?: return ImportResult.Unreadable
         val safe = display.replace(Regex("""[\\/:*?"<>|]"""), "_").trim()
-        if (safe.isBlank()) return false
+        if (safe.isBlank()) return ImportResult.Unreadable
         val bytes = try {
             context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
         } catch (_: Exception) {
             null
-        } ?: return false
-        if (bytes.isEmpty() || bytes.size > MAX_FONT_BYTES) return false
+        } ?: return ImportResult.Unreadable
+        if (bytes.isEmpty()) return ImportResult.Unreadable
+        if (bytes.size > MAX_FONT_BYTES) return ImportResult.TooLarge
+        // The sniff answers with an image MIME just as happily — only a font one passes here.
+        if (EpubMimeSniff.of(bytes)?.startsWith("font/") != true) return ImportResult.NotAFont
         return try {
             File(directory(context), safe).writeBytes(bytes)
-            true
+            ImportResult.Success
         } catch (_: Exception) {
-            false
+            ImportResult.Unreadable
         }
     }
 
@@ -82,18 +114,54 @@ object NovelFonts {
     /**
      * The font named by a family value, or null when it is gone or unreadable.
      *
-     * The stored family value carries no extension — it is a name, not a file — so the file is
-     * found by that name with or without its own extension, and the MIME type comes from whatever
-     * extension the file kept.
+     * The two prefixes the reader stores each name a font differently: `builtin/<Family>` is a
+     * file inside the APK's assets, `user/<name>` one in this app's own storage. Anything without
+     * a prefix still names a user file — the spelling an older stored preference carries — so the
+     * unsuffixed case keeps reaching the same reader's files rather than falling out of the switch.
      */
-    fun load(context: Context, family: String): Face? {
+    fun load(context: Context, family: String): Face? = when {
+        family.startsWith(NovelBuiltinFonts.PREFIX) ->
+            NovelBuiltinFonts.byValue(family)?.let { builtin(context, it) }
+        else -> user(context, family)
+    }
+
+    /**
+     * Removes a reader-imported font, by the family value the list offered.
+     *
+     * False for a built-in value — the app's own fonts have no counterpart in private storage to
+     * delete, and a caller that offers delete for one is the caller's bug, not a crash here.
+     */
+    fun delete(context: Context, family: String): Boolean {
+        if (!family.startsWith(PREFIX)) return false
+        val file = userFile(context, family) ?: return false
+        return try {
+            file.delete()
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * The reader-imported font's own file, when it exists — the picker previews from it.
+     *
+     * Separate from [user] because a preview wants the file for [Typeface.createFromFile] while
+     * reaching the page wants the bytes, and the lookup — by name with or without its extension —
+     * must be the same one or the picker would offer a font the page then cannot load.
+     */
+    fun userFile(context: Context, family: String): File? {
         val name = family.removePrefix(PREFIX)
         if (name.isBlank() || name.contains('/') || name.contains('\\')) return null
         return try {
             val directory = directory(context)
-            val file = File(directory, name).takeIf { it.isFile }
+            File(directory, name).takeIf { it.isFile }
                 ?: directory.listFiles()?.firstOrNull { it.nameWithoutExtension == name }
-                ?: return null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun user(context: Context, family: String): Face? = try {
+        userFile(context, family)?.let { file ->
             Face(
                 bytes = file.readBytes(),
                 mimeType = when (file.extension.lowercase(Locale.US)) {
@@ -103,9 +171,27 @@ object NovelFonts {
                     else -> "font/ttf"
                 },
             )
-        } catch (_: Exception) {
-            null
         }
+    } catch (_: Exception) {
+        null
+    }
+
+    /**
+     * The [built-in][NovelBuiltinFonts] face, read out of the assets.
+     *
+     * The MIME type comes from the same extension table the streaming resource path uses — the
+     * bundle is maintained like any other archive's font set, and a future `.otf` asset must not
+     * be declared as a TTF by assumption.
+     */
+    private fun builtin(context: Context, family: NovelBuiltinFonts.Family): Face? = try {
+        context.assets.open(family.asset).use { stream ->
+            Face(
+                bytes = stream.readBytes(),
+                mimeType = EpubArchiveUrls.contentTypeForPath(family.asset) ?: "font/ttf",
+            )
+        }
+    } catch (_: Exception) {
+        null
     }
 
     /**

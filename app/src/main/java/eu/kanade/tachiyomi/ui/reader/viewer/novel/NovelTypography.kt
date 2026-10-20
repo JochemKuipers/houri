@@ -113,6 +113,36 @@ data class NovelTypography(
      * upgrade. The other three default to null because they did nothing before they were settings.
      */
     val paragraphIndent: Boolean? = true,
+
+    /**
+     * Bold body text, on or off; null to follow the book.
+     *
+     * Tri-state like [justified] — a non-null default would force a `font-weight` into every book
+     * the moment the build ships, publisher's own typographic choices included. The emitted rule
+     * covers the text-bearing element set and *not* the headings: a heading's weight is part of the
+     * book's hierarchy, see [NovelTypographyCss.stylesheet].
+     *
+     * `true` is a real weight where the chosen face has one ([NovelBuiltinFonts] ships variable
+     * fonts for exactly this) and a synthesised one against a generic or against a book's own
+     * static face; `false` emits `400`, which is only not a no-op because a publisher stylesheet
+     * can set the whole body bold and "off" has to mean off there too.
+     */
+    val boldText: Boolean? = null,
+
+    /**
+     * Ignore the publisher's own colours and paint dark; null or false to keep the book's palette.
+     *
+     * The reason this exists is the book that *declares* white-on-white, or colours most of its
+     * body through classed elements: nothing in the palette settings can override a rule the
+     * publisher set on a class the background chip never sees. When on, the sheet resolves its own
+     * palette in place — the appearance tab's background when one is chosen, `#121212` otherwise,
+     * and a *contrast-derived* text colour — and neutralises the publisher's own backgrounds across
+     * the document. Illustrations are deliberately not inverted: an `img` keeping its own colours
+     * is the difference between dark reading with real plates and unreadable negatives.
+     *
+     * The resolved palette is [effectiveBackgroundColor]; see [NovelTypographyCss.resolvePalette].
+     */
+    val forceDark: Boolean? = null,
 ) {
     /**
      * The text size actually used for layout: [fontSizePt] scaled by [fontScale].
@@ -145,6 +175,17 @@ data class NovelTypography(
      */
     val effectiveFontColor: String?
         get() = fontColor ?: backgroundColor?.let(::contrastingForeground)
+
+    /**
+     * The background the sheet paints with, or null to leave the publisher's own alone.
+     *
+     * [forceDark] when on supplies a dark canvas even when nothing else did — the whole point is
+     * being readable where the publisher's palette cannot be — and anything the reader or the
+     * general theme chose outranks it. The WebView container reads this too, so the window around
+     * the document is the same colour before the first paint and outside it.
+     */
+    val effectiveBackgroundColor: String?
+        get() = backgroundColor ?: if (forceDark == true) FORCE_DARK_BACKGROUND else null
 
     /** True when anything differs from the defaults and the stylesheet has to be injected. */
     val isCustomised: Boolean
@@ -234,6 +275,21 @@ data class NovelTypography(
             )
         }
 
+        /**
+         * A hand-typed colour as the one canonical `#rrggbb` form the sheet stores, or null for
+         * anything [hexChannels] would refuse.
+         *
+         * The picker's own value is already this shape, so the custom entry accepts only what the
+         * chip values accept — `#rgb` with a leading `#` optional — and returns the expanded,
+         * lower-cased spelling rather than what was typed. One spelling is what keeps "a colour the
+         * reader picked" and "the chip it rode in on" a plain string comparison everywhere the
+         * value is later compared, including the palette's own selected state.
+         */
+        fun normalizedColor(raw: String): String? {
+            val channels = hexChannels(raw) ?: return null
+            return String.format(java.util.Locale.ROOT, "#%02x%02x%02x", channels[0], channels[1], channels[2])
+        }
+
         /** The sRGB gamma expansion WCAG defines, so mid-tones are not read as far too bright. */
         private fun relativeLuminance(channel: Int): Double {
             val c = channel / 255.0
@@ -242,5 +298,12 @@ data class NovelTypography(
 
         const val DARK = "#000000"
         const val LIGHT = "#ffffff"
+
+        /**
+         * The canvas [forceDark] paints when neither the appearance tab nor the general theme chose
+         * one. Material's dark surface rather than pure black, so the illustration edges that end
+         * short of the page frame still read against it.
+         */
+        const val FORCE_DARK_BACKGROUND = "#121212"
     }
 }

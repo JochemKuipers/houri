@@ -46,10 +46,12 @@ object NovelTypographyCss {
      * choice unless the reader made one.
      */
     fun stylesheet(type: NovelTypography): String {
-        val t = type.sanitized()
+        val t = resolvePalette(type.sanitized())
         // Not `t.fontColor`: a background the reader chose forces a text colour even when they did
         // not choose one, or the page is the publisher's black text on the reader's black plate.
+        // With force dark on, resolvePalette has already made that derivation explicit.
         val textColor = t.effectiveFontColor
+        val forDark = t.forceDark == true
 
         return buildString {
             appendLine("/* komikku reader typography */")
@@ -99,13 +101,37 @@ object NovelTypographyCss {
                 appendLine("""p + p { text-indent: ${if (it) "1em" else "0"} !important; }""")
             }
 
+            // Bold text is a weight on the text-bearing set only. `h1`–`h6` are excluded on purpose:
+            // a heading's weight carries the book's hierarchy, and a reader turning body bold on is
+            // not saying their chapter headings should look broken. `strong`/`b`/`em` are excluded
+            // too, so a book's own emphasised words keep their meaning rather than being flattened
+            // onto the body's choice. Both answers emit under `!important` for the same reason every
+            // other override does — a publisher that set `body { font-weight: bold }` must be
+            // overridable by "off" — and `null`, follow the publisher, emits nothing.
+            t.boldText?.let {
+                appendLine(
+                    "body, p, div, span, li, td, th, blockquote, dd, dt, section, article, figcaption, small " +
+                        "{ font-weight: ${if (it) 700 else 400} !important; }",
+                )
+            }
+
+            // Force dark neutralises the publisher's own colours in a second sentence the palette
+            // above cannot express: nearly every book paints the *flow* through classed elements —
+            // panels, chapter cards, a `div` with a white background and dark text inside it. Those
+            // rules outrank our colour on specificity, so the palette is worthless until their own
+            // backgrounds are made transparent. The page canvas and the illustrations keep theirs:
+            // `html`/`body` are the palette itself, and inverting an image is how dark reading
+            // becomes unreadable negatives.
+            if (forDark) appendLine(FORCE_DARK_NEUTRAL)
+
             // Headings keep the publisher's scale but inherit the colour choice.
             textColor?.let { appendLine("h1, h2, h3, h4, h5, h6 { color: $it !important; }") }
 
-            // An image must never bleed into the margin box once the user has set one.
-            if (t.marginLeft > 0f || t.marginRight > 0f) {
-                appendLine("img, svg, video { max-width: 100% !important; height: auto !important; }")
-            }
+            // An image must never bleed into the margin box. Unconditional rather than margin-gated:
+            // a book without reader margins can still carry a full-bleed `<img>` wider than the
+            // column, and the alternative to this rule is horizontal scroll mid-sentence — the one
+            // direction of reading a book must never open.
+            appendLine("img, svg, video { max-width: 100% !important; height: auto !important; }")
             // A figure the reader has tapped open. Lifted out of the text so it reads as magnified
             // rather than as a stretched picture, and `!important` because the publisher's own
             // `position` on an image would otherwise win on specificity and leave it in the line.
@@ -128,6 +154,35 @@ object NovelTypographyCss {
      */
     fun styleTag(type: NovelTypography): String =
         "<style id=\"kmk-typography\">${stylesheet(type).replace("</", "<\\/")}</style>"
+
+    /**
+     * Resolves [style]'s palette in place when force dark is on, so every rule below the palette can
+     * keep reading [NovelTypography.effectiveFontColor] as if it had always been there.
+     *
+     * The appearance tab's background outranks the forced canvas — it is the *more* specific choice,
+     * and the general theme merge in the viewer has already been through it by the time a value
+     * arrives here. The text colour is **derived, not taken**: the one way this feature fails is a
+     * dark text on the dark page it is standing on, and a `fontColor` the reader picked *before*
+     * turning force dark on is exactly how a palette chosen for a light page ends up dark-on-dark.
+     * Contrast against the canvas is the answer that cannot lose in either direction.
+     *
+     * Also the reason `fontColor` — not [NovelTypography.effectiveFontColor] — is written out
+     * here: a subsequent derived colour from *this* value must not re-derive from the pre-forced
+     * fields.
+     */
+    private fun resolvePalette(style: NovelTypography): NovelTypography {
+        if (style.forceDark != true) return style
+        val background = style.backgroundColor ?: NovelTypography.FORCE_DARK_BACKGROUND
+        return style.copy(
+            backgroundColor = background,
+            fontColor = NovelTypography.contrastingForeground(background) ?: NovelTypography.LIGHT,
+        )
+    }
+
+    /** The rule that takes the flow's own colours away while force dark resolves its palette. */
+    private const val FORCE_DARK_NEUTRAL =
+        "*:not(html):not(body):not(img):not(svg):not(video):not(picture):not(source) " +
+            "{ background-color: transparent !important; }"
 
     private fun elementsRule(t: NovelTypography, textColor: String?): String = buildString {
         append("body, p, div, span, li, td, th, blockquote, dd, dt, section, article, h1, h2, h3, h4, h5, h6 {")

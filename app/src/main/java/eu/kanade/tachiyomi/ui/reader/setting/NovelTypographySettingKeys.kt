@@ -45,6 +45,17 @@ object NovelTypographySettingKeys {
     val VERTICAL_WRITING = SettingKey("pref_novel_vertical_writing", NOVEL_FOLLOW_PUBLISHER)
 
     /**
+     * Bold body text and force-dark colours, both tri-states stored like the three above.
+     *
+     * "Off" for these two is the same as "follow the book" where it matters (nothing is emitted for
+     * force-dark's `off`; bold's `off` emits `font-weight: 400`) but is kept a distinct answer: the
+     * cycle follow → on → off → follow is how every tri-state in the tab is operated, and a control
+     * with a missing third state would read as broken and stay on follow forever.
+     */
+    val BOLD_TEXT = SettingKey("pref_novel_bold_text", NOVEL_FOLLOW_PUBLISHER)
+    val FORCE_DARK = SettingKey("pref_novel_force_dark", NOVEL_FOLLOW_PUBLISHER)
+
+    /**
      * Whether a paragraph after the first is indented.
      *
      * Tri-state like the three above, but defaulting to **on** rather than to the publisher. That is
@@ -84,6 +95,8 @@ object NovelTypographySettingKeys {
         JUSTIFIED,
         HYPHENATION,
         VERTICAL_WRITING,
+        BOLD_TEXT,
+        FORCE_DARK,
         PARAGRAPH_INDENT,
         LINE_SPACING,
         PARAGRAPH_SPACING,

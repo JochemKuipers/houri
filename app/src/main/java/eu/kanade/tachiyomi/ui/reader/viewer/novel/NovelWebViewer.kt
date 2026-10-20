@@ -259,20 +259,33 @@ internal class NovelWebViewer(
         )
     }
 
-    /** The reader font's `@font-face`, when the family chosen is one the reader brought. */
+    /** The reader font's `@font-face`, when the family chosen is one the reader or the app brought. */
     private fun readerFontCss(): String {
         val family = typography.fontFamily
-        if (!family.startsWith(NovelFonts.PREFIX)) return ""
-        val name = family.removePrefix(NovelFonts.PREFIX)
+        if (!family.startsWith(NovelBuiltinFonts.PREFIX) && !family.startsWith(NovelFonts.PREFIX)) return ""
+        val name = family.substringAfter('/', "")
         if (name.isBlank()) return ""
-        val face = readerFontCache.getOrPut(family) {
-            NovelFonts.load(activity, family) ?: return ""
-        }
+        // A `get` on this map is a re-ordering mutation, so only touch it for a real miss.
+        val face = readerFontCache[family] ?: NovelFonts.load(activity, family)?.also {
+            readerFontCache[family] = it
+        } ?: return ""
         return NovelFonts.faceCss(family, face)
     }
 
-    /** The chosen font, read once per family rather than once per document. */
-    private val readerFontCache = mutableMapOf<String, NovelFonts.Face>()
+    /**
+     * The chosen font, read once per family rather than once per document.
+     *
+     * Bounded at the low end a picker session needs: a face is half a megabyte of bytes held as a
+     * `data:` URI across documents, so an unbounded cache pins every font ever displayed for the
+     * life of the chapter. Four is wide enough to hold the families back and forth of a comparing
+     * reader and small enough that hopping through the whole bundle allocates nothing it keeps.
+     */
+    private val readerFontCache: LinkedHashMap<String, NovelFonts.Face> =
+        object : LinkedHashMap<String, NovelFonts.Face>(READER_FONT_CACHE_FACES, 0.75f, true) {
+            override fun removeEldestEntry(
+                eldest: MutableMap.MutableEntry<String, NovelFonts.Face>,
+            ): Boolean = size > READER_FONT_CACHE_FACES
+        }
 
     /** Cancelled in [destroy]: the typography subscription outlives the viewer otherwise. */
     private var typographyJob: Job? = null
@@ -322,10 +335,11 @@ internal class NovelWebViewer(
      *
      * A WebView whose content is black but whose overscroll glow is white reads as a rendering bug, so
      * this goes on both. Follows [typography], so the general reader theme reaches it through the
-     * merge above.
+     * merge above — and so does [NovelTypography.forceDark], whose canvas is a choice made without
+     * setting a background and must paint the window beside the document, not only under it.
      */
     private val backgroundColor: Int
-        get() = typography.backgroundColor?.toColorIntOrNull() ?: Color.TRANSPARENT
+        get() = typography.effectiveBackgroundColor?.toColorIntOrNull() ?: Color.TRANSPARENT
 
     /**
      * Taps, long-presses and scrolls.
@@ -1461,6 +1475,11 @@ internal class NovelWebViewer(
     private companion object {
         /** Fraction of the width, at each edge, that turns a page. */
         const val TAP_ZONE = 0.30f
+
+        /**
+         * How many font faces the [readerFontCache] may hold. See its comment for the number.
+         */
+        const val READER_FONT_CACHE_FACES = 4
 
         const val SMALL_TAP_ZONE = 0.15f
 

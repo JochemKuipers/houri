@@ -49,6 +49,7 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
              "$REPO_ROOT/app/src/main/java/eu/kanade/tachiyomi/ui/reader/viewer/novel" \
              -name 'EpubPaths.kt' -o -name 'EpubBook.kt' \
              -o -name 'NovelTypography.kt' -o -name 'NovelTypographyCss.kt' -o -name 'NovelProgress.kt' \
+             -o -name 'NovelBuiltinFonts.kt' \
              -o -name 'NovelDocument.kt' -o -name 'NovelScrollBridge.kt' \
              -o -name 'NovelNavigation.kt' -o -name 'NovelReaderTheme.kt' \
              -o -name 'NovelContinuous.kt' -o -name 'NovelInline.kt' \

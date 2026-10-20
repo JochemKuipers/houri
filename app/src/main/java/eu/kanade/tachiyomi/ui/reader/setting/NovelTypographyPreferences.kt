@@ -112,6 +112,15 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
             NovelTypographySettingKeys.PARAGRAPH_INDENT.default,
         )
 
+    private val boldTextPref: Preference<String>
+        get() = store.getString(NovelTypographySettingKeys.BOLD_TEXT.key, NovelTypographySettingKeys.BOLD_TEXT.default)
+
+    private val forceDarkPref: Preference<String>
+        get() = store.getString(
+            NovelTypographySettingKeys.FORCE_DARK.key,
+            NovelTypographySettingKeys.FORCE_DARK.default,
+        )
+
     /** True when the reader explicitly chose justify-on or justify-off; null to follow the book. */
     var justified: Boolean?
         get() = triState(justifiedPref.get())
@@ -129,6 +138,16 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
     var paragraphIndent: Boolean?
         get() = triState(paragraphIndentPref.get())
         set(value) = paragraphIndentPref.set(encodeTriState(value))
+
+    /** Whether body text is set bold; null to follow the book. See [NovelTypography.boldText]. */
+    var boldText: Boolean?
+        get() = triState(boldTextPref.get())
+        set(value) = boldTextPref.set(encodeTriState(value))
+
+    /** Whether the reader's own dark palette stands in for the book's; see [NovelTypography.forceDark]. */
+    var forceDark: Boolean?
+        get() = triState(forceDarkPref.get())
+        set(value) = forceDarkPref.set(encodeTriState(value))
 
     // ------------------------------------------------------------ reads / writes
 
@@ -151,6 +170,8 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
         marginBottom = marginBottom.get(),
         verticalWriting = verticalWriting,
         paragraphIndent = paragraphIndent,
+        boldText = boldText,
+        forceDark = forceDark,
     ).sanitized()
 
     fun setTypography(value: NovelTypography) {
@@ -165,6 +186,8 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
         hyphenation = t.hyphenation
         verticalWriting = t.verticalWriting
         paragraphIndent = t.paragraphIndent
+        boldText = t.boldText
+        forceDark = t.forceDark
         paragraphSpacing.set(t.paragraphSpacing)
         lineSpacing.set(t.lineSpacing)
         fontSpacing.set(t.fontSpacing)
@@ -206,6 +229,8 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
             hyphenationPref.changes().asSignal(),
             verticalWritingPref.changes().asSignal(),
             paragraphIndentPref.changes().asSignal(),
+            boldTextPref.changes().asSignal(),
+            forceDarkPref.changes().asSignal(),
         )
         // Spread rather than passed as a List: `merge`'s overload set has no `Iterable` + transform
         // form, so a List argument silently binds to the single-argument Iterable overload instead and

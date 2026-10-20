@@ -701,6 +701,20 @@
     <string name="novel_font_add">Add a font…</string>
     <string name="novel_font_added">Font added</string>
     <string name="novel_font_add_failed">Could not add that font</string>
+    <!-- KMK: the font picker. Built-in families are grouped by what they are for; the preview
+         renders every name in its own face, so a name is also its specimen. -->
+    <string name="novel_font_built_in">Built-in fonts</string>
+    <string name="novel_font_user">Your fonts</string>
+    <string name="novel_font_group_generic">Device fonts</string>
+    <string name="novel_font_group_serif">Serif</string>
+    <string name="novel_font_group_sans">Sans-serif</string>
+    <string name="novel_font_group_mono">Monospace</string>
+    <string name="novel_font_group_handwriting">Handwriting</string>
+    <string name="novel_font_remove">Remove font</string>
+    <string name="novel_font_remove_confirm">Remove this font? Books set in it fall back to the default.</string>
+    <string name="novel_font_removed">Font removed</string>
+    <string name="novel_font_invalid">That file is not a font the reader recognises</string>
+    <string name="novel_font_too_large">That font is too large to import</string>
     <string name="pref_novel_font_color">Font colour</string>
     <string name="pref_novel_background_color">Background colour</string>
     <string name="pref_novel_smooth_text">Smooth text</string>
@@ -712,6 +726,8 @@
     <string name="pref_novel_vertical_writing">Vertical writing</string>
     <string name="pref_novel_vertical_writing_summary">Top-to-bottom, right-to-left. Japanese and Chinese novels often expect this</string>
     <string name="pref_novel_paragraph_indent">Paragraph indent</string>
+    <string name="pref_novel_bold_text">Bold text</string>
+    <string name="pref_novel_force_dark">Force dark</string>
     <string name="local_book_import">Import books</string>
     <string name="local_book_import_summary">Pick one or more EPUB files off this device. They are copied into a new folder in your local source, named by you, and show up as one series.</string>
     <string name="local_book_import_name">Series name</string>
@@ -737,6 +753,11 @@
     <string name="novel_color_cream">Cream</string>
     <string name="novel_color_paper">Paper</string>
     <string name="novel_color_sepia">Sepia</string>
+    <!-- KMK: the free-form entry behind the "Custom…" chip. Values are normalised to the same
+         #rrggbb the palette chips store, so the contrast rule treats them identically. -->
+    <string name="novel_color_custom">Custom…</string>
+    <string name="novel_color_hex_label">Hex colour</string>
+    <string name="novel_color_hex_hint">For example, #0099EE</string>
     <string name="novel_error_drm_protected">This book is DRM-protected and cannot be read</string>
     <string name="novel_error_chapter_not_found">Chapter not found</string>
     <!-- KMK: reader contents + in-chapter search -->
