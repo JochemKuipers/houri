@@ -464,6 +464,8 @@
     <string name="mtl_models_clear">Clear downloaded models</string>
     <string name="mtl_models_clear_summary">Remove model files from disk — they must be re-downloaded to translate</string>
     <string name="mtl_models_cleared">Models cleared</string>
+    <string name="mtl_models_ocr_addon">Install multilingual OCR add-on</string>
+    <string name="mtl_models_ocr_addon_summary">Adds PP-OCRv5 (~16 MB), needed to read English and other Latin-script pages — Japanese and Chinese work without it</string>
     <string name="stats_top_manga">Top manga by reading time</string>
     <string name="pref_yakuyomi_llm_advanced">Advanced (llama.cpp)</string>
     <string name="pref_yakuyomi_engine_advanced">Advanced engine tuning</string>

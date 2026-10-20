@@ -392,6 +392,17 @@ class ModelManager(
             sanitizeCustomUrl(p.customDetectorModelUrl().get()).isNotBlank()
     }
 
+    // KMK -->
+    /**
+     * True when the optional multilingual OCR add-on ([PP_OCR_V5], English + more) is present and
+     * complete. Size-only, like [isReady]/[refresh] — the full sha256 pass happens in
+     * [verifyInBackground] and must never run on the settings screen's UI thread. The bundled int8
+     * OCR alone reads Japanese and Chinese, so settings surfaces this row for the upgrade.
+     */
+    fun isMultilingualOcrInstalled(): Boolean =
+        models.firstOrNull { it.optional && it.role == "ocr" }?.let(::hasValidSize) == true
+    // KMK <--
+
     private fun downloadAndVerify(model: RemoteModel, onBytes: (Long) -> Unit) {
         if (model.name.contains("..") || model.name.contains("/")) throw IllegalStateException("Invalid model name")
         if (!model.url.startsWith("https://")) throw IllegalStateException("Invalid model URL")

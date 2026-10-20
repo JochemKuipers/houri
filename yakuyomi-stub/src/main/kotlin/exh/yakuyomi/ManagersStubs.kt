@@ -39,6 +39,12 @@ class ModelManager {
     fun cancelDownload() = Unit
     fun clearModels() = Unit
     fun customUrlsActive(): Boolean = false
+
+    // KMK --> #54: parity with the engine ModelManager — SettingsYakuyomiScreen's add-on-row gate
+    // calls this on both flavors. The no-MTL manager never reaches READY, so `true` just means
+    // "nothing missing", keeping the row hidden here.
+    fun isMultilingualOcrInstalled(): Boolean = true
+    // KMK <--
 }
 
 /** No-op stub of [LocalLlmDownloadManager] for the no-MTL APK variant. */

@@ -185,6 +185,11 @@ object SettingsYakuyomiScreen : SearchableSettings {
                             "id" to "Indonesia (ID)",
                             "ar" to "العربية (AR)",
                             "zh" to "中文 (ZH)",
+                            // KMK --> Traditional Chinese is requested as its own target (#53);
+                            // starts with "zh", so the CJK vertical-layout rule in
+                            // EngineConfigFactory.shouldForceHorizontal keeps applying.
+                            "zh-TW" to "繁體中文 (ZH-TW)",
+                            // KMK <--
                             "ja" to "日本語 (JA)",
                             "ko" to "한국어 (KO)",
                             "th" to "ไทย (TH)",
@@ -723,84 +728,114 @@ object SettingsYakuyomiScreen : SearchableSettings {
             exh.yakuyomi.ModelManager.State.READY -> stringResource(KMR.strings.mtl_models_redownload)
             else -> stringResource(KMR.strings.mtl_models_download)
         }
+        // KMK --> Multilingual OCR add-on (issue #54): older installs only downloaded the bundled
+        // int8 OCR, which reads CJK scripts but not English. Surface the optional PP-OCRv5 model
+        // whenever the engine is READY without it — startDownload() fetches only the files that
+        // fail verification, so the row pulls just this ~16 MB add-on, never the whole pack.
+        val missingOcrAddon = status.state == exh.yakuyomi.ModelManager.State.READY &&
+            !modelManager.isMultilingualOcrInstalled()
+        // KMK <--
         return Preference.PreferenceGroup(
             title = stringResource(KMR.strings.mtl_models_title),
             // KMK --> on-device model weights need both the MTL engine and enough RAM.
             mtlOnly = true,
             ramGated = true,
             // KMK <--
-            preferenceItems = persistentListOf(
-                Preference.PreferenceItem.CustomPreference(
-                    title = stringResource(KMR.strings.mtl_models_title),
-                    content = {
-                        Column(modifier = Modifier.padding(horizontal = MaterialTheme.padding.medium, vertical = 8.dp)) {
-                            when (status.state) {
-                                exh.yakuyomi.ModelManager.State.READY -> {
-                                    Text(
-                                        text = stringResource(KMR.strings.mtl_models_ready, status.downloadedBytes / (1024 * 1024)),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                }
-                                exh.yakuyomi.ModelManager.State.DOWNLOADING -> {
-                                    val percent = (status.progress * 100).toInt()
-                                    Text(
-                                        text = stringResource(KMR.strings.mtl_models_downloading, percent),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                    Spacer(modifier = Modifier.padding(vertical = 4.dp))
-                                    // Padding on both sides so the bar doesn't touch the screen edges.
-                                    LinearProgressIndicator(
-                                        progress = { status.progress },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp),
-                                    )
-                                    if (!status.currentFile.isNullOrBlank()) {
-                                        Spacer(modifier = Modifier.padding(vertical = 4.dp))
+            // buildList (same idiom as the local-model group): the multilingual OCR add-on row is
+            // only appended when the engine is READY without it — startDownload() fetches just the
+            // files that fail verification, so the row downloads only the ~16 MB add-on.
+            preferenceItems = buildList {
+                add(
+                    Preference.PreferenceItem.CustomPreference(
+                        title = stringResource(KMR.strings.mtl_models_title),
+                        content = {
+                            Column(modifier = Modifier.padding(horizontal = MaterialTheme.padding.medium, vertical = 8.dp)) {
+                                when (status.state) {
+                                    exh.yakuyomi.ModelManager.State.READY -> {
                                         Text(
-                                            text = "File: ${status.currentFile}",
-                                            style = MaterialTheme.typography.bodySmall,
+                                            text = stringResource(KMR.strings.mtl_models_ready, status.downloadedBytes / (1024 * 1024)),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                    }
+                                    exh.yakuyomi.ModelManager.State.DOWNLOADING -> {
+                                        val percent = (status.progress * 100).toInt()
+                                        Text(
+                                            text = stringResource(KMR.strings.mtl_models_downloading, percent),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                        )
+                                        Spacer(modifier = Modifier.padding(vertical = 4.dp))
+                                        // Padding on both sides so the bar doesn't touch the screen edges.
+                                        LinearProgressIndicator(
+                                            progress = { status.progress },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 16.dp),
+                                        )
+                                        if (!status.currentFile.isNullOrBlank()) {
+                                            Spacer(modifier = Modifier.padding(vertical = 4.dp))
+                                            Text(
+                                                text = "File: ${status.currentFile}",
+                                                style = MaterialTheme.typography.bodySmall,
+                                            )
+                                        }
+                                    }
+                                    exh.yakuyomi.ModelManager.State.ERROR -> {
+                                        Text(
+                                            text = stringResource(KMR.strings.mtl_models_error, status.error ?: "unknown"),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
+                                    else -> {
+                                        Text(
+                                            text = stringResource(KMR.strings.mtl_models_missing),
+                                            style = MaterialTheme.typography.bodyMedium,
                                         )
                                     }
                                 }
-                                exh.yakuyomi.ModelManager.State.ERROR -> {
-                                    Text(
-                                        text = stringResource(KMR.strings.mtl_models_error, status.error ?: "unknown"),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
-                                }
-                                else -> {
-                                    Text(
-                                        text = stringResource(KMR.strings.mtl_models_missing),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                    )
-                                }
                             }
-                        }
-                    },
-                ),
-                Preference.PreferenceItem.TextPreference(
-                    title = actionTitle,
-                    onClick = {
-                        when (status.state) {
-                            exh.yakuyomi.ModelManager.State.DOWNLOADING -> modelManager.cancelDownload()
-                            exh.yakuyomi.ModelManager.State.READY -> modelManager.startDownload(force = true)
-                            else -> modelManager.startDownload()
-                        }
-                    },
-                    enabled = !lowRam,
-                ),
-                Preference.PreferenceItem.TextPreference(
-                    title = stringResource(KMR.strings.mtl_models_clear),
-                    subtitle = stringResource(KMR.strings.mtl_models_clear_summary),
-                    onClick = {
-                        modelManager.clearModels()
-                        context.toast(modelsClearedText)
-                    },
-                    enabled = !lowRam && status.state != exh.yakuyomi.ModelManager.State.DOWNLOADING,
-                ),
-            ),
+                        },
+                    ),
+                )
+                add(
+                    Preference.PreferenceItem.TextPreference(
+                        title = actionTitle,
+                        onClick = {
+                            when (status.state) {
+                                exh.yakuyomi.ModelManager.State.DOWNLOADING -> modelManager.cancelDownload()
+                                exh.yakuyomi.ModelManager.State.READY -> modelManager.startDownload(force = true)
+                                else -> modelManager.startDownload()
+                            }
+                        },
+                        enabled = !lowRam,
+                    ),
+                )
+                // KMK --> #54: multilingual OCR add-on (PP-OCRv5) — older installs only have the
+                // bundled int8 model, which reads CJK but not English, and there was no way to
+                // discover the optional upgrade without re-downloading everything.
+                if (missingOcrAddon) {
+                    add(
+                        Preference.PreferenceItem.TextPreference(
+                            title = stringResource(KMR.strings.mtl_models_ocr_addon),
+                            subtitle = stringResource(KMR.strings.mtl_models_ocr_addon_summary),
+                            onClick = { modelManager.startDownload() },
+                            enabled = !lowRam && status.state != exh.yakuyomi.ModelManager.State.DOWNLOADING,
+                        ),
+                    )
+                }
+                // KMK <--
+                add(
+                    Preference.PreferenceItem.TextPreference(
+                        title = stringResource(KMR.strings.mtl_models_clear),
+                        subtitle = stringResource(KMR.strings.mtl_models_clear_summary),
+                        onClick = {
+                            modelManager.clearModels()
+                            context.toast(modelsClearedText)
+                        },
+                        enabled = !lowRam && status.state != exh.yakuyomi.ModelManager.State.DOWNLOADING,
+                    ),
+                )
+            }.toPersistentList(),
         )
     }
 
