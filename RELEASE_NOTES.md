@@ -10,38 +10,6 @@ files moved. See .github/scripts/release_notes.py.
 
 ### New
 
-- **Reader (EPUB books)**: Long-pressing an illustration inside a book now offers "Set as cover", so any image carried in the EPUB can become the cover art of its library entry. Long-pressing text still selects text, as before.
-
-- **Backup restore**: A new "Update library after restore" toggle (on by default) controls whether a restored library immediately kicks off a full background refresh. Previously this always ran and could not be turned off.
-
 ### Improve
 
-- **Reader (EPUB books)**: The book's contents list now has a scrollbar, so a long table of contents can be jumped through instead of only flick-scrolled.
-
-- **Tracking**: Logging out of a tracker now keeps your library's tracking records (scores and statuses) by default, so re-logging in re-links them without re-syncing from scratch. A new "Delete tracking records on logout" toggle in *Settings → Tracking* (off by default) restores the old behavior, where signing out also wiped those records from the database.
-
-- **Backup restore**: The restore screen stays responsive while a large backup is validated, and the database folds its write-ahead log when a restore finishes so the restored data is fully settled on disk instead of sitting in a large log file.
-
-- **Local source**: When a book's own title is only the volume half of a series title (an EPUB whose OPF is filled with "and the Prisoner of Azkaban" in a "Harry Potter" folder), chapter names now lead with the series title, so every row says which volume it belongs to. Book tables of contents that carry markup inside their labels no longer show it either.
-
-- **Manga Reader**: Controller stick smoothly scrolls webtoons (and long-strip mode) at a speed based on how far the stick is tilted; adjust **Controller scroll speed** under Settings → Reader → Navigation, or in the reader sheet when the series is in webtoon / long-strip mode
-
 ### Fix
-
-- **Discord**: The Discord Rich Presence notification no longer appears when you are not logged in to Discord. It used to pop up briefly even logged out — roughly 30 seconds after closing the app, or when toggling the Rich Presence off — because stopping the background service could start it just to stop it. Removing your active Discord account in the accounts list also now properly signs that session out: the notification goes away instead of the presence continuing behind your back, and switching to another account points it at the right one.
-
-- **Reader**: The vertical seekbar layout is now separate for books and manga. Setting it (side, landscape, or force-horizontal) while reading a book (EPUB) no longer also moves the seekbar for long-strip content (manhwa), and the reverse — each reader keeps its own navigator layout.
-
-- **Book reading (EPUB)**: Clicking a chapter in the contents list now opens at the section it names. Before, a jump into a section that had not been opened in the current reading session could find itself halfway through that section, near its end, or inside the following one: the destination was lost while the section's text was being read, and a freshly rendered page could start from the scroll position of the page it replaced.
-
-- **Local source**: Importing EPUB books no longer crashes the app when the import finishes, because the confirmation toast was shown from a background thread. The toast now appears from the main thread as normal.
-
-- **Backup restore**: A restore could silently skip the last series in the file (up to one internal batch, 249 entries) when no full batch remained before the merged entries were written. The leftover batch is now written, so the restored library matches the backup and the progress bar reaches 100% again.
-
-- **Local source**: Chapters of a folder of imported EPUB books now sort by the volume number recognised in the file name. The list used to be ordered alphabetically by each book's declared title, which set the volumes down out of sequence ("and the Prisoner of Azkaban" before "and the Chamber of Secrets") and printed bogus "Missing N chapters" markers between them.
-
-- **Local source**: EPUB book chapter names no longer have the series title peeled off the front ("and the Prisoner of Azkaban" instead of "Harry Potter and the Prisoner of Azkaban"), and XML markup left inside a book's metadata no longer leaks into chapter titles and the author line.
-
-- **Library**: Large libraries load noticeably faster and stay responsive while updating. Cover-cleanup work no longer runs a second full library scan at the same moment the library is first built, duplicate background library queries were collapsed into one, and title sorting now prepares each title once instead of on every comparison.
-
-- **Book reading**: The typography rows in *Settings → Book reading* were drawn on top of each other into an unreadable pile, because they relied on a scrolling container they were not given there. They now stack normally.
