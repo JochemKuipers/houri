@@ -79,6 +79,7 @@ import eu.kanade.tachiyomi.ui.browse.source.feed.SourceFeedScreen
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import eu.kanade.tachiyomi.ui.category.CategoryScreen
 import eu.kanade.tachiyomi.ui.home.HomeScreen
+import eu.kanade.tachiyomi.ui.home.LibrarySearchHostScreen
 import eu.kanade.tachiyomi.ui.manga.merged.EditMergedSettingsDialog
 import eu.kanade.tachiyomi.ui.manga.notes.MangaNotesScreen
 import eu.kanade.tachiyomi.ui.manga.track.TrackInfoDialogHomeScreen
@@ -843,16 +844,18 @@ class MangaScreen(
         }
 
         // KMK -->
-        // Library search: pop to HomeScreen so HomeScreen.search(query) can route
-        // via librarySearchEvent -> LibraryTab.search -> queryEvent -> filterLibrary.
+        // Library search: route through a fresh home instance pushed on top of the current
+        // screen, so Back from the library search results returns to the screen the search was
+        // started from (#55) — the same behavior Global Search has. Popping down to the
+        // resident HomeScreen (the old approach) discarded the current item entirely.
+        // LibrarySearchHostScreen always opens on the Library tab, where the query is applied
+        // via HomeScreen.search -> LibraryTab.search -> LibraryScreenModel.search.
         if (library) {
             if (query.isBlank()) return
-            if (navigator.items.none { it is HomeScreen }) {
-                navigator.push(HomeScreen)
-            } else if (navigator.lastItem !is HomeScreen) {
-                navigator.popUntil { it is HomeScreen }
+            if (navigator.lastItem !is LibrarySearchHostScreen) {
+                navigator.push(LibrarySearchHostScreen())
             }
-            (navigator.lastItem as? HomeScreen)?.search(query)
+            HomeScreen.search(query)
             return
         }
         // KMK <--

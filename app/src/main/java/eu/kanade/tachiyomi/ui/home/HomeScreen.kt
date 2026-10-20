@@ -36,6 +36,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.util.fastFilter
 import androidx.compose.ui.util.fastForEach
+import cafe.adriel.voyager.core.screen.ScreenKey
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import cafe.adriel.voyager.navigator.tab.LocalTabNavigator
@@ -401,3 +402,24 @@ object HomeScreen : Screen() {
         ) : Tab
     }
 }
+
+// KMK -->
+/**
+ * Host pushed for a Library Search started from another screen (manga page title/author tap).
+ * Rendering the home tabs UI but carrying its own back stack entry means Back from the library
+ * search results returns to the screen the search was started from (#55) instead of just
+ * dropping out of Home — the same behavior Global Search already has. A fresh instance always
+ * opens on [LibraryTab] (the tab whose search is being invoked), which is where
+ * [HomeScreen.search]'s query lands.
+ */
+class LibrarySearchHostScreen : Screen() {
+    // HomeScreen is a singleton object whose default key is its class name, so reusing it as-is
+    // would collide with the resident instance's saved state; give the host its own key.
+    override val key: ScreenKey = "${HomeScreen::class.qualifiedName}#librarySearchHost"
+
+    @Composable
+    override fun Content() {
+        HomeScreen.Content()
+    }
+}
+// KMK <--
