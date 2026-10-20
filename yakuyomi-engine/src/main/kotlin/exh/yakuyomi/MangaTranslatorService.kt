@@ -198,22 +198,36 @@ class MangaTranslatorService(
         targetLang: String,
         translationModel: String? = null,
     ): List<IchigoTranslation>? {
-        if (imageBytes.isEmpty() || imageBytes.size > 8 * 1024 * 1024) return null
-        if (imageBytes.size < 1024) return null
+        // KMK --> #47: the silent `return null`s here used to collapse every local rejection into
+        // one misleading "MangaTranslator returned empty result" error later. Throw distinguishable
+        // causes instead — TranslationManager routes them through TranslationErrorMapper.
+        if (imageBytes.isEmpty() || imageBytes.size > 8 * 1024 * 1024) {
+            throw TranslationException("MangaTranslator image too large (over the 8 MB limit)")
+        }
+        if (imageBytes.size < 1024) {
+            throw TranslationException("MangaTranslator image too small")
+        }
         // Validate image decodability early to avoid sending garbage and wasting quota
         try {
             val opts = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
             android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, opts)
-            if (opts.outWidth <= 0 || opts.outHeight <= 0 || opts.outWidth > 10000 || opts.outHeight > 10000) return null
+            if (opts.outWidth <= 0 || opts.outHeight <= 0 || opts.outWidth > 10000 || opts.outHeight > 10000) {
+                throw TranslationException("MangaTranslator image unsupported (not an image, or over 10000px)")
+            }
+        } catch (e: TranslationException) {
+            throw e
         } catch (_: Exception) {
-            return null
+            throw TranslationException("MangaTranslator image unsupported (could not decode)")
         }
+        // KMK <--
 
         val sanitizedLang = sanitizeTargetLang(targetLang)
         val sanitizedModel = sanitizeModel(translationModel)
         val base64 = "data:image/jpeg;base64," + Base64.encodeToString(imageBytes, Base64.NO_WRAP)
         // Guard against absurd payload size
-        if (base64.length > 12 * 1024 * 1024) return null
+        if (base64.length > 12 * 1024 * 1024) {
+            throw TranslationException("MangaTranslator image too large (over the 8 MB limit)")
+        }
         val body = IchigoTranslateRequest(
             base64Images = listOf(base64),
             targetLangCode = sanitizedLang,
@@ -347,9 +361,18 @@ class MangaTranslatorService(
         targetLang: String,
         translationModel: String? = null,
     ): ByteArray? {
-        val translations = translateImage(imageBytes, targetLang, translationModel) ?: return null
-        if (translations.isEmpty()) return null
+        // KMK --> #47: no silent nulls left — each failure names its cause and the manager's
+        // TranslationException handler sends it through TranslationErrorMapper for the chip text.
+        val translations = translateImage(imageBytes, targetLang, translationModel)
+            ?: throw TranslationException("MangaTranslator image unsupported (could not decode)")
+        if (translations.isEmpty()) {
+            // HTTP 200 with an empty list is not transient — the service had no text it could
+            // read on this page. Name that (plus the remedy) instead of "returned empty result".
+            throw TranslationException("MangaTranslator found no readable text on the page")
+        }
         return renderTranslationsToWebP(imageBytes, translations)
+            ?: throw TranslationException("MangaTranslator render failed")
+        // KMK <--
     }
 
     private fun renderTranslationsToWebP(

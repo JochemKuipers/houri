@@ -43,6 +43,22 @@ object TranslationErrorMapper {
                 "Provider rejected the request — wrong model or unsupported target language"
             "no usable translation" in lower || "empty response" in lower ->
                 "Provider returned an empty/invalid translation — try a different model"
+            // KMK --> #47: distinguish the MangaTranslator (image service) failure modes so the
+            // reader chip explains what happened and what to do. These must stay above the generic
+            // "image too large"/"too small" rules, whose keys also match these raws.
+            "mangatranslator image too large" in lower ->
+                "Page too large for the MangaTranslator service (8 MB limit) — try another provider in Settings → Translation"
+            "mangatranslator image too small" in lower ->
+                "Page image too small for the MangaTranslator service to read"
+            "mangatranslator image unsupported" in lower ->
+                "Page unreadable or over the service's 10000px limit — MangaTranslator can't use it; try another provider"
+            "mangatranslator found no readable text" in lower ->
+                "MangaTranslator found no readable text on the page — it may not support this script; try another provider in Settings → Translation"
+            "mangatranslator render failed" in lower ->
+                "MangaTranslator answered but composing the page failed — retry, or switch provider in Settings → Translation"
+            "mangatranslator returned empty" in lower ->
+                "MangaTranslator returned an empty result — retry, or switch provider in Settings → Translation"
+            // KMK <--
             "timeout" in lower || "timed out" in lower ->
                 "Provider timed out — check your connection and retry"
             "queue overflow" in lower ->
