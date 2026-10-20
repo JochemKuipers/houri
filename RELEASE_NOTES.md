@@ -26,6 +26,8 @@ files moved. See .github/scripts/release_notes.py.
 
 ### Fix
 
+- **Book reading (EPUB)**: Clicking a chapter in the contents list now opens at the section it names. Before, a jump into a section that had not been opened in the current reading session could find itself halfway through that section, near its end, or inside the following one: the destination was lost while the section's text was being read, and a freshly rendered page could start from the scroll position of the page it replaced.
+
 - **Local source**: Importing EPUB books no longer crashes the app when the import finishes, because the confirmation toast was shown from a background thread. The toast now appears from the main thread as normal.
 
 - **Backup restore**: A restore could silently skip the last series in the file (up to one internal batch, 249 entries) when no full batch remained before the merged entries were written. The leftover batch is now written, so the restored library matches the backup and the progress bar reaches 100% again.

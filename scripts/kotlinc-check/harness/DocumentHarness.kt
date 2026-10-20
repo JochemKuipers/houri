@@ -179,6 +179,18 @@ fun main() {
     val unsegmented = NovelDocument.build(REAL_SPINE_ITEM, t, BASE)
     absent("no marker without a segment", unsegmented, "kmk-seg")
 
+    // The request stamp the growth scripts verify against is part of the document itself, in the
+    // same script element as the bridge so it is declared before any of them can run. Default `0`
+    // for non-reader callers; the number the reader passes is the one its scripts are stamped with.
+    checkTrue("document declares its epoch", NovelDocument.build(REAL_SPINE_ITEM, t, BASE).contains("window.KmkEpoch = 0;"))
+    val epochDoc = NovelDocument.build(REAL_SPINE_ITEM, t, BASE, epoch = 3)
+    contains("stamped document carries the epoch", epochDoc, "window.KmkEpoch = 3;")
+    checkTrue(
+        "epoch is declared inside a script element",
+        epochDoc.indexOf("window.KmkEpoch = 3;") > epochDoc.indexOf("<script>") &&
+            epochDoc.indexOf("window.KmkEpoch = 3;") < epochDoc.indexOf("</script>"),
+    )
+
     check("fragment extracted", NovelContinuous.bodyFragment("<html><body>HELLO</body></html>"), "HELLO")
     check("fragment without a body is itself", NovelContinuous.bodyFragment("just text"), "just text")
 
@@ -235,6 +247,30 @@ fun main() {
     // compensation that animates defeats itself.
     checkTrue("prepend compensation is instant", prepend.contains("scrollBehavior = 'auto'"))
     checkTrue("trim compensation is instant", NovelContinuous.trimScript(1, true).contains("scrollBehavior = 'auto'"))
+
+    // ---------------- the growth scripts are stamped with their request ----------------
+    // A growth script can outlive the document it was built for: a jump or a turn re-renders while
+    // its read is in flight, and a script that already left for the renderer cannot be cancelled. A
+    // stale append adds a section of somebody else's chapter to the new document's window, and a
+    // stale prepend worse — it scrolls the reader with its own compensation. The document declares
+    // the request that built it and each script refuses to run against another.
+    val stampedAppend = NovelContinuous.appendScript("<p>x</p>", 4, "u.xhtml", 3)
+    checkTrue(
+        "append script carries its stamp",
+        stampedAppend.contains("window.KmkEpoch !== epoch") && stampedAppend.contains("})(3)"),
+    )
+    checkTrue(
+        "prepend script carries its stamp",
+        NovelContinuous.prependScript("<p>x</p>", 4, "u.xhtml", 3).contains("window.KmkEpoch !== epoch"),
+    )
+    checkTrue(
+        "trim script carries its stamp",
+        NovelContinuous.trimScript(1, true, 3).contains("window.KmkEpoch !== epoch"),
+    )
+    checkTrue("a stale append answer is dropped", NovelContinuous.isStale("false"))
+    checkTrue("a stale answer survives surrounding whitespace", NovelContinuous.isStale("\nfalse\n"))
+    checkTrue("a fresh append answer is kept", !NovelContinuous.isStale("true"))
+    checkTrue("no answer is kept", !NovelContinuous.isStale(null))
 
     // ---------------- inlining: the book's resources travel inside the document ----------------
     // A fetcher that knows the archive: plate.jpg and main.css resolve (the css in turn names
@@ -391,6 +427,17 @@ fun main() {
     val anchor = NovelScrollBridge.scrollToAnchor("id", 32)
     checkTrue("anchor script substitutes the id", anchor.contains("\"id\""))
     checkTrue("anchor script substitutes the inset", anchor.endsWith("(\"id\",32)"))
+    // onPageFinished fires before an illustrated document's data: images have decoded, and an anchor
+    // measured then sits short by the height of every image above it — which is how a contents entry
+    // landed a screen away from the section it named. The scroll is taken twice, like the prepend
+    // compensation: at the finish, and again once the document's images have all settled.
+    checkTrue(
+        "anchor scrolls early and re-measures after images",
+        anchor.contains("if(!go())return false;") &&
+            anchor.indexOf("decode()") > 0 &&
+            anchor.contains("Promise.all(w).then(go,go)") &&
+            anchor.indexOf("function go()") < anchor.indexOf("decode()"),
+    )
 
     val injected = NovelScrollBridge.scrollToAnchor("\"); alert(1); //", 0)
     checkTrue("quotes escaped", !injected.contains(""""); alert(1); //"""))

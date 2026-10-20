@@ -154,8 +154,12 @@ internal class NovelWebViewer(
      * Element to scroll to once the document now loading has laid out, from a contents entry.
      *
      * Separate from [pendingRestoreFraction] because the two are different *requests*: one is "put
-     * me back", the other is "take me to this section". Whichever was asked for last wins, which is
-     * why every jump clears both before setting one.
+     * me back", the other is "take me to this section". An intent belongs to the [showDocument]
+     * request it was asked with — set when the request starts, consumed by [applyPendingPosition]
+     * at the finish that comes with the document. It must never be written **after** the call:
+     * for an unread document the render runs later than it, and a jump that set these after
+     * [showDocument] returned had them wiped by the very render the jump caused — every jump
+     * into a section the reader had not opened yet landed wherever the document was last left.
      */
     private var pendingAnchor: String? = null
 
@@ -592,11 +596,26 @@ internal class NovelWebViewer(
      * document can be read, so without it a slow read for the document they passed finishes last and
      * puts them back where they left — the one failure mode a reading position cannot recover from,
      * because the position was saved for where they were, not where they went.
+     *
+     * [anchor] and [fraction] are the *destination* this request was asked for — a contents entry or
+     * a search hit. They travel with the request rather than being set after it returns, because for
+     * an unread document the render happens at the end of an asynchronous read: an intent written
+     * after the call was wiped by the render the jump itself caused (see [pendingAnchor]). A plain
+     * turn passes neither and clears both, so a destination left over from an older request cannot
+     * fire on a document it was never meant for.
      */
-    private fun showDocument(page: ReaderPage) {
+    private fun showDocument(page: ReaderPage, anchor: String? = null, fraction: Float? = null) {
         val textPage = page.textPage ?: return
         val request = ++documentRequest
         pendingPage = page
+
+        if (anchor == null && fraction == null) {
+            pendingAnchor = null
+            pendingFraction = null
+        } else {
+            pendingAnchor = anchor
+            pendingFraction = fraction
+        }
 
         if (textPage.text.isNotEmpty()) {
             renderDocument(page)
@@ -638,22 +657,35 @@ internal class NovelWebViewer(
         stuckForward = 0
         stuckBackward = 0
         lastObservedScrollY = 0
+        // ... and no growth of the old window may land in it. An append or prepend still being read
+        // belongs to a DOM that just ended; [appendAhead] stamps what already left for the renderer
+        // (see the epoch there), and the cancel here retires the read that has not.
+        windowJob?.cancel()
+        windowJob = null
 
         // Set before the load, because onPageFinished for it can arrive before this function returns
         // on a warm engine, and a null here would make the finish look like somebody else's.
-        currentBaseUrl = baseUrl
+        //
+        // The load URL carries this request's own fragment. The engine keeps a page's scroll where
+        // the address it is given is one it already holds, and every document in the same book
+        // folder loads at the *same* directory base — so an untagged load looked like the old page
+        // continuing, and a fresh document could start from the scroll offset of the one it
+        // replaced: halfway through it, at its end, or past it into the section that the window
+        // then grew below the clamped viewport. No document and no book names a `kmk-load`
+        // fragment, so every load is a different address. The finish guard below ignores the tag —
+        // a WebView has one finish in flight, and it is always this load's.
+        currentBaseUrl = "$baseUrl#kmk-load-$documentRequest"
         val html = NovelDocument.build(
             inlined,
             typography,
             baseUrl,
             segment = position to textPage.url,
             extraHead = readerFontCss(),
+            epoch = documentRequest,
         )
-        webView.loadDataWithBaseURL(baseUrl, html, "text/html", "UTF-8", null)
+        webView.loadDataWithBaseURL(currentBaseUrl, html, "text/html", "UTF-8", null)
 
         pendingRestoreFraction = restoreFractionFor(page)
-        pendingAnchor = null
-        pendingFraction = null
         lastSavedFraction = -1f
         activity.onPageSelected(page)
     }
@@ -684,15 +716,18 @@ internal class NovelWebViewer(
     fun jumpTo(document: String, fragment: String?) {
         val page = chapters?.currChapter?.pages?.firstOrNull { it.textPage?.url == document } ?: return
 
-        showDocument(page)
-        // Set *after* the load is requested, because [showDocument] clears the pending position and the
-        // engine cannot answer onPageFinished before this returns. Reloading even when the document is
-        // already the one on screen is deliberate: one path, and the caller asked to go somewhere.
+        // The intent travels *with* the request (see [showDocument]). For an unread document the
+        // render happens at the end of an asynchronous read, so an intent set after the call was
+        // wiped by the render it caused, and the entry silently landed wherever the document was
+        // last left instead of where it pointed. The scroll still happens in `onPageFinished`,
+        // after the document has laid out: asking for a position before then measures an empty
+        // page and lands at the top. Reloading even when the document is already on screen is
+        // deliberate: one path, and the caller asked to go somewhere.
         if (fragment != null) {
-            pendingAnchor = fragment
+            showDocument(page, anchor = fragment)
         } else {
             // A contents entry without a fragment means "the top of this document".
-            pendingFraction = 0f
+            showDocument(page, fraction = 0f)
         }
     }
 
@@ -717,8 +752,10 @@ internal class NovelWebViewer(
         // `TextSearchHit.pageIndex`.
         val page = pages?.firstOrNull { it.textPage?.index == documentIndex } ?: return
 
-        showDocument(page)
-        pendingFraction = fraction.coerceIn(0f, 1f)
+        // Same reasoning as [jumpTo]: the destination belongs to the request, not to after it —
+        // an unread document renders at the end of an asynchronous read, and an intent written
+        // after the call was wiped by the render the jump itself caused.
+        showDocument(page, fraction = fraction.coerceIn(0f, 1f))
     }
 
     private fun handleTap(x: Float) {
@@ -973,11 +1010,19 @@ internal class NovelWebViewer(
         val position = windowLast + 1
         val page = chapters?.currChapter?.pages?.getOrNull(position) ?: return
         val loader = loader ?: return
+        // Stamped against the request that built the document this append is grown into. A jump or
+        // a turn re-renders fresh while this read is in flight, and the render cancels the job from
+        // its side; the stamp is the second half of the guard, for a job that already left for the
+        // renderer and cannot be told it was cancelled (see renderDocument and NovelContinuous).
+        val epoch = documentRequest
         windowJob = activity.lifecycleScope.launch {
             if (!loader.ensureText(page)) {
                 logcat(LogPriority.WARN) { "NovelViewer: could not append section $position; leaving the window" }
                 return@launch
             }
+            // A newer request took the document over while this read was running: its render wiped
+            // the window this append was grown into, so the fragment must not land in it.
+            if (epoch != documentRequest) return@launch
             val textPage = page.textPage ?: return@launch
             val fragment = NovelInline.inline(
                 NovelContinuous.bodyFragment(textPage.text),
@@ -985,8 +1030,11 @@ internal class NovelWebViewer(
                 inlineFetcher,
             )
             webView.evaluateJavascript(
-                NovelContinuous.appendScript(fragment, position, textPage.url),
-            ) { _ ->
+                NovelContinuous.appendScript(fragment, position, textPage.url, epoch),
+            ) { answer ->
+                // The script answers "false" when it ran against a document that was replaced
+                // underneath it; only a fresh answer may move the window bookkeeping.
+                if (NovelContinuous.isStale(answer)) return@evaluateJavascript
                 windowLast = position
                 trimToWindow()
             }
@@ -999,11 +1047,20 @@ internal class NovelWebViewer(
         if (position < 0) return
         val page = chapters?.currChapter?.pages?.getOrNull(position) ?: return
         val loader = loader ?: return
+        // Stamped against the request that built the document this prepend is grown into; see
+        // [appendAhead] for why a cancelled read needs a second guard, and what a stale script
+        // answer is.
+        val epoch = documentRequest
         windowJob = activity.lifecycleScope.launch {
             if (!loader.ensureText(page)) {
                 logcat(LogPriority.WARN) { "NovelViewer: could not prepend section $position; leaving the window" }
                 return@launch
             }
+            // A newer request took the document over while this read was running: its render wiped
+            // the window this prepend was grown into, so the fragment must not land in it — and a
+            // stale prepend is the worse of the two, because it scrolls the reader with its
+            // compensation instead of only adding content below.
+            if (epoch != documentRequest) return@launch
             val textPage = page.textPage ?: return@launch
             val fragment = NovelInline.inline(
                 NovelContinuous.bodyFragment(textPage.text),
@@ -1011,8 +1068,9 @@ internal class NovelWebViewer(
                 inlineFetcher,
             )
             webView.evaluateJavascript(
-                NovelContinuous.prependScript(fragment, position, textPage.url),
-            ) { _ ->
+                NovelContinuous.prependScript(fragment, position, textPage.url, epoch),
+            ) { answer ->
+                if (NovelContinuous.isStale(answer)) return@evaluateJavascript
                 windowFirst = position
                 trimToWindow()
             }
@@ -1027,11 +1085,17 @@ internal class NovelWebViewer(
     private fun trimToWindow() {
         val edge = NovelContinuous.WINDOW_EDGE
         if (currentSegment - windowFirst > edge && windowFirst < windowLast) {
-            webView.evaluateJavascript(NovelContinuous.trimScript(windowFirst, compensate = true), null)
+            webView.evaluateJavascript(
+                NovelContinuous.trimScript(windowFirst, compensate = true, epoch = documentRequest),
+                null,
+            )
             windowFirst++
         }
         if (windowLast - currentSegment > edge && windowFirst < windowLast) {
-            webView.evaluateJavascript(NovelContinuous.trimScript(windowLast, compensate = false), null)
+            webView.evaluateJavascript(
+                NovelContinuous.trimScript(windowLast, compensate = false, epoch = documentRequest),
+                null,
+            )
             windowLast--
         }
     }
@@ -1276,7 +1340,17 @@ internal class NovelWebViewer(
             // back from the engine percent-encoded, and a raw string comparison would then mistake
             // the document that was asked for somebody else's - silently skipping the restore, the
             // contents jump and the position save that all hang off this check.
-            if (EpubArchiveUrls.percentDecode(url) != EpubArchiveUrls.percentDecode(askedFor)) return
+            //
+            // The comparison ignores the fragment (`#kmk-load-N`, see renderDocument): the load URL
+            // carries the request tag, and an engine that normalises it away must not make this
+            // finish look like somebody else's. Two documents cannot collide on the directory base
+            // alone because a WebView has at most one finish in flight, and it is always this
+            // load's.
+            if (EpubArchiveUrls.percentDecode(url).substringBefore('#') !=
+                EpubArchiveUrls.percentDecode(askedFor).substringBefore('#')
+            ) {
+                return
+            }
             applyPendingPosition()
             // Re-assert typography in the live DOM too, so the injected stylesheet and the running
             // document cannot drift apart after a self-navigation.
@@ -1337,6 +1411,9 @@ internal class NovelWebViewer(
         if (anchor != null) {
             pendingAnchor = null
             pendingFraction = null
+            // A jump is "take me here", not "put me back": the anchor's scroll stands, and a
+            // restore left standing would scroll it away on whatever finish came next.
+            pendingRestoreFraction = null
             webView.evaluateJavascript(
                 NovelScrollBridge.scrollToAnchor(anchor, anchorInsetPx),
                 null,

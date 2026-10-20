@@ -147,9 +147,18 @@ object NovelContinuous {
      *
      * `innerHTML` on a detached element on purpose: content inserted that way does not execute
      * scripts, which is exactly the property wanted when the content is a file the user downloaded.
+     *
+     * [epoch] is the request stamp the script is verified against. A growth script can outlive the
+     * document it was built for — a jump or a turn re-renders while its read is in flight, and the
+     * document it hands its fragment to may no longer be the one it was grown for. The document
+     * declares its own epoch ([NovelDocument.build] sets `window.KmkEpoch`), and a script that finds
+     * the two disagree is dropped: it answers `false` instead of inserting, rather than adding a
+     * section of somebody else's chapter to a window that just ended. See [isStale] for where the
+     * answer is read back.
      */
-    fun appendScript(html: String, position: Int, url: String): String = """
-        (function(){
+    fun appendScript(html: String, position: Int, url: String, epoch: Int = 0): String = """
+        (function(epoch){
+          if (window.KmkEpoch !== epoch) return false;
           var div = document.createElement('div');
           div.className = '$SEGMENT_CLASS';
           div.setAttribute('data-i', '$position');
@@ -157,7 +166,7 @@ object NovelContinuous {
           div.innerHTML = ${NovelScrollBridge.quoteForJs(html)};
           document.body.appendChild(div);
           return true;
-        })()
+        })($epoch)
     """
 
     /**
@@ -184,8 +193,9 @@ object NovelContinuous {
      * The script still returns `true` synchronously, because the host takes its callback from that
      * return value and must not wait on a book's images to update its window bookkeeping.
      */
-    fun prependScript(html: String, position: Int, url: String): String = """
-        (function(){
+    fun prependScript(html: String, position: Int, url: String, epoch: Int = 0): String = """
+        (function(epoch){
+          if (window.KmkEpoch !== epoch) return false;
           var div = document.createElement('div');
           div.className = '$SEGMENT_CLASS';
           div.setAttribute('data-i', '$position');
@@ -214,16 +224,24 @@ object NovelContinuous {
             jump(div.offsetHeight);
             div.style.visibility = '';
           }
-        })()
+        })($epoch)
     """
 
     /**
      * Removes the segment at [position]; [compensate] holds the viewport still for a removal above
      * it (the content below moves up by exactly the removed height), and is false for one below,
      * where removing content cannot move what is on screen.
+     *
+     * [epoch] is the same request stamp [appendScript] and [prependScript] carry: a trim whose
+     * document has been replaced must not remove a segment from the new one — which, for a jump
+     * *to* the position being trimmed, is a segment the new window legitimately contains. The
+     * host-side window bookkeeping (`windowFirst`/`windowLast`) is only ever moved by trims run
+     * from the live document's own probe, so a stale trim needs no read-back here; the script
+     * refusing to run is the whole guard.
      */
-    fun trimScript(position: Int, compensate: Boolean): String = """
-        (function(){
+    fun trimScript(position: Int, compensate: Boolean, epoch: Int = 0): String = """
+        (function(epoch){
+          if (window.KmkEpoch !== epoch) return false;
           var el = document.querySelector('.kmk-seg[data-i="$position"]');
           if (!el || !el.parentNode) return false;
           var h = el.offsetHeight;
@@ -238,7 +256,7 @@ object NovelContinuous {
             root.style.scrollBehavior = was;
           }
           return true;
-        })()
+        })($epoch)
     """
 
     /**
@@ -261,5 +279,17 @@ object NovelContinuous {
           return true;
         })(${fraction.coerceIn(0f, 1f)})
     """
+
+    /**
+     * Whether the answer an `evaluateJavascript` callback received came from a growth or trim script
+     * that refused to run — the `false` a stale epoch stamps out, as the JSON string the bridge
+     * hands back.
+     *
+     * A growth script that already left for the renderer cannot be cancelled: the job is, but the
+     * script is not, and it may run after a jump has replaced the document. Its window bookkeeping
+     * belongs to the window that just ended, so the callback drops it instead of moving
+     * `windowFirst`/`windowLast` of a window that no longer exists.
+     */
+    fun isStale(answer: String?): Boolean = answer?.trim() == "false"
 }
 // KMK <--

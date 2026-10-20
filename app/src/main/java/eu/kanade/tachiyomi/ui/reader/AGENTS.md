@@ -245,10 +245,31 @@ two sheets close that, and both are offered from the bottom bar **only when the 
 loader can answer** (`TextPageLoader.tocSource` / `.searchSource`) — a button that opens an empty
 sheet reads as a bug in the reader rather than in the book.
 
-**A jump is a reload plus a position.** `jumpTo`/`jumpToFraction` call `showDocument` and only then
-set what to scroll to, because `showDocument` clears the pending position and the engine cannot answer
-`onPageFinished` before the call returns. Every position is applied in `onPageFinished`: an anchor
-measured against a document that has not laid out resolves to the top of an empty page.
+**A jump's destination belongs to its [showDocument] request.** `jumpTo`/`jumpToFraction` pass the
+anchor or fraction *into* `showDocument`, which sets the pending position when the request starts and
+is what a plain call (a turn, a chapter open) clears. Setting it after the call was the original
+design and it silently broke every contents jump into a section the reader had not opened yet: `EPUB`
+pages are answers to `TextIncrementalSource`, so the target document's markup is read **asynchronously
+after** `showDocument` returns, and the `renderDocument` at the end of that read wiped the intent that
+the jump had just set — landing wherever the chapter's stored position (or nothing) said: mid-chapter,
+near its end, or in the section the window then grew underneath. Every position is still applied in
+`onPageFinished`, after layout: measured earlier, an anchor resolves to the top of an empty page.
+
+**A load is a fresh address, or the engine inherits the scroll of the document it replaced.** Every
+document of a book folder loads at the same directory base URL, so an untagged `loadDataWithBaseURL`
+looked to the engine like the old page continuing — and a fresh document could start from the scroll
+offset of the one that ended: random landing positions, clamped to the bottom of a shorter document,
+and after that the window growing below the viewport leaves the reader in the *next* section. Each
+load therefore carries its own `#kmk-load-<request>` fragment (nothing a book can name), and the
+finish guard ignores the fragment since a WebView has exactly one finish in flight.
+
+**Growth scripts are stamped with the request that built their document.** An append/prepend/trim can
+outlive its document: a jump re-renders while its read is in flight, and a script that already left
+for the renderer cannot be cancelled. The document declares `window.KmkEpoch` (its own request number)
+and each script refuses to run against a different one, answering `false` — which the host reads back
+with `NovelContinuous.isStale` and drops, instead of moving `windowFirst`/`windowLast` of a window
+that just ended, or worse, letting a stale *prepend* scroll the reader with its own compensation. The
+render also cancels the window job in flight, for everything that has not left yet.
 
 **A contents entry for another chapter is shown, not dropped.** A whole-book contents points at files
 the open chapter never loaded. Those rows render disabled (`NovelTocEntry.reachable`) so the structure

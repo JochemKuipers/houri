@@ -177,15 +177,31 @@ object NovelScrollBridge {
      * Both spellings are checked because publishers use both and the href says which is which in
      * practice only by the book being well made: `id` is XHTML, `name` on an `<a>` is the HTML 4
      * habit that a great deal of EPUB2-era content still uses.
+     *
+     * The measurement is taken **twice**. `onPageFinished` fires before layout settles for a document
+     * whose illustrations are still decoding, and [NovelInline] hands the engine `<img>` tags with a
+     * `data:` URI and no `width`/`height` — zero height until decoded. A section below an
+     * illustration therefore measures short, and a scroll landed once would sit *before* the entry
+     * as the images above it inflate underneath a fixed scroll offset. So the anchor scrolls as soon
+     * as it can (the reader must not watch an unscrolled document while images decode), and again
+     * once the document's images have all finished, re-measuring against the layout that then exists.
+     * A doc that answers and then settles over a couple of hundred milliseconds is imperceptible; an
+     * entry that lands a screen away from where it pointed is not.
      */
     const val SCROLL_TO_ANCHOR: String =
         "(function(id,offset){" +
+            "function go(){" +
             "var el=null;try{el=document.getElementById(id);}catch(e){el=null;}" +
             "if(!el){var as=document.getElementsByTagName('a');" +
             "for(var i=0;i<as.length;i++){if(as[i].getAttribute('name')===id){el=as[i];break;}}}" +
             "if(!el){window.scrollTo(0,0);return false;}" +
             "var top=el.getBoundingClientRect().top+window.pageYOffset-(offset||0);" +
-            "window.scrollTo(0,Math.max(0,top));return true;})(%s,%d)"
+            "window.scrollTo(0,Math.max(0,top));return true;}" +
+            "if(!go())return false;" +
+            "var imgs=document.images,w=[];" +
+            "for(var i=0;i<imgs.length;i++){if(imgs[i].decode)w.push(imgs[i].decode());}" +
+            "Promise.all(w).then(go,go);" +
+            "return true;})(%s,%d)"
 
     /**
      * [SCROLL_TO_ANCHOR] with the fragment id already quoted as a JS string literal.

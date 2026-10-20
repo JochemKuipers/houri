@@ -70,11 +70,20 @@ object NovelDocument {
         // KMK -->
         segment: Pair<Int, String>? = null,
         extraHead: String = "",
+        /**
+         * The request stamp the continuous growth scripts verify against. Every document carries one,
+         * and `NovelContinuous`' append/prepend/trim scripts are stamped with the request that built
+         * the document whose window they grow or trim; a script handed to a renderer that has since
+         * moved to another document refuses to run, instead of adding a section of somebody else's
+         * chapter to a window that just ended. Default `0` keeps non-reader callers (the harness)
+         * building documents whose scripts simply find agreement and run.
+         */
+        epoch: Int = 0,
         // KMK <--
     ): String {
         val document = wrapBody(normalize(source), segment)
         val prologue = prologue(baseUrl) + styleTag(extraHead)
-        val epilogue = epilogue(typography)
+        val epilogue = epilogue(typography, epoch)
 
         val headOpen = HEAD_OPEN.find(document)
         if (headOpen != null) {
@@ -178,12 +187,16 @@ object NovelDocument {
         if (css.isBlank()) "" else """<style id="kmk-reader-font">${css.replace("</", "<\\/")}</style>"""
 
     /** Goes at the very end of the head, so it outranks the publisher's rules on source order. */
-    private fun epilogue(typography: NovelTypography): String = buildString {
+    private fun epilogue(typography: NovelTypography, epoch: Int): String = buildString {
         appendLine(NovelTypographyCss.styleTag(typography))
         // Wrapped, obviously. Script text emitted bare is not script: it is the first thing on the
         // page, printed in the reader's own font, and it is not the last thing anyone notices.
         append("<script>")
         append(NovelScrollBridge.BRIDGE_SCRIPT.replace("</script", """<\/script"""))
+        // The stamp the growth scripts compare themselves against, in the same script element so it
+        // is declared before any of them can run rather than beside it. `var` — this must land on
+        // `window` itself, and the value is the reader's own request number: no book counts here.
+        append(""";window.KmkEpoch = $epoch;""")
         appendLine("</script>")
     }
 
