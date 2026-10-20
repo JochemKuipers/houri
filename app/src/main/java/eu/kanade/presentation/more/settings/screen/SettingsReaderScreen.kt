@@ -754,6 +754,10 @@ object SettingsReaderScreen : SearchableSettings {
     private fun getNavigationGroup(readerPreferences: ReaderPreferences): Preference.PreferenceGroup {
         val readWithVolumeKeysPref = readerPreferences.readWithVolumeKeys()
         val readWithVolumeKeys by readWithVolumeKeysPref.collectAsState()
+        // KMK -->
+        val controllerScrollSpeedPref = readerPreferences.controllerScrollSpeed()
+        val controllerScrollSpeed by controllerScrollSpeedPref.collectAsState()
+        // KMK <--
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_reader_navigation),
             preferenceItems = persistentListOf(
@@ -766,6 +770,15 @@ object SettingsReaderScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_read_with_volume_keys_inverted),
                     enabled = readWithVolumeKeys,
                 ),
+                // KMK -->
+                Preference.PreferenceItem.SliderPreference(
+                    value = controllerScrollSpeed,
+                    valueRange = ReaderPreferences.CONTROLLER_SCROLL_SPEED_MIN..ReaderPreferences.CONTROLLER_SCROLL_SPEED_MAX,
+                    title = stringResource(KMR.strings.pref_controller_scroll_speed),
+                    valueString = controllerScrollSpeed.toString(),
+                    onValueChanged = { controllerScrollSpeedPref.set(it) },
+                ),
+                // KMK <--
             ),
         )
     }

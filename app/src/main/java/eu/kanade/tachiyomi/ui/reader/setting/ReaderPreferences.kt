@@ -98,6 +98,14 @@ class ReaderPreferences(
 
     fun webtoonSidePadding() = preferenceStore.getInt("webtoon_side_padding", WEBTOON_PADDING_MIN)
 
+    // KMK -->
+    /** Max stick scroll speed for webtoon/continuous modes (1..10). Default 5 ≈ 1 viewport/sec. */
+    fun controllerScrollSpeed() = preferenceStore.getInt(
+        "pref_controller_scroll_speed",
+        CONTROLLER_SCROLL_SPEED_DEFAULT,
+    )
+    // KMK <--
+
     fun readerHideThreshold() = preferenceStore.getEnum("reader_hide_threshold", ReaderHideThreshold.LOW)
 
     fun folderPerManga() = preferenceStore.getBoolean("create_folder_per_manga", false)
@@ -403,6 +411,10 @@ class ReaderPreferences(
         const val WEBTOON_PADDING_MAX = 25
 
         // KMK -->
+        const val CONTROLLER_SCROLL_SPEED_MIN = 1
+        const val CONTROLLER_SCROLL_SPEED_MAX = 10
+        const val CONTROLLER_SCROLL_SPEED_DEFAULT = 5
+
         const val WEBGPU_PAGE_OFFSET_MIN = -50
         const val WEBGPU_PAGE_OFFSET_MAX = 50
 
