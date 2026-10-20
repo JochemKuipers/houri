@@ -37,6 +37,7 @@ import tachiyomi.domain.category.model.Category.Companion.UNCATEGORIZED_ID
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import timber.log.Timber
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.ceil
 import kotlin.math.floor
 
@@ -46,6 +47,7 @@ class DiscordRPCService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        serviceRunning.set(true)
         Timber.tag(TAG).i("Starting Discord RPC service")
 
         // KMK --> must enter foreground BEFORE any early return: the system kills the
@@ -96,6 +98,7 @@ class DiscordRPCService : Service() {
     }
 
     override fun onDestroy() {
+        serviceRunning.set(false)
         NotificationReceiver.dismissNotification(this, Notifications.ID_DISCORD_RPC)
         // Drop delayed stop posts and in-flight presence updates: the static handler and
         // scope outlive the service instance and would otherwise act on a dead client.
@@ -196,6 +199,12 @@ class DiscordRPCService : Service() {
         private val job = SupervisorJob()
         internal val discordScope = CoroutineScope(Dispatchers.IO + job)
 
+        // KMK -->
+        // True while an instance of this service is alive (set in onCreate/onDestroy). The stop
+        // path checks it so that stopping never becomes the thing that creates the service.
+        private val serviceRunning = AtomicBoolean(false)
+        // KMK <--
+
         private const val ACTION_RESTART = "eu.kanade.tachiyomi.DISCORD_RPC_RESTART"
         private const val STOP_SERVICE = "eu.kanade.tachiyomi.DISCORD_RPC_STOP"
 
@@ -223,26 +232,48 @@ class DiscordRPCService : Service() {
             handler.removeCallbacksAndMessages(null)
             if (delay > 0) {
                 handler.postDelayed({
-                    val stopIntent = Intent(context, DiscordRPCService::class.java).apply {
-                        action = STOP_SERVICE
-                    }
-                    try {
-                        context.startForegroundService(stopIntent)
-                    } catch (e: Exception) {
-                        Timber.tag(TAG).e(e, "Failed to stop Discord RPC service: ${e.message}")
-                    }
+                    // KMK -->
+                    stopService(context)
+                    // KMK <--
                 }, delay)
             } else {
-                val stopIntent = Intent(context, DiscordRPCService::class.java).apply {
-                    action = STOP_SERVICE
-                }
-                try {
-                    context.startForegroundService(stopIntent)
-                } catch (e: Exception) {
-                    Timber.tag(TAG).e(e, "Failed to stop Discord RPC service: ${e.message}")
-                }
+                // KMK -->
+                stopService(context)
+                // KMK <--
             }
         }
+
+        // KMK -->
+        /**
+         * Stops the running service with [Context.stopService].
+         *
+         * Stopping must not go through [Context.startForegroundService]: when the service is not
+         * running, that call *creates* it, and onCreate has to enter the foreground (post the
+         * notification) before the blank-token early return can bail. The result was the RPC
+         * notification flashing up even when the user is not logged in to Discord — both from the
+         * 30 s delayed stop after every app close while logged out, and from toggling RPC off with
+         * no account. It also fired from the background, which Android 12+ restricts. `stopService`
+         * avoids all of that: on a service that isn't running it is a harmless no-op, so a
+         * stop never brings the service (and its notification) into existence.
+         */
+        private fun stopService(context: Context) {
+            if (!serviceRunning.get()) {
+                Timber.tag(TAG).d("Discord RPC service is not running, nothing to stop")
+                return
+            }
+            val stopIntent = Intent(context, DiscordRPCService::class.java).apply {
+                action = STOP_SERVICE
+            }
+            try {
+                if (!context.stopService(stopIntent)) {
+                    Timber.tag(TAG).w("Discord RPC service was already gone, nothing to stop")
+                    serviceRunning.set(false)
+                }
+            } catch (e: Exception) {
+                Timber.tag(TAG).e(e, "Failed to stop Discord RPC service: ${e.message}")
+            }
+        }
+        // KMK <--
 
         fun restart(context: Context, connectionsManager: ConnectionsManager = globalAppGraph.connectionsManager) {
             val token = connectionsPreferences.connectionsToken(connectionsManager.discord).get()

@@ -72,11 +72,30 @@ class Discord(id: Long) : ConnectionsService(id) {
         saveAccounts(accounts)
     }
 
-    fun removeAccount(accountId: String) {
+    // KMK -->
+    fun removeAccount(accountId: String): Boolean {
         val accounts = getAccounts().toMutableList()
+        val wasActive = accounts.firstOrNull { it.id == accountId }?.isActive == true
         accounts.removeAll { it.id == accountId }
         saveAccounts(accounts)
+
+        if (wasActive) {
+            val nextActive = accounts.firstOrNull { it.isActive }
+            if (nextActive != null) {
+                // Another account already holds the active slot: keep the session token
+                // pointing at it instead of at the account that was just removed.
+                connectionsPreferences.connectionsToken(this).set(nextActive.token)
+            } else {
+                // Removing the active account is a logout. Without this the token keeps
+                // pointing at a removed account: isLogged stays true, start() happily
+                // re-runs the RPC, and the notification and presence outlive the session
+                // the user believes is gone.
+                logout()
+            }
+        }
+        return wasActive
     }
+    // KMK <--
 
     fun setActiveAccount(accountId: String) {
         val accounts = getAccounts().toMutableList()

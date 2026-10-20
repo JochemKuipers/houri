@@ -24,7 +24,11 @@ files moved. See .github/scripts/release_notes.py.
 
 - **Local source**: When a book's own title is only the volume half of a series title (an EPUB whose OPF is filled with "and the Prisoner of Azkaban" in a "Harry Potter" folder), chapter names now lead with the series title, so every row says which volume it belongs to. Book tables of contents that carry markup inside their labels no longer show it either.
 
+- **Manga Reader**: Controller stick smoothly scrolls webtoons (and long-strip mode) at a speed based on how far the stick is tilted; adjust **Controller scroll speed** under Settings → Reader → Navigation, or in the reader sheet when the series is in webtoon / long-strip mode
+
 ### Fix
+
+- **Discord**: The Discord Rich Presence notification no longer appears when you are not logged in to Discord. It used to pop up briefly even logged out — roughly 30 seconds after closing the app, or when toggling the Rich Presence off — because stopping the background service could start it just to stop it. Removing your active Discord account in the accounts list also now properly signs that session out: the notification goes away instead of the presence continuing behind your back, and switching to another account points it at the right one.
 
 - **Reader**: The vertical seekbar layout is now separate for books and manga. Setting it (side, landscape, or force-horizontal) while reading a book (EPUB) no longer also moves the seekbar for long-strip content (manhwa), and the reverse — each reader keeps its own navigator layout.
 

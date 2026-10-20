@@ -41,6 +41,7 @@ import eu.kanade.domain.connections.service.ConnectionsPreferences
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.tachiyomi.data.connections.ConnectionsManager
 import eu.kanade.tachiyomi.data.connections.discord.DiscordAccount
+import eu.kanade.tachiyomi.data.connections.discord.DiscordRPCService
 import eu.kanade.tachiyomi.ui.setting.connections.DiscordLoginScreen
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -128,7 +129,7 @@ private fun DiscordAccountsScreenContent() {
                         items(accounts) { account ->
                             DiscordAccountItem(
                                 account = account,
-                                onRemove = { screenModel.removeAccount(account.id) },
+                                onRemove = { screenModel.removeAccount(account.id, context) },
                                 onSetActive = { screenModel.setActiveAccount(account.id, context) },
                             )
                         }
@@ -194,11 +195,23 @@ class DiscordAccountsScreenModel : StateScreenModel<DiscordAccountsScreenState>(
         }
     }
 
-    fun removeAccount(accountId: String) {
+    fun removeAccount(accountId: String, context: Context) {
         screenModelScope.launch {
             mutableState.update { it.copy(isLoading = true, error = null) }
             runCatching {
-                discord.removeAccount(accountId)
+                val wasActive = discord.removeAccount(accountId)
+                // KMK -->
+                // A running RPC holds the removed account's session: take it down, or restart
+                // it onto the account that took over, instead of letting the stale token keep
+                // the notification and presence alive for an account that no longer exists.
+                if (wasActive) {
+                    if (discord.getAccounts().any { it.isActive }) {
+                        discord.restartRichPresence(context)
+                    } else {
+                        DiscordRPCService.stop(context, 0L)
+                    }
+                }
+                // KMK <--
                 loadAccounts()
             }.onFailure { e ->
                 mutableState.update { it.copy(isLoading = false, error = e.message ?: "Unknown error") }
