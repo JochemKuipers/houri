@@ -88,5 +88,58 @@ fun main() {
     }
     check("ncx escaped tags stripped", tocFromNcx.firstOrNull()?.label, "Scene two")
 
-    if (failures > 0) println("FAILURES: $failures")
+    // 6) Series: calibre's stamped pair — the most common real spelling, self-contained attributes.
+    val calibre = opf(
+        """    <meta name="calibre:series" content="Riftwar"/>
+    <meta name="calibre:series_index" content="3"/>""",
+    )
+    check("calibre series read", calibre.series, "Riftwar")
+    check("calibre series index read", calibre.seriesIndex, 3f)
+
+    // 7) The EPUB3 collection form, only a series once `collection-type` confirms it, its position
+    //    read from `group-position`. The refine binds by id without the leading hash.
+    val collection = opf(
+        """    <meta property="belongs-to-collection" id="c01">Riftwar</meta>
+    <meta refines="#c01" property="collection-type">series</meta>
+    <meta refines="#c01" property="group-position">3</meta>""",
+    )
+    check("epub3 collection confirmed as a series", collection.series, "Riftwar")
+    check("epub3 position read", collection.seriesIndex, 3f)
+
+    // 8) An unconfirmed collection is *not* a volume: "complete works of" is a set, and filing a
+    //    set's name over every book in it would mislabel all of them.
+    val unconfirmed = opf(
+        """    <meta property="belongs-to-collection" id="c01">The Complete Works</meta>""",
+    )
+    check("unconfirmed collection ignored", unconfirmed.series, null)
+    check("unconfirmed collection has no position", unconfirmed.seriesIndex, null)
+
+    // 9) Calibre's pair outranks the confirmed collection when a book carries both — same producer,
+    //    and the stamp needs no confirmation step.
+    val both = opf(
+        """    <meta name="calibre:series" content="Riftwar"/>
+    <meta property="belongs-to-collection" id="c01">Riftwar Saga</meta>
+    <meta refines="#c01" property="collection-type">series</meta>""",
+    )
+    check("calibre outranks the collection", both.series, "Riftwar")
+
+    // 10) The index is an editorial number, and leniently parsed for exactly that: junk costs the
+    //     number, never the name.
+    val junkIndex = opf(
+        """    <meta name="calibre:series" content="Riftwar"/>
+    <meta name="calibre:series_index" content="vol three"/>""",
+    )
+    check("junk index costs the index", junkIndex.seriesIndex, null)
+    check("junk index keeps the name", junkIndex.series, "Riftwar")
+
+    // 11) A `collection-type` refine aimed at an id nothing declared confirms nothing: the pending
+    //     collection must still earn its confirmation for itself.
+    val foreignRefine = opf(
+        """    <meta property="belongs-to-collection" id="c01">Riftwar</meta>
+    <meta refines="#zzz" property="collection-type">series</meta>""",
+    )
+    check("refine for another id does not confirm", foreignRefine.series, null)
+
+    println(if (failures == 0) "\nALL PASS" else "\n$failures FAILURES")
+    if (failures > 0) kotlin.system.exitProcess(1)
 }

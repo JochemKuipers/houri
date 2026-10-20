@@ -101,7 +101,11 @@ object EpubArchiveUrls {
      */
     fun archivePathOf(absoluteUrl: String): String? {
         if (!isArchiveUrl(absoluteUrl)) return null
-        val afterAuthority = absoluteUrl.substringAfter("$SCHEME://")
+        // Split on `://` rather than on the scheme's own spelling: this namespace is `https`, but
+        // the renderer can hand the authority back in any case (`HTTPS://`), and `isArchiveUrl`
+        // matched it loosely while `substringAfter("https://")` would not — sending the host part
+        // into the path and resolving an archive name for a host that never existed.
+        val afterAuthority = absoluteUrl.substringAfter("://")
         val path = afterAuthority.substringAfter('/', "")
             .substringBefore('#')
             .substringBefore('?')

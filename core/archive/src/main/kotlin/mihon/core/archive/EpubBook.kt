@@ -66,6 +66,17 @@ data class EpubMetadata(
     /** Manifest id of the NCX, from `<spine toc="…">`. */
     val ncxId: String? = null,
     val identifier: String? = null,
+    // KMK --> The volume this book is, as the library would like to file it. Calibre stamps its own
+    // pair (`calibre:series` / `calibre:series_index`); EPUB3 books instead say
+    // `belongs-to-collection` and have it *confirmed* by a `collection-type: series` refine — which
+    // confirmation is what keeps a plain "complete works of X" from reading as a series volume.
+    // Both answers land in the same fields; the calibre pair wins when a book carries both, since
+    // same-producer data needs no confirmation step.
+    /** Series this book is one volume of, confirmed or stamped, or null. */
+    val series: String? = null,
+    /** Position within [series], lenient-parsed, or null when the book does not say. */
+    val seriesIndex: Float? = null,
+    // KMK <--
 ) {
     /** Title and subtitle joined for display, falling back to the title alone. */
     val displayTitle: String? = listOfNotNull(title, subtitle)

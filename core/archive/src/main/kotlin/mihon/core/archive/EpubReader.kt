@@ -162,7 +162,7 @@ class EpubReader(private val reader: ArchiveReader) : Closeable by reader {
      */
     fun readText(path: String): String? {
         val bytes = readBytes(path) ?: return null
-        return String(bytes, charsetOf(bytes))
+        return String(bytes, charsetOf(bytes)).removePrefix(BOM)
     }
 
     /**
@@ -373,6 +373,16 @@ class EpubReader(private val reader: ArchiveReader) : Closeable by reader {
         val SCRIPT_OR_STYLE = Regex("(?is)<(script|style)[^>]*>.*?</\\1>")
         val TAG = Regex("(?s)<[^>]*>")
         val WHITESPACE = Regex("[ \\t\\r\\n\\u00A0]+")
+
+        /**
+         * A decoded UTF-8 byte-order mark, present at the head of some producers' files.
+         *
+         * It is a real character once decoded — encoding-information bytes only mean anything at the
+         * head of a *byte* stream, and this string is not one — and a document handed to the engine
+         * with one at its head shows it as text. Where exactly it lands is uninteresting; the strip
+         * is unconditional because a document marker in a Java string is noise however it got there.
+         */
+        const val BOM = "\uFEFF"
     }
 }
 
