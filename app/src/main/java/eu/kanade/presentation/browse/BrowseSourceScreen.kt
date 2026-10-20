@@ -5,8 +5,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Public
@@ -16,6 +14,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.paging.LoadState
@@ -83,9 +82,14 @@ fun BrowseSourceContent(
     // Owning it at the top of the screen makes the swap irrelevant: whichever branch renders, it
     // renders with the state that was already there. Both kinds exist because the grid layouts and
     // the list layouts do not share a state type, and only one is ever composed.
+    //
+    // They are also Saveable, not remember: pushing a manga on top of this screen disposes the
+    // whole composition, and a plain remember would have come back scrolled to the very top of
+    // the search results (#43). The Saver keeps first visible index + offset, which is the whole
+    // of a lazy state worth keeping.
     // KMK <--
-    val gridState = rememberLazyGridState()
-    val listState = rememberLazyListState()
+    val gridState = rememberSaveable(saver = LazyGridState.Saver) { LazyGridState() }
+    val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
 
     val errorState = mangaList.loadState.refresh.takeIf { it is LoadState.Error }
         ?: mangaList.loadState.append.takeIf { it is LoadState.Error }
