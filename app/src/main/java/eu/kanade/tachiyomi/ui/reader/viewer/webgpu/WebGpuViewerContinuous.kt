@@ -1,10 +1,15 @@
 // Mihon -->
 package eu.kanade.tachiyomi.ui.reader.viewer.webgpu
 
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
 import ca.mpreg.webgpuviewer.ImageViewContinuous
 import ca.mpreg.webgpuviewer.viewer.ImageViewerContinuousState
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.ui.reader.viewer.JoystickScrollHelper
 import kotlin.math.max
 
 /** Ceiling on how far past the baseline window [cacheSize] grows to follow the drawn reach. */
@@ -61,6 +66,14 @@ class WebGpuViewerContinuous(activity: ReaderActivity, val useGap: Boolean = fal
         }
 
     private val state get() = (pager as ImageViewContinuous).state
+
+    // KMK -->
+    private val joystickScroll = JoystickScrollHelper(
+        scrollByPx = { dy -> state.scrollBy(dy) },
+        maxSpeedPxPerSec = ::controllerMaxSpeedPxPerSec,
+        isEnabled = { !activity.viewModel.state.value.menuVisible },
+    )
+    // KMK <--
 
     init {
         // KMK --> Library flag replaces the old DoubleTapZoomGateLayout proxy.
@@ -120,6 +133,51 @@ class WebGpuViewerContinuous(activity: ReaderActivity, val useGap: Boolean = fal
     override fun moveRight() = scrollByHalfPage(1)
 
     override fun moveLeft() = scrollByHalfPage(-1)
+
+    // KMK -->
+    override fun moveUp() = scrollByHalfPage(-1)
+
+    override fun moveDown() = scrollByHalfPage(1)
+
+    override fun handleKeyEvent(event: KeyEvent): Boolean {
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN -> {
+                return joystickScroll.onDpadKeyEvent(event)
+            }
+        }
+        return super.handleKeyEvent(event)
+    }
+
+    override fun handleGenericMotionEvent(event: MotionEvent): Boolean {
+        if (joystickScroll.onGenericMotionEvent(event)) return true
+        if (event.source and InputDevice.SOURCE_CLASS_POINTER != 0) {
+            when (event.action) {
+                MotionEvent.ACTION_SCROLL -> {
+                    val vScroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
+                    // Negative VSCROLL = wheel down = read forward.
+                    state.scrollBy(-vScroll * state.height / 8f)
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    override fun destroy() {
+        joystickScroll.stop()
+        super.destroy()
+    }
+
+    private fun controllerMaxSpeedPxPerSec(): Float {
+        val speed = readerPreferences.controllerScrollSpeed().get()
+            .coerceIn(
+                ReaderPreferences.CONTROLLER_SCROLL_SPEED_MIN,
+                ReaderPreferences.CONTROLLER_SCROLL_SPEED_MAX,
+            )
+        val viewport = activity.resources.displayMetrics.heightPixels.toFloat()
+        return speed * viewport / ReaderPreferences.CONTROLLER_SCROLL_SPEED_DEFAULT
+    }
+    // KMK <--
 
     override fun moveToPage(page: ReaderPage) {
         super.moveToPage(page)

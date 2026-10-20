@@ -21,6 +21,7 @@ import eu.kanade.tachiyomi.ui.reader.model.ChapterTransition
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
+import eu.kanade.tachiyomi.ui.reader.viewer.JoystickScrollHelper
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerNavigation.NavigationRegion
 import kotlinx.coroutines.MainScope
@@ -73,6 +74,23 @@ class WebtoonViewer(
      * Configuration used by this viewer, like allow taps, or crop image borders.
      */
     val config = WebtoonConfig(scope)
+
+    // KMK -->
+    /** Accumulates fractional stick deltas so slow tilts are not truncated by [RecyclerView.scrollBy]. */
+    private var joystickScrollRemainder = 0f
+    private val joystickScroll = JoystickScrollHelper(
+        scrollByPx = { dy ->
+            joystickScrollRemainder += dy
+            val step = joystickScrollRemainder.toInt()
+            if (step != 0) {
+                joystickScrollRemainder -= step
+                recycler.scrollBy(0, step)
+            }
+        },
+        maxSpeedPxPerSec = ::controllerMaxSpeedPxPerSec,
+        isEnabled = { !activity.viewModel.state.value.menuVisible },
+    )
+    // KMK <--
 
     /**
      * Adapter of the recycler view.
@@ -251,6 +269,10 @@ class WebtoonViewer(
      * Destroys this viewer. Called when leaving the reader or swapping viewers.
      */
     override fun destroy() {
+        // KMK -->
+        joystickScroll.stop()
+        joystickScrollRemainder = 0f
+        // KMK <--
         super.destroy()
         scope.cancel()
     }
@@ -479,15 +501,19 @@ class WebtoonViewer(
             }
             KeyEvent.KEYCODE_MENU -> if (isUp) activity.toggleMenu()
 
-            KeyEvent.KEYCODE_DPAD_LEFT,
+            // KMK --> Stick-emulated / held D-pad: continuous scroll. Page keys stay discrete.
             KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_DPAD_DOWN,
+            -> return joystickScroll.onDpadKeyEvent(event)
+
+            KeyEvent.KEYCODE_DPAD_LEFT,
             KeyEvent.KEYCODE_PAGE_UP,
             -> if (isUp) scrollUp()
 
             KeyEvent.KEYCODE_DPAD_RIGHT,
-            KeyEvent.KEYCODE_DPAD_DOWN,
             KeyEvent.KEYCODE_PAGE_DOWN,
             -> if (isUp) scrollDown()
+            // KMK <--
             else -> return false
         }
         return true
@@ -498,8 +524,22 @@ class WebtoonViewer(
      * return true if the event was handled, false otherwise.
      */
     override fun handleGenericMotionEvent(event: MotionEvent): Boolean {
-        return false
+        // KMK -->
+        return joystickScroll.onGenericMotionEvent(event)
+        // KMK <--
     }
+
+    // KMK -->
+    private fun controllerMaxSpeedPxPerSec(): Float {
+        val speed = readerPreferences.controllerScrollSpeed().get()
+            .coerceIn(
+                ReaderPreferences.CONTROLLER_SCROLL_SPEED_MIN,
+                ReaderPreferences.CONTROLLER_SCROLL_SPEED_MAX,
+            )
+        val viewport = activity.resources.displayMetrics.heightPixels.toFloat()
+        return speed * viewport / ReaderPreferences.CONTROLLER_SCROLL_SPEED_DEFAULT
+    }
+    // KMK <--
 
     /**
      * Notifies adapter of changes around the current page to trigger a relayout in the recycler.

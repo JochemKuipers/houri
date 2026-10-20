@@ -1291,15 +1291,17 @@ open class WebGpuViewer(
 
     /**
      * Moves to the page at the top (or previous).
+     * Continuous subclasses override for pixel/half-viewport scroll instead of a page jump.
      */
-    protected fun moveUp() {
+    protected open fun moveUp() {
         moveToPrevious()
     }
 
     /**
      * Moves to the page at the bottom (or next).
+     * Continuous subclasses override for pixel/half-viewport scroll instead of a page jump.
      */
-    protected fun moveDown() {
+    protected open fun moveDown() {
         moveToNext()
     }
 
