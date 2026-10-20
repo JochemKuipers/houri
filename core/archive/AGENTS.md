@@ -15,6 +15,7 @@ CBZ/archive reading with optional AES encryption (SY). Package root: `mihon.core
 | `EpubXmlReader` | Namespace-aware pull parser for the structural documents |
 | `EpubOpfParser` / `EpubTocParser` / `EpubEncryptionParser` | One pass each over `content.opf`, the TOC, `encryption.xml` |
 | `EpubPaths` | Pure-JVM reference resolution (relative, absolute, `..`, percent-encoding) |
+| `EpubArchiveUrls` | The reserved `https://book.internal/` URL space book documents are served under, and its pure translation to archive paths |
 | `ZipWriter` | Archive writing with optional encryption (SY) |
 
 ## Dependencies
@@ -41,6 +42,13 @@ Handled that the old parser did not:
   byte for byte. `EpubPaths.lookupCandidates` offers the decoded and re-encoded spellings as
   *fallbacks* — decoding inside `resolve` would turn a file named `%2E%2E` into a directory escape.
 - **Charset** from the XML prolog, not assumed UTF-8.
+- **Byte-order mark.** `readText` strips a leading UTF-8 `\uFEFF` from every decoded document — some
+  producers ship text that begins with one, and handed to a renderer it is a stray character before
+  the first paragraph rather than nothing.
+- **Authority case.** The renderer can hand a URL back in any case (`HTTPS://Book.Internal/…`).
+  `isArchiveUrl` matches loosely, so `archivePathOf` has to be as tolerant in the other direction and
+  splits on `://` rather than on the scheme's own spelling — `substringAfter("https://")` sends the
+  host into the path and "resolves" an archive name that never existed.
 - Spine entries whose idref has no manifest item are dropped (a placeholder would be a chapter that
   can never open).
 
@@ -80,6 +88,26 @@ document converts into wrong output with no error anywhere.
 - `textDocuments()` — the book as prose, one page per spine item. **This is what the reader uses.**
 - `getImagesFromPages()` — every `<img>` in every spine document. The manga local source treats an
   EPUB as an art book and uses this. Do not confuse them.
+
+### Series metadata, the two spellings
+
+`EpubBook.metadata` carries optional `series` and `seriesIndex`, read from whichever convention the
+producer used; calibre's pair outranks a confirmed EPUB 3 collection.
+
+- **Calibre** stamps `name="calibre:series"` / `name="calibre:series_index"` as plain attribute metas
+  — no confirmation needed, because the pipeline guarantees the meaning. This is what most books
+  that arrive by that pipeline carry.
+- **EPUB 3** writes `property="belongs-to-collection"` as *text content*, whose name only means
+  "series" once a `property="collection-type"` meta containing `series` confirms it. That refine
+  names the collection by id with the `#` stripped from its `refines` attribute; a book with but one
+  collection may omit the refine entirely. A confirm naming a collection that has not been seen is
+  ignored, not buffered — buffering confirmations ahead of their target would be a second pending
+  state for one malformed book.
+- `group-position`, bound by the same id rule, stands in as the index when the calibre one is
+  absent. The index is read leniently (`toFloatOrNull`): a producer that wrote something
+  not-a-number costs the sort order, not the series.
+
+All of it is asserted off-device by `scripts/kotlinc-check/harness/OpfMetadataHarness.kt`.
 
 ## Encryption (SY)
 

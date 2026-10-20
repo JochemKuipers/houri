@@ -67,6 +67,12 @@ never compiled into the app.
 `packageHref` property), intra-module type errors, and anything a pure function can be asserted
 against. Add a new stub under `stubs/` when a fresh external class is needed.
 
+It is also the only thing that catches the **nested-KDoc trap**: Kotlin block comments *nest*, so a
+`` `font/*` `` written inside a KDoc opens a second comment — the file's final `*/` closes *that*
+one, the outer one runs to EOF and silently swallows every declaration after it, and the real build
+then reports the missing symbols as unresolved references far from their real lines. Never write a
+`/*` sequence inside a doc comment, even backticked.
+
 **What it is not:** not a build. Unresolved-reference diagnostics are suppressed and reported as a
 count, because almost all of them come from the absent project classpath. It runs neither spotless
 nor ktlint. It does not replace the user's `spotlessApply` → `spotlessCheck` → `assembleDebug` pass —

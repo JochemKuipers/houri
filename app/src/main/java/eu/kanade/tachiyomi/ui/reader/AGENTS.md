@@ -61,6 +61,7 @@ The reader's preferences are layered on as an injected stylesheet; the document 
 | `NovelContinuous.kt` | The book as one continuous scroll: segment markers, the probe, append/prepend/trim/seek scripts. Pure strings |
 | `NovelInline.kt` | Rewrites a document's images and stylesheets into `data:` URIs. Pure |
 | `NovelFonts.kt` | Fonts the reader imported, stored and offered beside the built-in families |
+| `NovelBuiltinFonts.kt` | The curated variable fonts bundled in `app/src/main/assets/novel-fonts/`, grouped by kind. No Android imports, so it is unit-testable |
 | `NovelScrollBridge.kt` | `window.KmkReader` — how the host measures and scrolls the document, and `quoteForJs` |
 | `NovelNavigation.kt` | Contents rows and search results: the pure mapping from source models to renderable ones |
 | `NovelReaderScreenModels.kt` | `NovelTocScreenModel` + `NovelSearchScreenModel` |
@@ -76,10 +77,39 @@ Typography settings *and* per-chapter reading positions both live in `NovelTypog
 (`reader/setting/`), not here — the viewer reads them through it and subscribes to `changes()` for
 the live re-apply. A separate store for either would be a second answer to the same question.
 
-**Tri-state preferences.** `justified`, `hyphenation` and `verticalWriting` are `Boolean?` where
-`null` means *follow the publisher*, stored as the string `"follow"`. They are nullable on purpose: a
-default of `false` would mean "emit `text-align: left !important`", which silently restyles a
-Japanese light novel out of vertical writing and cannot be turned off again.
+**Tri-state preferences.** `justified`, `hyphenation`, `verticalWriting`, `paragraphIndent`,
+`boldText` and `forceDark` are `Boolean?` where `null` means *follow the publisher*, stored as the
+string `"follow"`. They are nullable on purpose: a default of `false` would mean "emit
+`text-align: left !important`", which silently restyles a Japanese light novel out of vertical
+writing and cannot be turned off again.
+
+**Bold text weights the body, not the book.** `boldText` emits `font-weight: 700` (or `400` for
+"off") on the text-bearing set only — `h1`–`h6`, `strong`, `b` and `em` are excluded on purpose, so
+a book's own hierarchy and emphasis keep their meaning and bolding the body does not rough up the
+chapter headings. Both answers emit under the same `!important` as every other override: a publisher
+that bolded `body` must be overridable by "off".
+
+**Force dark is a palette rewrite, not a filter.** With `forceDark` on, `resolvePalette` fixes the
+palette in place before any rule is emitted: the canvas is the background the appearance tab chose,
+else `NovelTypography.FORCE_DARK_BACKGROUND` (`#121212` — Material's dark surface rather than black,
+so an illustration edge that ends short of the page frame still reads), and the text colour is
+**derived** from that canvas with `contrastingForeground`. Derived, not taken: the one way this
+feature fails is dark text on the dark plate it stands on, and a text colour picked before force dark
+went on is exactly how that happens. And because nearly every book paints its flow through classed
+elements, the palette is worthless until those backgrounds go: `FORCE_DARK_NEUTRAL` makes every
+element except `html`, `body` and the image containers transparent while the canvas and the
+illustrations keep theirs — inverting an illustration is how dark reading becomes unreadable
+negatives.
+
+**Hand-typed colours are canonicalised, or they are not accepted.** Each colour palette ends in a
+custom chip that opens `HexColorDialog`, whose OK is gated on `NovelTypography.normalizedColor`: it
+takes `#rgb`/`#rrggbb` with the `#` optional and returns the one expanded lower-case `#rrggbb` form,
+formatted with `Locale.ROOT` like every other number this folder emits. The single spelling is
+load-bearing — it is what makes "a colour the reader picked" and "the chip it rode in on" a plain
+string comparison everywhere the value is later compared, including the palette's own selected state,
+which is also how a *non-blank value no palette entry equals* presents as a custom choice rather than
+as a broken one. The field pre-fills only genuinely custom values, so a palette entry never
+round-trips as editable text.
 
 **The stylesheet is never empty.** Even for default typography, because that is the only way a user
 can turn *off* a publisher's own justification. Properties that default to "follow the publisher" are
@@ -153,6 +183,35 @@ the document's head as a `data:` URI — built into `NovelDocument.build`'s head
 `liveTypographyJs`, so a live family change re-declares the face. `quoteFamily` quotes any name
 that is not a CSS identifier: `user/My Font` unquoted would drop the whole `font-family` rule and
 the setting would silently do nothing.
+
+**The picker shows real faces, and the app carries its own (`NovelBuiltinFonts`).** The font row
+(`NovelFontPickerDialog`) opens a list built for a reading decision: an import row first, the CSS
+generics labelled with what they mean, the bundled families grouped serif / sans / mono /
+handwriting — the order of classical type-setting, which is the order a reader decides in — and the
+reader's own imports last, each deletable behind its own confirm that resets the setting when it
+deletes the family in use. Bundled families store as `builtin/<Family>`, a prefix that cannot collide
+with a generic keyword, and the whole value doubles as the CSS family name, so the declared
+`@font-face` and the chosen `font-family` cannot disagree. Each bundled file is a *variable* font,
+one file per family, all of them OFL with the licence text shipped in the same directory — one file
+covers the whole weight axis, which is what gives `boldText` a real 700 instead of the engine's
+synthetic bold. Family lookup is case-insensitive on purpose: a value restored from another device,
+migrated, or typed by hand still finds its file.
+
+**Faces are decoded once per family and kept behind a small LRU.** `NovelWebViewer.readerFontCache`
+is an access-order `LinkedHashMap` capped at four faces (`READER_FONT_CACHE_FACES`) — a face is half
+a megabyte of bytes held as a `data:` URI across documents, so an unbounded cache pins every family
+ever displayed for the life of the chapter, and a picker session that compares a dozen of them
+otherwise allocates without end. Four is wide enough for the families a comparing reader swings
+between and keeps whatever is evicted cheap to re-read. A preview failure is not a filter: a family
+whose file cannot be decoded for the preview falls back to its category's generic CSS keyword and
+still lists, so nothing an import declared is silently hidden from the reader.
+
+**An import is validated, because a font library is where non-font files go to die.**
+`NovelFonts.import` answers `ImportResult` — `Success`, `NotAFont`, `TooLarge`, `Unreadable` — and
+the picker toasts what arrived instead of what was asked for. Accepting every file a provider labels
+a font would list a face that silently falls back, and the reader would conclude the feature is
+broken rather than the file. The document picker first offers the `font` MIME types, plus the
+spellings providers mislabel under — `application/octet-stream` included.
 
 **CSS in the head has to be in a `<style>`, and the wrapper belongs to the injector.** `faceCss`
 returns a bare `@font-face` rule and `NovelDocument.build` takes it as `extraHead`. It was emitted
@@ -353,6 +412,24 @@ must handle a page that is no longer in the list.
 Strip and continuous reading use separate image processors (split 2026-08-31):
 `PagerPageImageProcessor.kt`, `PagerJoinedItemsBuilder.kt`, `WebtoonPageImageProcessor.kt`.
 `WebtoonBaseHolder.viewer` is public for cross-holder access. Keep the two paths separate.
+
+## EPUB as comic (`loader/EpubPageLoader.kt`)
+
+The local source can also offer an EPUB as an image chapter: `getImagesFromPages` walks every `<img>`
+in every spine document, which is the producer's promise, not the archive's. `getPages` therefore
+gates each collected path on `reader.contains(path)` before it may become a page — a page this reader
+can never stream is not a page — drops the rest with a WARN log naming each path, and keeps the
+surviving page indexes **dense**: a gap in the list reads, screens away from the missing image, as a
+broken neighbourhood rather than as one absent file. The stream lambda itself still answers
+`error("Missing EPUB image: $path")` per path rather than returning null, because null is how a page
+gets stuck forever.
+
+Series metadata rides the same container: `source-local`'s `EpubReaderExtensions.fillMetadata` leads
+the chapter name with the series the book *declares* — calibre's stamped pair, or an EPUB 3
+collection confirmed as a series — as `"Series: Volume"`, skipping the prefix when the book's own
+title already opens with the series name (a whole book shelved in a series folder would only double
+it), and keeping the folder-number heuristic only for books that declare nothing. How the two
+spellings are read out of the OPF is in `core/archive/AGENTS.md`.
 
 ## Komikku additions (KMK)
 
