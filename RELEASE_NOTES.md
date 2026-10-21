@@ -11,5 +11,11 @@ files moved. See .github/scripts/release_notes.py.
 ### New
 
 ### Improve
+- **Anime-Planet**: rewired against the site's current pages — refreshing now reads your status,
+  chapter progress and score back from your Anime-Planet list (true two-way sync), and freshly
+  bound entries pick up the manga's total chapter count.
 
 ### Fix
+- **Anime-Planet**: rating writes now hit the site's real `rate` endpoint and use its half-star
+  (0.5–5.0) scale — scores previously never persisted.
+- **Anime-Planet**: starting a re-read no longer marks the entry "Won't Read" on the site.

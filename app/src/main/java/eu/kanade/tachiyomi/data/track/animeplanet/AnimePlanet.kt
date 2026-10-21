@@ -24,6 +24,15 @@ class AnimePlanet(id: Long) : BaseTracker(id, "AnimePlanet"), DeletableTracker {
         const val DROPPED = 5L
         const val REREADING = 6L
 
+        /**
+         * Site-domain status for "Won't Read" (the widget's value 6). Note this deliberately
+         * clashes with the internal REREADING value: entry states parsed off the site live in
+         * the site's value space and [fromApiStatus] translates them. The former tracker mapped
+         * REREADING onto this value, quietly marking re-reads as never going to happen - the
+         * site has no re-reading status, so [getRereadingStatus] returns READING instead.
+         */
+        const val WONT_READ = 6L
+
         // KMK -->
         private const val ANON_USERNAME = "animeplanet-user"
         // KMK <--
@@ -31,6 +40,30 @@ class AnimePlanet(id: Long) : BaseTracker(id, "AnimePlanet"), DeletableTracker {
         private val SCORE_LIST = (0..10)
             .map { if (it == 0) "-" else it.toString() }
             .toImmutableList()
+
+        /** Site list statuses by value: 1 Read, 2 Reading, 3 Dropped, 4 Want to Read, 5 Stalled. */
+        fun toApiStatus(status: Long): Int = when (status) {
+            READING -> 2
+            COMPLETED -> 1
+            ON_HOLD -> 5
+            PLAN_TO_READ -> 4
+            DROPPED -> 3
+            REREADING -> 2
+            else -> 4
+        }
+
+        /** Inverse of [toApiStatus]; only call for site statuses 1..5 (0 and 6 are not tracked). */
+        fun fromApiStatus(apiStatus: Long): Long = when (apiStatus) {
+            1L -> COMPLETED
+            2L -> READING
+            3L -> DROPPED
+            4L -> PLAN_TO_READ
+            5L -> ON_HOLD
+            else -> READING
+        }
+
+        /** Anime-Planet rates on a half-star 0.5..5.0 scale; the tracker scores 0..10. */
+        fun siteToTrackerRating(siteRating: Double): Double = siteRating * 2.0
     }
 
     private val interceptor by lazy { AnimePlanetInterceptor(this) }
@@ -40,7 +73,9 @@ class AnimePlanet(id: Long) : BaseTracker(id, "AnimePlanet"), DeletableTracker {
     override fun getLogo(): Int = R.drawable.brand_animeplanet
 
     override fun getStatusList(): List<Long> {
-        return listOf(READING, COMPLETED, ON_HOLD, PLAN_TO_READ, DROPPED, REREADING)
+        // Anime-Planet has no re-reading status on its site (REREADING stays a reserved
+        // internal value for legacy manga_sync rows; the wire maps it onto READING).
+        return listOf(READING, COMPLETED, ON_HOLD, PLAN_TO_READ, DROPPED)
     }
 
     override fun getStatus(status: Long): StringResource? = when (status) {
@@ -55,7 +90,7 @@ class AnimePlanet(id: Long) : BaseTracker(id, "AnimePlanet"), DeletableTracker {
 
     override fun getReadingStatus(): Long = READING
 
-    override fun getRereadingStatus(): Long = REREADING
+    override fun getRereadingStatus(): Long = READING
 
     override fun getCompletionStatus(): Long = COMPLETED
 
@@ -71,8 +106,10 @@ class AnimePlanet(id: Long) : BaseTracker(id, "AnimePlanet"), DeletableTracker {
         }
         val slug = extractSlugFromUrl(track.tracking_url)
         if (slug != null) {
+            if (track.remote_id == 0L) {
+                throw Exception("Anime-Planet entry for ${track.title} has no remote id; bind it first")
+            }
             api.updateMangaListEntry(
-                getUsername(),
                 track.remote_id,
                 slug,
                 track.status,
@@ -86,20 +123,35 @@ class AnimePlanet(id: Long) : BaseTracker(id, "AnimePlanet"), DeletableTracker {
     override suspend fun delete(track: DomainTrack) {
         val slug = extractSlugFromUrl(track.remoteUrl)
         if (slug != null) {
-            api.deleteMangaFromList(getUsername(), track.remoteId, slug)
+            api.deleteMangaFromList(track.remoteId, slug)
         }
     }
 
     override suspend fun bind(track: Track, hasReadChapters: Boolean): Track {
-        if (track.remote_id == 0L && track.tracking_url.isNotBlank()) {
-            val slug = extractSlugFromUrl(track.tracking_url)
-            if (slug != null) {
-                track.remote_id = api.getMangaId(slug)
-            }
+        val slug = extractSlugFromUrl(track.tracking_url) ?: return track
+
+        val page = api.getMangaPage(slug)
+        if (page.remoteId == 0L) {
+            // Challenge or login page: the fetch did not resolve the entry, so keep the
+            // legacy heuristic instead of zeroing an existing id.
+            track.status = if (hasReadChapters) READING else PLAN_TO_READ
+            return track
         }
 
-        val status = if (hasReadChapters) READING else PLAN_TO_READ
-        track.status = status
+        track.remote_id = page.remoteId
+        track.total_chapters = page.totalChapters
+
+        // First binding: prefer the state the user already has on Anime-Planet, fall back to
+        // what this library entry knows.
+        if (page.trackedRemotely) {
+            track.status = fromApiStatus(page.entryStatus)
+            track.last_chapter_read = page.entryChapters.toDouble()
+            if (page.entryRating > 0) {
+                track.score = siteToTrackerRating(page.entryRating)
+            }
+        } else {
+            track.status = if (hasReadChapters) READING else PLAN_TO_READ
+        }
         return track
     }
 
@@ -108,11 +160,28 @@ class AnimePlanet(id: Long) : BaseTracker(id, "AnimePlanet"), DeletableTracker {
     }
 
     override suspend fun refresh(track: Track): Track {
-        val slug = extractSlugFromUrl(track.tracking_url)
-        if (slug != null) {
-            val manga = api.getManga(slug)
-            track.remote_id = manga.remote_id
-            track.title = manga.title
+        val slug = extractSlugFromUrl(track.tracking_url) ?: return track
+
+        val page = api.getMangaPage(slug)
+        if (page.remoteId == 0L) {
+            // The page did not render the list widget at all: expired login or a challenge
+            // slip-through. Fail loudly, like the other trackers do, instead of zeroing ids.
+            throw Exception("Could not read Anime-Planet page for $slug (login or Cloudflare mismatch)")
+        }
+
+        track.remote_id = page.remoteId
+        track.title = page.title
+        track.total_chapters = page.totalChapters
+
+        // Two-way sync: when the entry is on the user's Anime-Planet list, its remote state is
+        // the truth for status, progress and score. "Won't Read" and missing entries count as
+        // not tracked, leaving the local row untouched.
+        if (page.trackedRemotely) {
+            track.status = fromApiStatus(page.entryStatus)
+            track.last_chapter_read = page.entryChapters.toDouble()
+            if (page.entryRating > 0) {
+                track.score = siteToTrackerRating(page.entryRating)
+            }
         }
         return track
     }
