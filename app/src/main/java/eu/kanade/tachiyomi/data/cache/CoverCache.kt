@@ -189,7 +189,9 @@ class CoverCache(private val context: Context) {
         file.setLastModified(timestamp) && file.lastModified() >= timestamp - STAMP_TOLERANCE_MS
 
     /** Cache key a library cover is stored under, for handing to [pruneOrphanedCovers]. */
-    fun libraryCoverKey(manga: Manga): String? = manga.thumbnailUrl?.let { DiskUtil.hashKeyForDisk(it) }
+    fun libraryCoverKey(thumbnailUrl: String?): String? = thumbnailUrl?.let { DiskUtil.hashKeyForDisk(it) }
+
+    fun libraryCoverKey(manga: Manga): String? = libraryCoverKey(manga.thumbnailUrl)
 
     /** Cache key a custom cover is stored under, for handing to [pruneOrphanedCovers]. */
     fun customCoverKey(mangaId: Long): String = DiskUtil.hashKeyForDisk(mangaId.toString())

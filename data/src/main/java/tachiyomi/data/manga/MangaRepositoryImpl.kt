@@ -6,6 +6,7 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import logcat.LogPriority
 import tachiyomi.core.common.util.lang.toLong
 import tachiyomi.core.common.util.system.logcat
@@ -13,6 +14,7 @@ import tachiyomi.data.DatabaseHandler
 import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.StringListColumnAdapter
 import tachiyomi.data.UpdateStrategyColumnAdapter
+import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.library.model.LibraryManga
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.model.Manga
@@ -79,10 +81,38 @@ class MangaRepositoryImpl(
                 )
             }
         } catch (e: OutOfMemoryError) {
-            logcat(LogPriority.ERROR, e) { "OOM loading library (1000+ entries), returning empty guard" }
-            emptyList()
+            // KMK --> Degrade instead of blanking the library. The view's aggregate ran out of
+            // memory before it could produce counts, but the favorites rows themselves are far
+            // smaller than the aggregate it was building over - a library without per-series
+            // counts is recoverable; an empty library screen on a 10k-entry library looks like
+            // the user's data is gone. Entries land in the uncategorized group so the default
+            // grouping still shows them; if even the plain favorites pass throws, give up and
+            // keep the old empty guard.
+            logcat(LogPriority.ERROR, e) { "OOM loading library aggregates, degrading to favorites without chapter counts" }
+            runCatching { getFavorites().toLibraryMangaWithoutCounts() }
+                .onFailure { error ->
+                    logcat(LogPriority.ERROR, error) { "OOM fallback failed, returning empty guard" }
+                }
+                .getOrDefault(emptyList())
         }
     }
+
+    // KMK -->
+    private fun List<Manga>.toLibraryMangaWithoutCounts(): List<LibraryManga> = map { manga ->
+        LibraryManga(
+            manga = manga,
+            categories = listOf(Category.UNCATEGORIZED_ID),
+            totalChapters = 0,
+            readCount = 0,
+            bookmarkCount = 0,
+            bookmarkReadCount = 0,
+            chapterFlags = manga.chapterFlags,
+            latestUpload = 0,
+            chapterFetchedAt = 0,
+            lastRead = 0,
+        )
+    }
+    // KMK <--
 
     // KMK --> Counted in SQL rather than by measuring the list [getLibraryManga] returns.
     override suspend fun getLibraryCount(): Long {
@@ -103,6 +133,39 @@ class MangaRepositoryImpl(
     override fun getFavoritesBySourceId(sourceId: Long): Flow<List<Manga>> {
         return handler.subscribeToList { mangasQueries.getFavoriteBySourceId(sourceId, MangaMapper::mapManga) }
     }
+
+    // KMK --> Light favorites projections for callers that don't need the libraryView aggregate.
+    // See MangaRepository for what each answers and why these exist.
+    override suspend fun getFavoriteTitles(): List<String> {
+        return handler.awaitList {
+            mangasQueries.getFavoriteTitles()
+        }
+    }
+
+    override suspend fun getMangaIdByTitle(title: String): Long? {
+        return handler.awaitOneOrNull {
+            mangasQueries.getFavoriteMangaIdByTitle(title = title)
+        }
+    }
+
+    override suspend fun getFavoriteCovers(): List<Pair<Long, String?>> {
+        return handler.awaitList {
+            mangasQueries.getFavoriteCovers { mangaId, thumbnailUrl -> mangaId to thumbnailUrl }
+        }
+    }
+
+    override suspend fun getFavoriteCategoryCounts(): Map<Long, Long> {
+        return handler.awaitList {
+            mangasQueries.getFavoriteCategoryCounts { categoryId, mangaCount -> categoryId to mangaCount }
+        }.toMap()
+    }
+
+    override fun getFavoriteCategoryCountsAsFlow(): Flow<Map<Long, Long>> {
+        return handler.subscribeToList {
+            mangasQueries.getFavoriteCategoryCounts { categoryId, mangaCount -> categoryId to mangaCount }
+        }.map { it.toMap() }
+    }
+    // KMK <--
 
     override suspend fun getDuplicateLibraryManga(id: Long, title: String): List<MangaWithChapterCount> {
         return handler.awaitList {

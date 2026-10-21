@@ -5,7 +5,7 @@ SQLDelight database layer with23 tables/views,46 migrations, and18 repository im
 ## Schema organization
 
 **SQL files** in `src/main/sqldelight/tachiyomi/data/`:
-- `mangas.sq` (18 queries), `chapters.sq` (12), `history.sq` (6), `categories.sq` (5)
+- `mangas.sq` (30 queries), `chapters.sq` (12), `history.sq` (6), `categories.sq` (5)
 - `manga_sync.sq` (5), `merged.sq` (10), `saved_search.sq` (7), `feed_saved_search.sq` (10)
 - `sources.sq` (3), `excluded_scanlators.sq` (3), `extension_store.sq` (5)
 - `libraryUpdateError.sq` (5), `libraryUpdateErrorMessage.sq` (3)

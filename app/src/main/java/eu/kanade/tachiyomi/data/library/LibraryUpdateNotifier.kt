@@ -37,7 +37,6 @@ import tachiyomi.core.common.i18n.pluralStringResource
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.launchUI
 import tachiyomi.domain.chapter.model.Chapter
-import tachiyomi.domain.library.model.LibraryManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.i18n.MR
@@ -126,10 +125,14 @@ class LibraryUpdateNotifier(
 
     /**
      * Warn when excessively checking any single source.
+     *
+     * Takes plain [Manga]s because it only reads [Manga.source]: a queue-size look includes
+     * the metadata refresh job, which works from the favorites table and has no chapter
+     * aggregate to wrap its entries in.
      */
-    fun showQueueSizeWarningNotificationIfNeeded(mangaToUpdate: List<LibraryManga>) {
+    fun showQueueSizeWarningNotificationIfNeeded(mangaToUpdate: List<Manga>) {
         val maxUpdatesFromSource = mangaToUpdate
-            .groupBy { it.manga.source }
+            .groupBy { it.source }
             .filterKeys { sourceManager.get(it) !is UnmeteredSource }
             .maxOfOrNull { it.value.size } ?: 0
 

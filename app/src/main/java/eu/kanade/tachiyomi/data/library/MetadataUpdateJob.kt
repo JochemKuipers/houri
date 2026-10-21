@@ -26,8 +26,7 @@ import mihon.app.di.globalAppGraph
 import mihon.domain.source.interactor.UpdateMangaFromRemote
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
-import tachiyomi.domain.library.model.LibraryManga
-import tachiyomi.domain.manga.interactor.GetLibraryManga
+import tachiyomi.domain.manga.interactor.GetFavorites
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.service.SourceManager
 import java.util.concurrent.CopyOnWriteArrayList
@@ -40,12 +39,15 @@ class MetadataUpdateJob(private val context: Context, workerParams: WorkerParame
     CoroutineWorker(context, workerParams) {
 
     private val sourceManager: SourceManager = globalAppGraph.sourceManager
-    private val getLibraryManga: GetLibraryManga = globalAppGraph.getLibraryManga
+    // KMK --> Favorites, not the libraryView aggregate: this job only refreshes metadata for the
+    // series themselves, so building every entry's chapter counts, category aggregation and
+    // blacklist-aware stats was a full pass over the database to throw all of it away.
+    private val getFavorites: GetFavorites = globalAppGraph.getFavorites
     private val updateMangaFromRemote: UpdateMangaFromRemote = globalAppGraph.updateMangaFromRemote
 
     private val notifier = LibraryUpdateNotifier(context)
 
-    private var mangaToUpdate: List<LibraryManga> = mutableListOf()
+    private var mangaToUpdate: List<Manga> = mutableListOf()
 
     override suspend fun doWork(): Result {
         setForegroundSafely()
@@ -87,7 +89,7 @@ class MetadataUpdateJob(private val context: Context, workerParams: WorkerParame
      * Adds list of manga to be updated.
      */
     private suspend fun addMangaToQueue() {
-        mangaToUpdate = getLibraryManga.await()
+        mangaToUpdate = getFavorites.await()
         notifier.showQueueSizeWarningNotificationIfNeeded(mangaToUpdate)
     }
 
@@ -97,13 +99,12 @@ class MetadataUpdateJob(private val context: Context, workerParams: WorkerParame
         val currentlyUpdatingManga = CopyOnWriteArrayList<Manga>()
 
         coroutineScope {
-            mangaToUpdate.groupBy { it.manga.source }
+            mangaToUpdate.groupBy { it.source }
                 .values
                 .map { mangaInSource ->
                     async {
                         semaphore.withPermit {
-                            mangaInSource.forEach { libraryManga ->
-                                val manga = libraryManga.manga
+                            mangaInSource.forEach { manga ->
                                 ensureActive()
 
                                 withUpdateNotification(

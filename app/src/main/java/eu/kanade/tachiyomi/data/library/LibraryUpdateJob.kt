@@ -250,7 +250,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                         }
                 }
 
-            notifier.showQueueSizeWarningNotificationIfNeeded(mangaToUpdate)
+            notifier.showQueueSizeWarningNotificationIfNeeded(mangaToUpdate.map(LibraryManga::manga))
             return
         }
         // KMK <--
@@ -400,7 +400,7 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                 },
             )
 
-        notifier.showQueueSizeWarningNotificationIfNeeded(mangaToUpdate)
+        notifier.showQueueSizeWarningNotificationIfNeeded(mangaToUpdate.map { it.manga })
 
         if (skippedUpdates.isNotEmpty()) {
             val skippedByReason = skippedUpdates

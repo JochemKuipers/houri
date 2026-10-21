@@ -319,6 +319,46 @@ SELECT * FROM mangas;
 deleteById:
 DELETE FROM mangas WHERE _id = :id;
 
+-- KMK --> Small projections for the callers that only need one facet of the library. The full
+-- libraryView aggregate (chapter counting over every chapters row, four count(DISTINCT) temp
+-- b-trees, the blacklist instr() filters and the UNION for the merged source) runs per query,
+-- so a consumer that only wants titles, covers or per-category counts should never pay it.
+-- Custom-edited fields are folded in with the same coalesce/nullif rule the Manga model's
+-- @Transient initialiser applies: a blank edit means "not set", so fall back to the source row.
+getFavoriteTitles:
+SELECT coalesce(nullif(cm.title, ''), M.title) AS title
+FROM mangas M
+LEFT JOIN custom_manga_info cm ON cm.manga_id = M._id
+WHERE M.favorite = 1;
+
+getFavoriteMangaIdByTitle:
+SELECT M._id AS mangaId
+FROM mangas M
+LEFT JOIN custom_manga_info cm ON cm.manga_id = M._id
+WHERE M.favorite = 1
+AND lower(coalesce(nullif(cm.title, ''), M.title)) = lower(:title)
+LIMIT 1;
+
+getFavoriteCovers:
+SELECT
+    M._id AS mangaId,
+    coalesce(nullif(cm.thumbnail_url, ''), M.thumbnail_url) AS thumbnailUrl
+FROM mangas M
+LEFT JOIN custom_manga_info cm ON cm.manga_id = M._id
+WHERE M.favorite = 1;
+
+-- How many library entries each category holds, counted where the assignment lives instead of
+-- re-deriving it from group_concat after materializing the whole library.
+getFavoriteCategoryCounts:
+SELECT
+    mc.category_id AS categoryId,
+    count(*) AS mangaCount
+FROM mangas_categories mc
+JOIN mangas M ON M._id = mc.manga_id
+WHERE M.favorite = 1
+GROUP BY mc.category_id;
+-- KMK <--
+
 selectLastInsertRow:
 SELECT *
 FROM mangas

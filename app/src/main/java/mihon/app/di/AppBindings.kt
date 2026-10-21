@@ -82,12 +82,29 @@ object AppBindings {
                     setPragma(db, "foreign_keys = ON")
                     setPragma(db, "journal_mode = WAL")
                     setPragma(db, "synchronous = NORMAL")
+                    // KMK --> Large-library tuning. The heavy KMK views (libraryView,
+                    // updatesView) materialize group-by and UNION temp b-trees - libraryView
+                    // alone builds four count(DISTINCT) b-trees plus the UNION dedup sort over
+                    // every chapters row in the database on each run. RAM-backed temp storage,
+                    // a page cache above the 2MB default so 1M-chapter scans stop thrashing it,
+                    // and memory-mapped reads keep those passes off disk. Each pragma is best
+                    // effort: runCatching so a driver that refuses one (e.g. no mmap under
+                    // SQLCipher) cannot stop the database from opening at all.
+                    setPragmaSafely(db, "temp_store = MEMORY")
+                    setPragmaSafely(db, "cache_size = -16000")
+                    setPragmaSafely(db, "mmap_size = 268435456")
+                    // KMK <--
                 }
                 private fun setPragma(db: SupportSQLiteDatabase, pragma: String) {
                     val cursor = db.query("PRAGMA $pragma")
                     cursor.moveToFirst()
                     cursor.close()
                 }
+                // KMK -->
+                private fun setPragmaSafely(db: SupportSQLiteDatabase, pragma: String) {
+                    runCatching { setPragma(db, pragma) }
+                }
+                // KMK <--
             },
         )
     }

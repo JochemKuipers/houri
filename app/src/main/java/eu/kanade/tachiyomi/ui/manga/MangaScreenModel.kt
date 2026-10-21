@@ -1247,9 +1247,11 @@ class MangaScreenModel(
                     // library title render an "In library" badge. Stubs stay
                     // non-favorite (insertNetworkManga preserves favorite=false)
                     // so they never count towards library/achievement stats.
+                    // Titles come from the two-column projection, not the whole
+                    // libraryView aggregate: this runs per details screen.
                     val libraryTitles = try {
-                        mangaRepository.getLibraryManga()
-                            .map { it.manga.title.lowercase() }
+                        mangaRepository.getFavoriteTitles()
+                            .map(String::lowercase)
                             .toSet()
                     } catch (_: Exception) {
                         emptySet()
@@ -1269,11 +1271,10 @@ class MangaScreenModel(
     suspend fun resolveSequelPrequel(entry: SequelPrequelEntry): Long? {
         val state = successState ?: return null
         // KMK --> library first: land on the existing library entry without
-        // creating a stub or hitting any network.
+        // creating a stub or hitting any network. One indexed title lookup
+        // instead of materializing every library entry with its chapter counts.
         try {
-            mangaRepository.getLibraryManga()
-                .firstOrNull { it.manga.title.equals(entry.title, ignoreCase = true) }
-                ?.let { return it.manga.id }
+            mangaRepository.getMangaIdByTitle(entry.title)?.let { return it }
         } catch (_: Exception) {
         }
         // KMK --> tracker stub: metadata comes from the tracker that reported

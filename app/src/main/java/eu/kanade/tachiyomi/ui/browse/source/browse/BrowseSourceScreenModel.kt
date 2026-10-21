@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -70,8 +71,8 @@ import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.chapter.interactor.SetMangaDefaultChapterFlags
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.manga.interactor.GetDuplicateLibraryManga
+import tachiyomi.domain.manga.interactor.GetFavorites
 import tachiyomi.domain.manga.interactor.GetFlatMetadataById
-import tachiyomi.domain.manga.interactor.GetLibraryManga
 import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MangaWithChapterCount
@@ -114,8 +115,11 @@ open class BrowseSourceScreenModel(
     // KMK -->
     private val updateMangaFromRemote: UpdateMangaFromRemote = globalAppGraph.updateMangaFromRemote,
     private val toggleIncognito: ToggleIncognito = globalAppGraph.toggleIncognito,
-    // KMK --> For refreshLocalLibrary: the local source's library entries to re-sync.
-    private val getLibraryManga: GetLibraryManga = globalAppGraph.getLibraryManga,
+    // KMK --> For refreshLocalLibrary: the local source's library entries to re-sync. Scoped to
+    // the source: the sync only touches one source's entries, so fetching the whole libraryView
+    // aggregate (chapter counting over every chapters row) to then throw everything but this
+    // source's rows away was pure overhead on a large library.
+    private val getFavorites: GetFavorites = globalAppGraph.getFavorites,
     private val extensionManager: ExtensionManager = globalAppGraph.extensionManager,
     private val basePreferences: BasePreferences = globalAppGraph.basePreferences,
     // KMK <--
@@ -545,19 +549,18 @@ open class BrowseSourceScreenModel(
      */
     fun refreshLocalLibrary() {
         screenModelScope.launchIO {
-            val libraryManga = runCatching { getLibraryManga.await() }
+            val libraryManga = runCatching { getFavorites.subscribe(sourceId).first() }
                 .getOrElse { emptyList() }
-                .filter { it.manga.source == sourceId }
 
             for (entry in libraryManga) {
                 runCatching {
                     updateMangaFromRemote(
                         source = source,
-                        manga = entry.manga,
+                        manga = entry,
                         fetchDetails = false,
                         fetchChapters = true,
                     )
-                }.onFailure { logcat(LogPriority.ERROR, it) { "Local library refresh failed for '${entry.manga.title}'" } }
+                }.onFailure { logcat(LogPriority.ERROR, it) { "Local library refresh failed for '${entry.title}'" } }
             }
 
             // Re-read the directory listing. A fresh Listing instance, because the pager flow

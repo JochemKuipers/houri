@@ -28,7 +28,14 @@ files moved. See .github/scripts/release_notes.py.
 
 - **Local manga (EPUB)**: EPUB-as-comic chapters now collect plates declared as SVG `<image>` elements (by `xlink:href`), not only `<img src>` ones.
 
+- **Large libraries**: Global-update's metadata refresh and the category screen no longer load the entire library with per-entry chapter counts just to read titles and count category membership — that full-library pass was the heaviest step of both flows and is now gone.
+
+- **Large libraries**: Routines that only ever needed one field now ask the database for exactly that field — the manga screen's sequel/prequel badge lookup and the "is this source entry already in my library" cross-check run lightweight queries instead of a full-library snapshot, and library cover pruning matches covers without loading your whole collection first.
+
+- **Large libraries**: The database engine now keeps its scratch space and page cache in RAM and memory-maps the file for reads, so the temporary sorts that library-wide queries perform on big collections no longer spill to disk and every read gets a larger cache behind it.
+
 ### Fix
+- **Large libraries**: On very large libraries, the out-of-memory guard around loading the Library could leave you staring at an empty screen; it now falls back to showing your entries without their unread counts rather than an invisible library.
 - **Library**: Using "Search library" on a manga no longer breaks the back stack — Back from the filtered Library now lands you on the manga you came from, first closing the search filter as usual, instead of dropping the manga screen entirely.
 
 - **Browse**: Leaving a source's browse screen for a manga (and coming back from a chapter) keeps the list/grid scroll position, instead of returning to the top of the page.

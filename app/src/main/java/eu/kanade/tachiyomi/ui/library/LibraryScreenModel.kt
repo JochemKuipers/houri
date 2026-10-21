@@ -126,6 +126,7 @@ import tachiyomi.domain.manga.model.CustomMangaInfo
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MangaUpdate
 import tachiyomi.domain.manga.model.applyFilter
+import tachiyomi.domain.manga.repository.MangaRepository
 import tachiyomi.domain.source.model.StubSource
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.track.interactor.GetTracks
@@ -141,6 +142,10 @@ import tachiyomi.domain.source.model.Source as DomainSource
 
 class LibraryScreenModel(
     private val getLibraryManga: GetLibraryManga = globalAppGraph.getLibraryManga,
+    // KMK --> Light favorites projections (covers) and the plain rows, without the libraryView
+    // aggregate.
+    private val mangaRepository: MangaRepository = globalAppGraph.mangaRepository,
+    // KMK <--
     private val getCategories: GetCategories = globalAppGraph.getCategories,
     private val getTracksPerManga: GetTracksPerManga = globalAppGraph.getTracksPerManga,
     private val getNextChapters: GetNextChapters = globalAppGraph.getNextChapters,
@@ -676,14 +681,16 @@ class LibraryScreenModel(
             // so waiting for the first emission queues the prune behind the frames the user
             // is actually waiting on instead.
             state.first { it.libraryData.isInitialized }
-            // KMK <--
+            // KMK --> Read the referenced covers off a two-column projection of the favorites
+            // table instead of a second full libraryView run: pruning only ever asks for each
+            // entry's thumbnail key and id.
             val referenced = buildSet {
-                getLibraryManga.await().forEach { libraryManga ->
-                    val manga = libraryManga.manga
-                    coverCache.libraryCoverKey(manga)?.let(::add)
-                    add(coverCache.customCoverKey(manga.id))
+                mangaRepository.getFavoriteCovers().forEach { (mangaId, thumbnailUrl) ->
+                    coverCache.libraryCoverKey(thumbnailUrl)?.let(::add)
+                    add(coverCache.customCoverKey(mangaId))
                 }
             }
+            // KMK <--
             val retention = uiPreferences.removedCoverRetention().get().retentionMillis
             coverCache.pruneOrphanedCovers(referenced, retention)
         }
@@ -896,7 +903,14 @@ class LibraryScreenModel(
             libraryManga.map { manga ->
                 // Display mode based on user preference: take it from global library setting or category
                 // KMK -->
-                val source = sourceManager.getOrStub(manga.manga.source)
+                // One source lookup per entry, and none at all when no badge consumes it.
+                // Resolved unconditionally before, the stub lookup (and `lang` read) ran twice
+                // per entry per emission on a 10k-entry library.
+                val source = if (preferences.sourceBadge || preferences.languageBadge) {
+                    sourceManager.getOrStub(manga.manga.source)
+                } else {
+                    null
+                }
                 // KMK <--
                 LibraryItem(
                     libraryManga = manga,
@@ -925,7 +939,7 @@ class LibraryScreenModel(
                         false
                     },
                     sourceLanguage = if (preferences.languageBadge) {
-                        sourceManager.getOrStub(manga.manga.source).lang
+                        source?.lang.orEmpty()
                     } else {
                         ""
                     },
@@ -933,7 +947,8 @@ class LibraryScreenModel(
                     useLangIcon = preferences.useLangIcon,
                     source = if (preferences.sourceBadge) {
                         DomainSource(
-                            source.id,
+                            // KMK --> source is non-null whenever the badge asks for it
+                            source!!.id,
                             source.lang,
                             source.name,
                             supportsLatest = false,

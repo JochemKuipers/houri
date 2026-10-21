@@ -38,6 +38,28 @@ interface MangaRepository {
 
     suspend fun getDuplicateLibraryManga(id: Long, title: String): List<MangaWithChapterCount>
 
+    // KMK -->
+    /**
+     * Cheap projections of the favorites table, for callers that don't need the libraryView
+     * aggregate. [getLibraryManga] re-runs the whole chapter-counting view per query, which is
+     * the right price to *read* the library and far too high a price to answer "which titles /
+     * covers / category counts do the favorites have".
+     *
+     * [getFavoriteTitles] and [getFavoriteCovers] return the effective (custom-edited) values,
+     * matching what `Manga.title` / `Manga.thumbnailUrl` would show.
+     */
+    suspend fun getFavoriteTitles(): List<String>
+
+    /** The id of the library entry whose effective title matches [title], case-insensitively. */
+    suspend fun getMangaIdByTitle(title: String): Long?
+
+    suspend fun getFavoriteCovers(): List<Pair<Long, String?>>
+
+    suspend fun getFavoriteCategoryCounts(): Map<Long, Long>
+
+    fun getFavoriteCategoryCountsAsFlow(): Flow<Map<Long, Long>>
+    // KMK <--
+
     suspend fun getUpcomingManga(statuses: Set<Long>): Flow<List<Manga>>
 
     suspend fun resetViewerFlags(): Boolean

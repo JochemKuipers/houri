@@ -31,7 +31,7 @@ import tachiyomi.domain.category.model.CategorySortOrder
 import tachiyomi.domain.category.model.CategoryUpdate
 import tachiyomi.domain.category.service.CategoryReaderPreferences
 import tachiyomi.domain.library.service.LibraryPreferences
-import tachiyomi.domain.manga.interactor.GetLibraryManga
+import tachiyomi.domain.manga.repository.MangaRepository
 import tachiyomi.i18n.MR
 
 class CategoryScreenModel(
@@ -44,7 +44,11 @@ class CategoryScreenModel(
     private val hideCategory: HideCategory = globalAppGraph.hideCategory,
     private val updateCategory: UpdateCategory = globalAppGraph.updateCategory,
     private val mergeCategories: MergeCategories = globalAppGraph.mergeCategories,
-    private val getLibraryManga: GetLibraryManga = globalAppGraph.getLibraryManga,
+    // KMK --> Counts come straight out of an SQL group-by on mangas_categories now: this screen
+    // only needs how many entries each category holds, not the libraryView aggregate
+    // (chapter counts over every chapters row, history joins, blacklist filters) rebuilt in
+    // memory on every library emission just to be reduced to a number per category again.
+    private val mangaRepository: MangaRepository = globalAppGraph.mangaRepository,
     private val libraryPreferences: LibraryPreferences = globalAppGraph.libraryPreferences,
     private val setCategoryTrackStatus: SetCategoryTrackStatus = globalAppGraph.setCategoryTrackStatus,
     private val setCategoryUpdateInterval: SetCategoryUpdateInterval = globalAppGraph.setCategoryUpdateInterval,
@@ -60,15 +64,14 @@ class CategoryScreenModel(
         screenModelScope.launch {
             combine(
                 getCategories.subscribe(),
-                getLibraryManga.subscribe(),
-            ) { categories, libraryManga ->
-                val counts = mutableMapOf<Long, Int>()
-                for (item in libraryManga) {
-                    for (categoryId in item.categories) {
-                        counts[categoryId] = (counts[categoryId] ?: 0) + 1
-                    }
-                }
-                categories.filterNot(Category::isSystemCategory) to counts.toPersistentMap()
+                mangaRepository.getFavoriteCategoryCountsAsFlow(),
+            ) { categories, favoriteCounts ->
+                // KMK --> Same per-category totals the manual reduction produced (an entry with
+                // n categories counts in each of them); the group-by just does it where the
+                // assignment lives, and only on mangas/mangas_categories invalidation instead
+                // of every chapter and history write in the app.
+                categories.filterNot(Category::isSystemCategory) to
+                    favoriteCounts.mapValues { (_, count) -> count.toInt() }.toPersistentMap()
             }
                 .collectLatest { (categories, counts) ->
                     mutableState.update {
