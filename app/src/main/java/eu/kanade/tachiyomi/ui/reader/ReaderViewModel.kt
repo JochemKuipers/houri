@@ -509,8 +509,28 @@ class ReaderViewModel(
                 // chapter check, the previous chapter's index leaks into every newly loaded
                 // chapter (wrong landing page after each chapter change).
                 if (chapterPageIndex >= 0 && chapterId == currentChapter.chapter.id) {
-                    // Restore from SavedState
-                    currentChapter.requestedPage = chapterPageIndex
+                    // Restore from SavedState.
+                    // KMK --> ... in the list coordinates *from then*. The value was written by
+                    // updateChapterProgress as positionOf(page), a live index that already
+                    // includes every split segment inserted before it, while the list the fresh
+                    // process rebuilds is the un-split one the loader persists. Past a tall page's
+                    // split, that live index names a *later* page of the fresh list, so the reader
+                    // resumed however many segments forward instead of where they left.
+                    // last_page_read is the same page recorded in the coordinates the surviving
+                    // list has ("written in the coordinates the chapter has on the next open"),
+                    // so when it exists it pins the restore to the right page. The WebGPU viewer
+                    // restores the precise offset on top of it through its position store, which
+                    // setChaptersInternal consults under the same last_page_read > 0 gate.
+                    // Only the < branch is a shift: an equal value is the same page, and a smaller
+                    // one means the process died before the progress write (incognito skips the
+                    // write entirely), where page_index is the only record there is.
+                    val lastRead = currentChapter.chapter.last_page_read
+                    currentChapter.requestedPage = if (lastRead in 1 until chapterPageIndex) {
+                        lastRead
+                    } else {
+                        chapterPageIndex
+                    }
+                    // KMK <--
                 } else if (!currentChapter.chapter.read) {
                     currentChapter.requestedPage = currentChapter.chapter.last_page_read
                 }

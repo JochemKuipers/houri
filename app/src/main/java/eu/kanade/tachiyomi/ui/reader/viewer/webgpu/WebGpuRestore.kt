@@ -19,7 +19,7 @@ import kotlin.math.abs
 // Each arms its viewer's "restore pending" id first, so a page report landing in the meantime does
 // not save the fresh default position over the stored one.
 
-/** How long the restore waits for the target page before giving up (10 polls of 100ms). */
+/** How long the restore waits for the target page before giving up (100 polls of 100ms). */
 private const val RESTORE_POLL_LIMIT = 100
 
 /**
