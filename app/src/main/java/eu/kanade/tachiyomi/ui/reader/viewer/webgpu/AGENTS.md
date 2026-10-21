@@ -127,8 +127,13 @@ cannot arise on its own; it needs a queue/cache mutation, and only a few sites d
 
 The `last=<outcome>` in the log is `decodeOutcomes[pageKey]` — *how the previous decode
 ended*, not why the page is stuck. Outcomes: `no-stream`, `no-bytes`, `rejected:*`,
-`abandoned`, `decoded`, `threw`, `unfinished`. **`no-stream` means `page.stream` returned
-null, not that the decoder failed** — see "Symptom table".
+`abandoned`, `not-adopted`, `loading`, `decoded`, `threw`, `unfinished` — several of them are
+*normal* returns, and the worker's `finally` cannot tell a return from a throw, so every early
+return in `decodeReaderPage` completes its own trace first (`loading` = the page left for
+`startPageLoad` because bytes were not Ready; `not-adopted` = the finished image was discarded for
+a page nobody will draw; `abandoned` = viewer torn down, or the page evicted mid-decode). A return
+that skips its own completion is recorded as `threw` and the ladder's log lies. **`no-stream`
+means `page.stream` returned null, not that the decoder failed** — see "Symptom table".
 
 ## DEVICE LIFECYCLE — read this before touching recovery
 
@@ -331,6 +336,59 @@ branch. Tiles refill lazily, so shedding them costs a rebuild, not correctness.
 > `shedDeviceCaches`. The resample republishes the tile budget from current pressure, and
 > `onLowMemory` scales whatever it finds *downward* — so the reverse order has the resample
 > undo the shed on every callback, which is precisely the ratchet above.
+
+## READING-POSITION RESTORE — three coordinate systems, one landmine
+
+A restore lands through `setChaptersInternal` (position store → `requestedPage`), and the three
+sources of that page index are written in *different list coordinates*:
+
+| Source | Coordinates |
+|---|---|
+| `WebGpuReadingPositionStore` | the full strip the walk renders, camera-page relative (`pageIndexHint = 0`) |
+| DB `last_page_read` | the **next-open** (persisted, un-split) list |
+| SavedStateHandle `page_index` | the **live** list as it stood at write time — `updateChapterProgress` writes `positionOf(page)`, which already includes every split segment inserted before the read point |
+
+**A process-death restore used the live coordinate to index the fresh list.** After
+SavedStateHandle restore, the fresh process rebuilds the *un-split* list the loader persists, but
+`chapterPageIndex` names a position in the list as it stood then — so past a tall page's split,
+the chapter opened several pages forward. It is now clamped to `chapter.last_page_read` — the same
+page in next-open coordinates — when that value sits inside `1 until chapterPageIndex`: an equal
+value is the same page, and a smaller one means the process died before the progress write landed.
+Incognito writes nothing to the DB (`last_page_read == 0`), so `chapterPageIndex` stays the only
+record there and is used as-is.
+
+**Mechanisms eliminated while chasing the same report** — do not re-thrash these without new
+evidence:
+
+- `WebGpuRestore`'s math is camera-page-relative and lands inside the target page regardless of
+  neighbouring placeholder heights; `getCurrentPageIndexLocked` never returns null.
+- The position store's data is written in saved/unsplit coordinates, matching a fresh list.
+- `PageAnchor.MAX_PAGE_INDEX = 9999` is generous.
+- Restores running from the render thread are bounded: `onPageScrolledThrough`/
+  `emitReaderState` callbacks hop off via `viewModelScope.launchNonCancellable`/`launchIO`,
+  `StateFlow.update` is thread-safe, `currentAnchor` is `@Volatile`, and the `loadNewChapter`
+  branch is unreachable from the scrolled-through path (its
+  `chapter === viewerChapters?.currChapter` guard skips exactly when the callback belongs to the
+  transition being crossed).
+- `awaitRestoreTarget` polls on `RESTORE_POLL_LIMIT` — 100 polls of 100 ms. Its comment had drifted
+  away from that arithmetic and was restored; when touching the poll loop, keep comment and
+  arithmetic in agreement.
+
+> **Rule: a saved index is only valid in the list it was written against.** Every restore site —
+> SavedStateHandle, DB, position store — says which list its coordinate belongs to; `last_page_read`
+> is the one written in the coordinates a fresh list actually rebuilds.
+
+**Read-through only advances while real scrolling happens** (KMK island in submodule
+`ImageViewerContinuousState.kt`; port of upstream `92be54d`). `onPageScrolledThrough` guards the
+`last_page_read`/position-store writes on this path, and its ratchet computed from walk geometry —
+which a pinch zoom-out or a placeholder slot *shrinking* would move no less than a scroll would,
+marking pages read that were never scrolled past. The ratchet now fires only while
+`isFlinging || isPanning`: `animateScroll` (tap navigation) sets `isFlinging`, the single-finger
+drag sets `isPanning`, and a second pointer joining the drag clears it — so zoom-driven geometry
+changes cannot write progress anymore, and a restore measured against the steady baseline stays
+steady. When chasing a "opens on the wrong page" report where `last_page_read` looks *too large*,
+read this gate as eliminated along with the clamp: it was the second write-path corruption vector
+in the same family.
 
 ## MEMORY BUDGET — the reader sizes itself to the device
 
@@ -620,6 +678,21 @@ line, for instance, does not appear anywhere in the current tree.
   > Anything drawn into it must be sized from the slot. Two code paths that size the same boundary
   > differently leave a fractional disagreement, and a fractional disagreement at a page boundary
   > *is* the seam.
+- **The underlay must run before the mipmap-upload early return** (library
+  `ImageViewerContinuousState.kt`, KMK island). Between decode (`isDecoded == true`,
+  `imagePage` a fresh `ImageSingle`) and the first mip upload (`mipmaps.isEmpty()`), the
+  continuous walk's image loop used to early-return *past* the underlay with content merely
+  planned: the slot kept the transparent clear, bounded by two hard edges — a second seam shape,
+  visible for exactly the frames the first upload takes. `renderSnapshot`'s `forEachImage` now
+  paints the slot's underlay before checking what content exists. Same family as the two seam
+  landmines above; the extent is still the **slot**.
+- **Double-tap opt-out is one flag with a tied shadow** (port of upstream `34fb12b` in the
+  library's `ImageViewerState.kt` KMK island). The app sets `doubleTapZoomEnabled`
+  (`WebGpuViewer`/`WebGpuViewerContinuous`, from `WebGpuConfig.resolveDoubleTapZoom()`), and the
+  same setter keeps `doubleTapGesturesEnabled` equal to it — so with the pref off, a paged tap
+  fires on release (`waitForDown` is gated) and the continuous early-return key checks both flags.
+  Setting `doubleTapGesturesEnabled` directly defeats the tie; always go through
+  `doubleTapZoomEnabled` and let the setter do the work.
 - **Never reuse a GPU adapter** (above).
 - **Never call `WebGpuMemoryBudget.sample()` from a getter.** `cacheSize` is read by the render
   walk; `sample()` is a binder call. The snapshot exists so hot paths only ever read a volatile

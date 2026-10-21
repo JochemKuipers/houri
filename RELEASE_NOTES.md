@@ -31,3 +31,13 @@ files moved. See .github/scripts/release_notes.py.
 - **Local manga (EPUB)**: A chapter no longer gets stuck blank when the book references an image that is not actually in the archive — the loader skips (and logs) those references instead of creating a page the reader can never open.
 
 - **Book reader**: Producer-noise hardening for EPUB books — a stray byte-order mark at the start of a text chapter is stripped instead of rendered, and a case variation of the internal `book.internal` URL no longer silently drops a book's images and stylesheets.
+
+- **WebGPU reader**: Fixed a thin dark line that could appear at page boundaries in continuous (webtoon-style) reading while a neighbouring page was still decoding.
+
+- **WebGPU reader**: Reopening a chapter after the app was killed now resumes on the page you were actually on — when a tall page had been split into segments mid-reading, the reader used to land several pages past your position.
+
+- **WebGPU reader**: With double-tap zoom disabled, a tap on a paged page now registers immediately instead of the reader waiting to see whether a second tap arrives, matching the continuous reader.
+
+- **WebGPU reader**: Zooming out in continuous (webtoon-style) reading no longer silently marks ahead-of-read pages as read — the saved reading position only advances with actual scrolling now, so reopening a chapter lands where you left off even after deep pinch zooms.
+
+- **WebGPU reader**: A page in continuous reading that finished decoding while the reader sat still no longer stays blank until the next touch — the reader now notices pages joining the visible strip as soon as they become part of it.
