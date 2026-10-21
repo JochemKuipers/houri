@@ -205,9 +205,16 @@ internal fun WebGpuViewer.startPageLoad(page: ViewerReaderPage) {
 }
 
 internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
-    if (isDestroyed) return
+    if (isDestroyed) {
+        activeDecode?.complete("abandoned")
+        return
+    }
     if (page.page.status != Page.State.Ready) {
         startPageLoad(page)
+        // Not a decode at all: the page left for the loader. Completing the trace here gives the
+        // worker's finally an outcome that is not `threw` - a plain return skips every catch, so
+        // without this the sweep logged a page that never threw as if one had.
+        activeDecode?.complete("loading")
         return
     }
 
@@ -474,6 +481,7 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
             // that was already out of the cache, and nothing downstream ever called cleanup() on it.
             if (!synchronized(lock) { pageInCache(page) }) {
                 page.wantedByRender = false
+                trace?.complete("abandoned")
                 try {
                     dec.close()
                 } catch (_: Exception) {}
@@ -547,6 +555,7 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
                     // first is what makes that recovery certain if it is still cached.
                     if (!stillWanted) {
                         page.wantedByRender = false
+                        trace?.complete("abandoned")
                         discardFrames()
                         try {
                             dec.close()
