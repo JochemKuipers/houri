@@ -708,6 +708,15 @@ line, for instance, does not appear anywhere in the current tree.
   registration on a non-null display alone logs `IllegalStateException: HDR/SDR ratio changed not
   available` with a full stack trace on every surface creation of an SDR-only device.
 - **Do not merge `PagerPageImageProcessor` and `WebtoonPageImageProcessor` back together.**
+- **Per-frame GPU allocation churn is a library question, not an app one — and its ring now has a
+  frame contract.** For a long stretch the continuous underlay built a fresh `GPUBuffer` + bind
+  group per background rect per frame; the render engine now serves them from a count reset each
+  encoded frame (`RenderPage.drawMaskedRect` + `RenderPage.beginFrame()`, called from
+  `WebGpuRenderer.render`). When a report looks like native memory growing only while the reader
+  is open, look at the library's per-call GPU object creation first — `Draw.rect`/`Draw.circle`
+  still allocate per call on purpose (their per-frame count is unbounded; transitions and
+  placeholder pages use them, and those paths are transient). The submodule-side rules live in
+  `external/webgpuviewer-houri/library/src/main/java/ca/mpreg/webgpuviewer/renderer/AGENTS.md`.
 - **Do not grow `WebGpuViewer.kt` past wiring.** A new state machine belongs in its own file
   as a `WebGpuViewer` extension.
 

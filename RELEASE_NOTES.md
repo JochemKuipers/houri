@@ -20,6 +20,7 @@ files moved. See .github/scripts/release_notes.py.
 - **Local manga (EPUB)**: A book whose EPUB metadata declares a series — calibre's tags, or an EPUB 3 collection marked `series` — is titled "Series: Volume", so a library row is a volume of a series rather than an anonymous fragment.
 
 ### Improve
+- **WebGPU reader**: Smoother continuous (webtoon-style) scrolling — the background layer drawn under every page used to hand the GPU a fresh buffer and binding on every frame; both are now drawn from a small reusable ring, cutting per-frame GPU allocation churn for as long as the reader is open.
 
 ### Fix
 - **Library**: Using "Search library" on a manga no longer breaks the back stack — Back from the filtered Library now lands you on the manga you came from, first closing the search filter as usual, instead of dropping the manga screen entirely.
