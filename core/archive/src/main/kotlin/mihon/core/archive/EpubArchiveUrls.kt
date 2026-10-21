@@ -192,7 +192,19 @@ object EpubArchiveUrls {
         return out.joinToString("/")
     }
 
-    /** Percent-decoding that does not throw on the malformed escapes a book's markup can contain. */
-    fun percentDecode(value: String): String =
-        runCatching { java.net.URLDecoder.decode(value, "UTF-8") }.getOrDefault(value)
+    /**
+     * Percent-decoding that does not throw on the malformed escapes a book's markup can contain.
+     *
+     * Delegates to [EpubPaths.percentDecode] rather than spelling a second answer: a link URL on
+     * this side and a manifest href on that side must decode into the *same* archive path, or the
+     * path that decodes correctly in one place resolves to nothing in the other and the failure is
+     * a missing file — the exact shape this namespace's own history makes worth guarding against.
+     *
+     * This used to be `java.net.URLDecoder.decode`, whose `+`→space rule is HTML form encoding,
+     * not URL decoding: an entry named `cover+v2.jpg` was decoded to `cover v2.jpg`, which the
+     * archive never stored, and the image arrived as 404 — where the inline spell of the same
+     * book (whose resolution rides on this same decode) lost the same plate. The rule and its
+     * reasoning are stated on the delegate; the delegate is the only decoder.
+     */
+    fun percentDecode(value: String): String = EpubPaths.percentDecode(value)
 }

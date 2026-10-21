@@ -36,8 +36,8 @@ class EpubTextSource(
     private val readerFor: (SChapter) -> EpubReader?,
 ) : TextTocSource, TextSearchSource, TextIncrementalSource {
 
-    /** What a book reader can rely on. An EPUB chapter almost always has a TOC and inline images. */
-    val capabilities = TextCapabilities.EPUB
+    /** What a book reader can rely on. An EPUB chapter almost always has a TOC, search and inline images. */
+    val capabilities = TextCapabilities.EPUB.copy(SEARCH = true)
 
     /**
      * The chapter's documents, in reading order.
@@ -201,13 +201,31 @@ class EpubTextSource(
      * read cannot be shown anyway, so losing its hits costs nothing.
      *
      * Caching the stripped text is left to the caller. It depends only on the file, so it is
-     * computed once per chapter rather than per keystroke, but *where* to keep it belongs to the
-     * source that owns the archive — see `LocalEpubTextAdapter` in `source-local`.
+     * computed once per chapter rather than per keystroke — the source that owns the archive holds
+     * it alongside the archive and retires it when the archive retires: see `LocalEpubTextAdapter`
+     * in `source-local`. A caller that does not keep the archive open between keystrokes hands the
+     * suspension to this and re-reads per query, which for a remote source is the unavoidable cost.
      */
-    override suspend fun searchInChapter(chapter: SChapter, query: String): List<TextSearchHit> {
+    override suspend fun searchInChapter(chapter: SChapter, query: String): List<TextSearchHit> =
+        searchInChapter(chapter, query, plainTextFor(chapter))
+
+    /**
+     * Finds [query] over a plain-text index the caller computed, instead of over one read up fresh.
+     *
+     * Building [plainTextFor] costs one open, inflate and strip per spine document — the whole
+     * chapter, once. A search over it runs on a debounce while the reader types, so recomputing the
+     * index per keystroke throws that cost away nine times running for answers the previous
+     * keystroke's pass could have searched directly. The index depends only on the file, which is
+     * exactly why passing it in is sound: the caller holds it for as long as the archive is held,
+     * and the archive is what retires it. The whole-book host is `LocalEpubTextAdapter`.
+     *
+     * The [suspend] overload keeps the shape the interface promises — one call, anything reached —
+     * and stays the right answer for a caller that does not hold the archive between keystrokes.
+     */
+    fun searchInChapter(chapter: SChapter, query: String, plainText: List<IndexedText>): List<TextSearchHit> {
         if (query.isBlank()) return emptyList()
         val needle = query.trim()
-        return plainTextFor(chapter).flatMap { page ->
+        return plainText.flatMap { page ->
             val plain = page.plain
             plain.indexesOf(needle, plain.length).map { hit -> hit.copy(pageIndex = page.index) }
         }

@@ -54,6 +54,15 @@ class EpubResourceServer<K : Any>(
     private val readers = ConcurrentHashMap<String, HeldReader>()
 
     /**
+     * Sniff answers already given, by archive path. Only paths the extension table could not answer
+     * land here — it answers the vast majority before this is consulted — so the map is bounded by
+     * the number of extension-less or oddly-named resources a served book went over, not by the
+     * archive itself. Entries keyed on paths the reader no longer holds are re-computed if they ask
+     * again, which is the correct answer for a book that has changed underneath it.
+     */
+    private val sniffedTypes = ConcurrentHashMap<String, String>()
+
+    /**
      * The reader backing [key], opening it on first use.
      *
      * `putIfAbsent` rather than `getOrPut`: `getOrPut` is not atomic, so two threads arriving at a
@@ -156,21 +165,28 @@ class EpubResourceServer<K : Any>(
      * because the document's request was perfectly well formed.
      *
      * So an unrecognised extension falls through to [EpubMimeSniff] on the first bytes of the
-     * entry. That is a second `getInputStream` on the same archive rather than a cached guess, which
-     * is affordable because it happens at most once per resource and only for the ones the table
-     * cannot answer.
+     * entry. That is a second `getInputStream` and another decompress of the entry head, and it is
+     * memoised per archive path ([sniffedTypes]) rather than repeated: the bytes behind one reader
+     * cannot change while they are mapped, so a second request for the same path asks the archive
+     * for an answer it already gave. An empty string records "nothing known" —
+     * `ConcurrentHashMap` takes no nulls, and the point of the row is precisely not to ask twice.
      *
-     * Null when neither can answer. The host's own fallback is then responsible, and it is a
-     * deliberate one: a renderer asked for `application/octet-stream` declines to decode it exactly
-     * as it declines to decode a wrongly-typed image, so a wrong guess buys nothing over saying so.
+     * Null when neither can answer (nothing is memoised until a reader is held to sniff with). The
+     * host's own fallback is then responsible, and it is a deliberate one: a renderer asked for
+     * `application/octet-stream` declines to decode it exactly as it declines to decode a
+     * wrongly-typed image, so a wrong guess buys nothing over saying so.
      */
     fun contentTypeFor(absoluteUrl: String): String? {
         val path = EpubArchiveUrls.archivePathOf(absoluteUrl) ?: return null
         EpubArchiveUrls.contentTypeForPath(path)?.let { return it }
+        val memo = sniffedTypes[path]
+        // An empty string is "sniffed and found nothing" — revisiting costs a decompress for the
+        // same null, so it is served straight back rather than looked for again.
+        if (memo != null) return memo.takeIf { it.isNotEmpty() }
         for (held in readers.values) {
             val stream = held.open { reader.getInputStream(path) } ?: continue
             return try {
-                EpubMimeSniff.ofStream(stream)
+                EpubMimeSniff.ofStream(stream).also { sniffedTypes[path] = it.orEmpty() }
             } finally {
                 stream.close()
             }

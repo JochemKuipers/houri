@@ -109,7 +109,16 @@ class EpubReader(private val reader: ArchiveReader) : Closeable by reader {
 
             for (element in document.allElements) {
                 when (element.tagName()) {
-                    "img" -> element.attr("src")
+                    "img" -> element.attr("src").ifEmpty {
+                        // Jsoup normalises a top-level SVG `<image>` — whose source is named with
+                        // `xlink:href`, not `src` — to `<img>` (verified against its
+                        // `HtmlTreeBuilderState`: the "image" case rewrites the tag and copies the
+                        // attributes verbatim, unless the element sits inside `<svg>`). The plate
+                        // therefore arrives on *this* branch with no `src` at all, and reading only
+                        // `src` quietly dropped it from the page list. The sibling tag names it was
+                        // born with carry the answer, exactly as the `image` branch reads them.
+                        element.attr("xlink:href").ifEmpty { element.attr("href") }
+                    }
                     "image" -> element.attr("xlink:href").ifEmpty { element.attr("href") }
                     else -> continue
                 }.takeIf { it.isNotBlank() }?.let { result += EpubPaths.resolve(pageDir, it) }

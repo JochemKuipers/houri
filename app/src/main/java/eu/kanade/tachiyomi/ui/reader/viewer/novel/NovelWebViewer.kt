@@ -265,25 +265,34 @@ internal class NovelWebViewer(
         if (!family.startsWith(NovelBuiltinFonts.PREFIX) && !family.startsWith(NovelFonts.PREFIX)) return ""
         val name = family.substringAfter('/', "")
         if (name.isBlank()) return ""
-        // A `get` on this map is a re-ordering mutation, so only touch it for a real miss.
-        val face = readerFontCache[family] ?: NovelFonts.load(activity, family)?.also {
-            readerFontCache[family] = it
-        } ?: return ""
-        return NovelFonts.faceCss(family, face)
+        // A `get` on this map is a re-ordering mutation, so it is walked only on a real miss below.
+        readerFontCache[family]?.let { return it }
+        val face = NovelFonts.load(activity, family) ?: return ""
+        // The base64 of the whole face is exactly the work every render used to redo — once per
+        // document, and again on every live style swap — so it is built at this one miss and the
+        // rule, not the bytes, is what the cache keeps: nothing reads the face past this point,
+        // and holding it would double each entry's memory for no answer it can give.
+        return NovelFonts.faceCss(family, face).also { readerFontCache[family] = it }
     }
 
     /**
-     * The chosen font, read once per family rather than once per document.
+     * The chosen font, built once per family rather than once per document.
      *
-     * Bounded at the low end a picker session needs: a face is half a megabyte of bytes held as a
+     * Bounded at the low end a picker session needs: a rule carries a whole face spelled as a
      * `data:` URI across documents, so an unbounded cache pins every font ever displayed for the
      * life of the chapter. Four is wide enough to hold the families back and forth of a comparing
      * reader and small enough that hopping through the whole bundle allocates nothing it keeps.
+     *
+     * What is cached is the rule. Every render re-built it before — a fresh base64 string of the
+     * whole face each time, and again on every typography slider drag through `liveTypographyJs` —
+     * which is where the jank a font change reported came from. Building once and re-using one
+     * spelled rule also keeps the declaration the document's head carries and the one the live
+     * swap carries from ever drifting apart.
      */
-    private val readerFontCache: LinkedHashMap<String, NovelFonts.Face> =
-        object : LinkedHashMap<String, NovelFonts.Face>(READER_FONT_CACHE_FACES, 0.75f, true) {
+    private val readerFontCache: LinkedHashMap<String, String> =
+        object : LinkedHashMap<String, String>(READER_FONT_CACHE_FACES, 0.75f, true) {
             override fun removeEldestEntry(
-                eldest: MutableMap.MutableEntry<String, NovelFonts.Face>,
+                eldest: MutableMap.MutableEntry<String, String>,
             ): Boolean = size > READER_FONT_CACHE_FACES
         }
 
@@ -1317,13 +1326,24 @@ internal class NovelWebViewer(
          * the page list is built from. Anything that does not name one of them is refused: a
          * whole book's links span files this chapter never read, and showing a document the loader
          * has no page for would leave the viewer with nothing to display.
+         *
+         * The `#fragment` is a destination too, and a link to `ch3.xhtml#fn-12` is asking for the
+         * footnote and not for the top of chapter 3. It is split off before the (fragment-stripping)
+         * path mapping, decoded the way the path is, and handed to [showDocument] as its [anchor] —
+         * the same request-bound destination a contents jump travels with, applied after layout in
+         * `onPageFinished`, and quoted by `NovelScrollBridge` before anything script-shaped sees it.
          */
         private fun openArchiveLink(url: String) {
             val pages = chapters?.currChapter?.pages
             val document = EpubArchiveUrls.archivePathOf(url)
             val page = pages?.firstOrNull { it.textPage?.url == document }
             if (page != null) {
-                showDocument(page)
+                // `showDocument` with a null anchor clears both destinations, exactly as the plain
+                // call does — so a fragment-less link behaves as it always did.
+                val fragment = url.substringAfter('#', "")
+                    .takeIf { it.isNotEmpty() }
+                    ?.let(EpubArchiveUrls::percentDecode)
+                showDocument(page, anchor = fragment)
             } else {
                 xLogE("Refusing in-book link to a document this chapter does not contain: $url")
             }

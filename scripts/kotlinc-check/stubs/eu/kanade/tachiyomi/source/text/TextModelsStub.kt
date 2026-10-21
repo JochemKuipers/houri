@@ -38,6 +38,19 @@ interface EpubArchiveSource {
     fun releaseAllResourceReaders()
 }
 
+data class TextCapabilities(
+    val TOC: Boolean = false,
+    val SEARCH: Boolean = false,
+    val ANNOTATIONS: Boolean = false,
+    val IMAGES: Boolean = false,
+    val VERTICAL_WRITING: Boolean = false,
+    val RUBY: Boolean = false,
+) {
+    companion object {
+        val EPUB = TextCapabilities(TOC = true, IMAGES = true)
+    }
+}
+
 data class TextPage(
     val index: Int,
     val url: String = "",

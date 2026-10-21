@@ -19,6 +19,8 @@ import eu.kanade.tachiyomi.source.text.TextCapabilities
 import eu.kanade.tachiyomi.source.text.TextIncrementalSource
 import eu.kanade.tachiyomi.source.text.TextPage
 import eu.kanade.tachiyomi.source.text.TextResourceSource
+import eu.kanade.tachiyomi.source.text.TextSearchHit
+import eu.kanade.tachiyomi.source.text.TextSearchSource
 import eu.kanade.tachiyomi.source.text.TextSource
 import eu.kanade.tachiyomi.source.text.TextTocSource
 import eu.kanade.tachiyomi.source.text.TocEntry
@@ -73,6 +75,7 @@ class LocalSource(
     UnmeteredSource,
     TextSource,
     TextTocSource,
+    TextSearchSource,
     TextIncrementalSource,
     TextResourceSource,
     TextBaseUrlSource,
@@ -91,7 +94,11 @@ class LocalSource(
      */
     private val books: LocalEpubTextAdapter by lazy { LocalEpubTextAdapter(context, fileSystem) }
 
-    override val textCapabilities: TextCapabilities = TextCapabilities.EPUB
+    override val textCapabilities: TextCapabilities =
+        // SEARCH rides on this source implementing `TextSearchSource` (see `searchInChapter`);
+        // left out of the shared constant so extensions that adopt `EPUB` unchanged answer only
+        // for what *they* actually stand behind.
+        TextCapabilities.EPUB.copy(SEARCH = true)
 
     // ---------------------------------------------------------------- the book half
     //
@@ -103,6 +110,18 @@ class LocalSource(
     override suspend fun getTextPageList(chapter: SChapter): List<TextPage> = books.textPages(chapter)
 
     override suspend fun getTableOfContents(chapter: SChapter): List<TocEntry> = books.tableOfContents(chapter)
+
+    /**
+     * Finds [query] across the chapter's documents.
+     *
+     * Declared here like the rest of this section, because the host casts *this* object to
+     * `TextSearchSource` to decide whether the reader offers find-in-book at all. It was never
+     * implemented before: `EpubTextSource` has answered since the interface gained it, the reader's
+     * find-in-book sheet has asked for it, and the local source was the one object in the chain
+     * that could not say yes — so the button simply never appeared for an EPUB on disk.
+     */
+    override suspend fun searchInChapter(chapter: SChapter, query: String): List<TextSearchHit> =
+        books.searchInChapter(chapter, query)
 
     // Documents are read one at a time, so opening a novel is bounded by the document being opened
     // rather than by the length of the book. Declared here for the same reason as the rest of this

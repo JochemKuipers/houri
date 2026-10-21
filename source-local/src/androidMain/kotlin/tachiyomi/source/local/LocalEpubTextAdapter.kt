@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.text.TextCapabilities
 import eu.kanade.tachiyomi.source.text.TextPage
+import eu.kanade.tachiyomi.source.text.TextSearchHit
 import eu.kanade.tachiyomi.source.text.TocEntry
 import logcat.LogPriority
 import mihon.core.archive.EpubArchiveUrls
@@ -19,6 +20,7 @@ import tachiyomi.core.common.util.system.logcat
 import tachiyomi.source.local.io.Archive
 import tachiyomi.source.local.io.LocalSourceFileSystem
 import java.io.InputStream
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Serves the `.epub` chapters of the **manga** library as books.
@@ -66,7 +68,7 @@ internal class LocalEpubTextAdapter(
     }
 
     /** What a book reader can rely on. */
-    val textCapabilities: TextCapabilities = TextCapabilities.EPUB
+    val textCapabilities: TextCapabilities = TextCapabilities.EPUB.copy(SEARCH = true)
 
     /**
      * The `.epub` file a chapter URL names, opened for reading.
@@ -107,6 +109,39 @@ internal class LocalEpubTextAdapter(
     suspend fun tableOfContents(chapter: SChapter): List<TocEntry> = text.getTableOfContents(chapter)
 
     /**
+     * Finds [query] across the chapter's documents.
+     *
+     * The stripped plain text is built **once per chapter** — [EpubTextSource.plainTextFor] opens,
+     * inflates and strips every spine document — and then typed searches run over the cached copy
+     * ([plainTextIndexes]): the index depends only on the file, so a keystroke re-deriving it burns
+     * the same whole-book pass the previous keystroke just completed. Built through the same lease
+     * every other reader of the book uses, which is why [releaseResourceReader] can invalidate an
+     * entry honestly: at that point the archive the index was read from is retired, and whatever
+     * the file has become by the next search gets re-read from the top.
+     */
+    suspend fun searchInChapter(chapter: SChapter, query: String): List<TextSearchHit> {
+        // A concurrent miss computes twice and one result is discarded: correctness is unchanged,
+        // and a debounce plus one sheet per chapter makes the double build rare rather than the
+        // steady state.
+        val index = plainTextIndexes[chapter.url]?.takeIf { it.isNotEmpty() }
+            // Never stored empty: a book whose lease cannot open this once must still see the file
+            // that arrives later, not a cached nothing served from now until release.
+            ?: text.plainTextFor(chapter).also { built ->
+                if (built.isNotEmpty()) plainTextIndexes[chapter.url] = built
+            }
+        return text.searchInChapter(chapter, query, index)
+    }
+
+    /**
+     * Stripped plain-text indexes for the chapters liked enough to have been searched, keyed by
+     * chapter url. Chapter urls name files, so an entry retires with its archive — in
+     * [releaseResourceReader] — and the map holds at most one entry per chapter this source has
+     * open; it is the plain text of the book, not of the markup, which is the smaller half of
+     * `EpubTextSource.searchInChapter`'s warning about memory.
+     */
+    private val plainTextIndexes = ConcurrentHashMap<String, List<EpubTextSource.IndexedText>>()
+
+    /**
      * The URL each document must be loaded at.
      *
      * `TextPage.baseHref` is an in-archive path, which is meaningless to a layout engine on its own.
@@ -121,10 +156,18 @@ internal class LocalEpubTextAdapter(
     fun contentTypeFor(absoluteUrl: String): String? = resources.contentTypeFor(absoluteUrl)
 
     /** Retires the archive for [chapterUrl]. See `EpubResourceServer.release`. */
-    fun releaseResourceReader(chapterUrl: String) = resources.release(chapterUrl)
+    fun releaseResourceReader(chapterUrl: String) {
+        // The stripped-text index was read out of that archive, so it retires with it: a replaced
+        // or refreshed file is re-read on the next search rather than served from a stale copy.
+        plainTextIndexes.remove(chapterUrl)
+        resources.release(chapterUrl)
+    }
 
     /** Retires every archive. */
-    fun releaseAllResourceReaders() = resources.releaseAll()
+    fun releaseAllResourceReaders() {
+        plainTextIndexes.clear()
+        resources.releaseAll()
+    }
 
     /**
      * Whether this manga's chapters should be read as a book.

@@ -22,6 +22,12 @@ files moved. See .github/scripts/release_notes.py.
 ### Improve
 - **WebGPU reader**: Smoother continuous (webtoon-style) scrolling — the background layer drawn under every page used to hand the GPU a fresh buffer and binding on every frame; both are now drawn from a small reusable ring, cutting per-frame GPU allocation churn for as long as the reader is open.
 
+- **Book reader**: Find-in-book searches no longer re-read and re-strip the whole chapter with every keystroke — the plain text is built once per book while it is open, so typing in the search sheet stays quick on large novels. (Find-in-book is also now offered for local EPUB chapters at all — the button previously never appeared for them.)
+
+- **Book reader**: The chosen font's data is base64-encoded once per family instead of on every page render and every typography adjustment, removing the hitch a font change used to cause mid-book.
+
+- **Local manga (EPUB)**: EPUB-as-comic chapters now collect plates declared as SVG `<image>` elements (by `xlink:href`), not only `<img src>` ones.
+
 ### Fix
 - **Library**: Using "Search library" on a manga no longer breaks the back stack — Back from the filtered Library now lands you on the manga you came from, first closing the search filter as usual, instead of dropping the manga screen entirely.
 
@@ -32,6 +38,10 @@ files moved. See .github/scripts/release_notes.py.
 - **Local manga (EPUB)**: A chapter no longer gets stuck blank when the book references an image that is not actually in the archive — the loader skips (and logs) those references instead of creating a page the reader can never open.
 
 - **Book reader**: Producer-noise hardening for EPUB books — a stray byte-order mark at the start of a text chapter is stripped instead of rendered, and a case variation of the internal `book.internal` URL no longer silently drops a book's images and stylesheets.
+
+- **Book reader**: Links *inside* a book now land on their destination — a footnote link to `chapter.xhtml#note-7` scrolls to that note instead of opening the chapter at the top.
+
+- **Local manga (EPUB)**: Resources whose file names contain a `+` (some producers' `cover+v2.jpg`) no longer 404 when the book tries to show them.
 
 - **WebGPU reader**: Fixed a thin dark line that could appear at page boundaries in continuous (webtoon-style) reading while a neighbouring page was still decoding.
 
