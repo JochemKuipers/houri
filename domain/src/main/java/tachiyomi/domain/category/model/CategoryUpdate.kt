@@ -8,5 +8,6 @@ data class CategoryUpdate(
     // KMK -->
     val hidden: Boolean? = null,
     val parentId: Long? = null,
+    val type: Int? = null,
     // KMK <--
 )

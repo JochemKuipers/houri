@@ -105,9 +105,10 @@ class CategoryScreenModel(
     }
 
     // KMK -->
-    fun createSubcategory(name: String, parentId: Long) {
+    // KMK --> type: subcategory role (Author / Artist / ...), null when unclassified (issue #57).
+    fun createSubcategory(name: String, parentId: Long, type: Int? = null) {
         screenModelScope.launch {
-            when (val r = createCategoryWithName.await(name, parentId)) {
+            when (val r = createCategoryWithName.await(name, parentId, type)) {
                 is CreateCategoryWithName.Result.InternalError -> _events.send(CategoryEvent.InternalError)
                 is CreateCategoryWithName.Result.Success -> noteCreated(r.category.id)
             }

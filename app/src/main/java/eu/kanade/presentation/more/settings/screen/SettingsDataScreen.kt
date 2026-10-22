@@ -1,5 +1,6 @@
 package eu.kanade.presentation.more.settings.screen
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -686,6 +687,15 @@ object SettingsDataScreen : SearchableSettings {
                     try {
                         context.startActivity(googleDriveSync.getSignInIntent())
                     } catch (e: IOException) {
+                        context.toast(
+                            context.stringResource(SYMR.strings.google_drive_login_failed, e.message.orEmpty()),
+                            Toast.LENGTH_LONG,
+                        )
+                    } catch (e: ActivityNotFoundException) {
+                        // no browser on the device: startActivity throws before the
+                        // OAuth code even runs, and an uncaught ActivityNotFoundException
+                        // crashes here. Same handling as the asset failure, through the same
+                        // login-failed message (SY #1372).
                         context.toast(
                             context.stringResource(SYMR.strings.google_drive_login_failed, e.message.orEmpty()),
                             Toast.LENGTH_LONG,

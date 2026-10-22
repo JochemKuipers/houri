@@ -15,6 +15,7 @@ object CategoryMapper {
         dateModified: Long,
         trackStatus: Long?,
         updateInterval: Long?,
+        type: Long?,
         // KMK <--
     ): Category {
         return Category(
@@ -29,6 +30,7 @@ object CategoryMapper {
             dateModified = dateModified,
             trackStatus = trackStatus?.toInt(),
             updateInterval = updateInterval?.toInt(),
+            type = type?.toInt(),
             // KMK <--
         )
     }

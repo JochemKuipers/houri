@@ -370,6 +370,15 @@ class GoogleDriveService(
                 this@GoogleDriveService.logcat(LogPriority.ERROR, throwable = e) {
                     "Refresh token is invalid, prompt user to sign in again"
                 }
+                // KMK --> A revoked or expired refresh token stays invalid forever: without this
+                // cleanup every future sync attempt fails with the same error while the settings
+                // screen still shows Drive as signed in. Clearing both tokens and dropping the
+                // service routes the next attempt into the regular "not signed in" path, which
+                // tells the user to sign in again - exactly what the log line promises.
+                syncPreferences.googleDriveAccessToken().set("")
+                syncPreferences.googleDriveRefreshToken().set("")
+                driveService = null
+                // KMK <--
                 throw e.message?.let { Exception(it, e) } ?: Exception("Unknown error", e)
             } else {
                 // Token refresh failed; handle this situation

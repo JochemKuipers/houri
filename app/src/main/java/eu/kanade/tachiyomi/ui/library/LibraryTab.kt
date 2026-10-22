@@ -451,8 +451,8 @@ data object LibraryTab : Tab {
             is LibraryScreenModel.Dialog.CreateSubcategory -> {
                 CreateSubcategoryDialog(
                     onDismissRequest = onDismissRequest,
-                    onCreate = { name ->
-                        screenModel.createSubcategoryFromSelection(name)
+                    onCreate = { name, type ->
+                        screenModel.createSubcategoryFromSelection(name, type)
                     },
                     artist = dialog.artist,
                     author = dialog.author,

@@ -20,6 +20,10 @@ data class Category(
     // Days between library updates. null inherits the global interval, which is the behaviour
     // every category has until it is given its own.
     val updateInterval: Int? = null,
+
+    // KMK --> Role of a subcategory (author, artist, ...). null means unclassified, which is
+    // how every existing row behaves; see [CategoryType].
+    val type: Int? = null,
     // KMK <--
 ) : Serializable {
 

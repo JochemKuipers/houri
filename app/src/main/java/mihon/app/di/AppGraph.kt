@@ -142,6 +142,7 @@ import tachiyomi.domain.category.interactor.RenameCategory
 import tachiyomi.domain.category.interactor.ReorderCategory
 import tachiyomi.domain.category.interactor.ResetCategoryFlags
 import tachiyomi.domain.category.interactor.SetCategoryTrackStatus
+import tachiyomi.domain.category.interactor.SetCategoryType
 import tachiyomi.domain.category.interactor.SetCategoryUpdateInterval
 import tachiyomi.domain.category.interactor.SetDisplayMode
 import tachiyomi.domain.category.interactor.SetMangaCategories
@@ -464,6 +465,7 @@ interface AppGraph : ViewModelGraph {
     val reorderSortTag: ReorderSortTag
     val searchEngine: SearchEngine
     val setCategoryTrackStatus: SetCategoryTrackStatus
+    val setCategoryType: SetCategoryType
     val setCategoryUpdateInterval: SetCategoryUpdateInterval
     val setDisplayMode: SetDisplayMode
     val setExcludedScanlators: SetExcludedScanlators

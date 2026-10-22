@@ -23,7 +23,11 @@ CREATE TABLE categories(
     -- NULL inherits the global interval, which is how every existing category
     -- must behave after this lands. Days rather than hours because the
     -- request is phrased in days and FetchInterval already works in days.
-    update_interval INTEGER
+    update_interval INTEGER,
+    -- KMK --> Role of a subcategory (author, artist, ...). NULL is unclassified, so no
+    -- existing row changes character. Appended last to match migration 65's ALTER, which
+    -- can only add a column at the end of the physical table.
+    type INTEGER
     -- KMK <--
 );
 
@@ -39,7 +43,7 @@ BEGIN SELECT CASE
 END;
 
 getCategory:
-SELECT _id,name,sort,flags,hidden,parent_id,date_added,date_modified,track_status,update_interval
+SELECT _id,name,sort,flags,hidden,parent_id,date_added,date_modified,track_status,update_interval,type
 FROM categories
 WHERE _id = :id
 LIMIT 1;
@@ -56,7 +60,8 @@ parent_id,
 date_added,
 date_modified,
 track_status,
-update_interval
+update_interval,
+type
 -- KMK <--
 FROM categories
 ORDER BY sort;
@@ -73,7 +78,8 @@ C.parent_id,
 C.date_added,
 C.date_modified,
 C.track_status,
-C.update_interval
+C.update_interval,
+C.type
 -- KMK <--
 FROM categories C
 JOIN mangas_categories MC
@@ -92,7 +98,8 @@ parent_id,
 date_added,
 date_modified,
 track_status,
-update_interval
+update_interval,
+type
 FROM categories
 WHERE parent_id = :parentId
 ORDER BY sort;
@@ -108,7 +115,8 @@ parent_id,
 date_added,
 date_modified,
 track_status,
-update_interval
+update_interval,
+type
 FROM categories
 WHERE parent_id = 0
 ORDER BY sort;
@@ -125,8 +133,8 @@ WHERE parent_id != 0 AND parent_id NOT IN (SELECT _id FROM categories);
 -- KMK <--
 
 insert:
-INSERT INTO categories(name, sort, flags, manga_order, hidden, parent_id, date_added, date_modified)
-VALUES (:name, :order, :flags, "", :hidden, :parentId, strftime('%s', 'now'), strftime('%s', 'now'));
+INSERT INTO categories(name, sort, flags, manga_order, hidden, parent_id, type, date_added, date_modified)
+VALUES (:name, :order, :flags, "", :hidden, :parentId, :type, strftime('%s', 'now'), strftime('%s', 'now'));
 
 delete:
 DELETE FROM categories
@@ -140,6 +148,10 @@ SET name = coalesce(:name, name),
     -- KMK -->
     hidden = coalesce(:hidden, hidden),
     parent_id = coalesce(:parentId, parent_id),
+    -- Same partial-update rule as the other columns: coalesce assigns a role but cannot
+    -- clear one (NULL means "leave alone"), which is what the standalone updateType
+    -- statement is for.
+    type = coalesce(:type, type),
     -- Only a rename counts: reordering and flag toggles go through this same
     -- statement and would otherwise dominate a "date modified" sort.
     date_modified = CASE
@@ -169,6 +181,13 @@ WHERE _id = :categoryId;
 updateUpdateInterval:
 UPDATE categories
 SET update_interval = :updateInterval
+WHERE _id = :categoryId;
+
+-- KMK --> Same reasoning as updateTrackStatus: only an unconditional assignment can express
+-- clearing a role back to unclassified; the coalesce idiom would treat NULL as "leave alone".
+updateType:
+UPDATE categories
+SET type = :type
 WHERE _id = :categoryId;
 -- KMK <--
 

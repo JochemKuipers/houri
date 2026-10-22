@@ -1,6 +1,8 @@
 package eu.kanade.presentation.category.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -8,8 +10,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
@@ -26,15 +36,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.core.preference.asToggleableState
+import eu.kanade.presentation.category.CategoryTypeBadge
+import eu.kanade.presentation.category.sortedByHierarchy
 import eu.kanade.presentation.category.visualName
+import eu.kanade.tachiyomi.ui.category.CategoryManagerSort
+import eu.kanade.tachiyomi.ui.category.categorySortOrderOf
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.delay
 import tachiyomi.core.common.preference.CheckboxState
 import tachiyomi.domain.category.model.Category
+import tachiyomi.domain.category.model.CategorySortOrder
+import tachiyomi.domain.category.model.CategoryType
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.material.padding
@@ -155,7 +172,9 @@ private enum class SubcategoryNameSource {
 @Composable
 fun CreateSubcategoryDialog(
     onDismissRequest: () -> Unit,
-    onCreate: (String) -> Unit,
+    // KMK --> Second arg is the chosen [CategoryType] ordinal, or null for "unclassified".
+    onCreate: (String, Int?) -> Unit,
+    // KMK <--
     artist: String?,
     author: String?,
 ) {
@@ -166,6 +185,10 @@ fun CreateSubcategoryDialog(
     }
     var source by remember { mutableStateOf(initial.first) }
     var name by remember { mutableStateOf(initial.second) }
+    // KMK --> Role of this subcategory: Author / Artist / Illustrator / Designer / None.
+    // Defaults to None, because a manual or auto-filled name gives no evidence of a role.
+    var type by remember { mutableStateOf<Int?>(null) }
+    // KMK <--
 
     val hasDetection = !artist.isNullOrBlank() || !author.isNullOrBlank()
 
@@ -175,7 +198,7 @@ fun CreateSubcategoryDialog(
             TextButton(
                 enabled = name.isNotBlank(),
                 onClick = {
-                    onCreate(name)
+                    onCreate(name, type)
                     onDismissRequest()
                 },
             ) {
@@ -234,10 +257,47 @@ fun CreateSubcategoryDialog(
                         onSelect = { source = SubcategoryNameSource.MANUAL },
                     )
                 }
+                // KMK --> Role picker, so two same-named subcategories can be told apart
+                // later in the lists (issue #57).
+                SubcategoryTypePicker(type = type, onType = { type = it })
+                // KMK <--
             }
         },
     )
 }
+
+// KMK -->
+/**
+ * Role choice for a new subcategory: unclassified (default), Author, Artist, Illustrator
+ * or Designer. Author and Artist reuse shared MR strings - the same words everywhere;
+ * Illustrator and Designer have no upstream equivalent and are KMR.
+ */
+@Composable
+internal fun SubcategoryTypePicker(
+    type: Int?,
+    onType: (Int?) -> Unit,
+) {
+    Text(
+        text = stringResource(KMR.strings.subcategory_type),
+        style = MaterialTheme.typography.labelLarge,
+        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+    )
+    listOf(
+        null to KMR.strings.subcategory_type_none,
+        CategoryType.AUTHOR.ordinal to MR.strings.author,
+        CategoryType.ARTIST.ordinal to MR.strings.artist,
+        CategoryType.ILLUSTRATOR.ordinal to KMR.strings.subcategory_type_illustrator,
+        CategoryType.DESIGNER.ordinal to KMR.strings.subcategory_type_designer,
+    ).forEach { (ordinal, res) ->
+        SubcategorySourceRow(
+            label = stringResource(res),
+            selected = type == ordinal,
+            enabled = true,
+            onSelect = { onType(ordinal) },
+        )
+    }
+}
+// KMK <--
 
 @Composable
 private fun SubcategorySourceRow(
@@ -265,16 +325,26 @@ private fun SubcategorySourceRow(
 
 @Composable
 fun CategoryCreateDialog(
+    // KMK --> type-aware subcategory creation passes [onCreateWithSubcategoryType] instead.
     onDismissRequest: () -> Unit,
-    onCreate: (String) -> Unit,
+    onCreate: (String) -> Unit = {},
     categories: ImmutableList<String>,
     // SY -->
     title: String = stringResource(MR.strings.action_add_category),
     extraMessage: String? = null,
     alreadyExistsError: StringResource = MR.strings.error_category_exists,
     // SY <--
+    // KMK --> When true, the dialog also picks a subcategory role (Author / Artist /
+    // Illustrator / Designer / None) and hands it to the branch below instead of [onCreate].
+    subcategoryType: Boolean = false,
+    onCreateWithSubcategoryType: ((String, Int?) -> Unit)? = null,
+    // KMK <--
 ) {
     var name by remember { mutableStateOf("") }
+    // KMK --> Role of the created subcategory; defaults to unclassified whenever the picker
+    // is active, matching the "no evidence, no role" behaviour of the dedicated dialog.
+    var subcategoryTypeValue by remember { mutableStateOf<Int?>(null) }
+    // KMK <--
 
     val focusRequester = remember { FocusRequester() }
     val nameAlreadyExists = remember(name) { categories.contains(name) }
@@ -285,7 +355,14 @@ fun CategoryCreateDialog(
             TextButton(
                 enabled = name.isNotEmpty() && !nameAlreadyExists,
                 onClick = {
-                    onCreate(name)
+                    // KMK --> Role-carrying branch when the caller asked for a picker.
+                    val createWithType = onCreateWithSubcategoryType
+                    if (subcategoryType && createWithType != null) {
+                        createWithType(name, subcategoryTypeValue)
+                    } else {
+                        onCreate(name)
+                    }
+                    // KMK <--
                     onDismissRequest()
                 },
             ) {
@@ -329,6 +406,12 @@ fun CategoryCreateDialog(
                     isError = name.isNotEmpty() && nameAlreadyExists,
                     singleLine = true,
                 )
+                // KMK --> Role choice only for subcategory creation; a top-level category keeps
+                // the plain form.
+                if (subcategoryType && onCreateWithSubcategoryType != null) {
+                    SubcategoryTypePicker(type = subcategoryTypeValue, onType = { subcategoryTypeValue = it })
+                }
+                // KMK <--
                 // SY -->
             }
             // SY <--
@@ -474,6 +557,29 @@ fun ChangeCategoryDialog(
         return
     }
     var selection by remember { mutableStateOf(initialSelection) }
+    // KMK --> The Search / sort / collapse trio from the Edit Categories screen, requested for
+    // this dialog in issue #57. The state is dialog-scoped on purpose: it closes over the
+    // snapshot the dialog was opened with, and the category set can change under it through
+    // other screens, so persisting it would only describe a stale list.
+    var searchQuery by remember { mutableStateOf("") }
+    var sortMode by remember { mutableStateOf(CategoryManagerSort.MANUAL) }
+    var collapsedIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+
+    val rows = remember(selection, sortMode, searchQuery, collapsedIds) {
+        buildSetCategoryRows(
+            selection = selection,
+            sortOrder = categorySortOrderOf(sortMode),
+            query = searchQuery.trim(),
+            collapsedIds = collapsedIds,
+        )
+    }
+    // Whether any parent carries subcategories at all - without hierarchy the collapse
+    // pair has nothing to act on and the controls only add noise.
+    val hasHierarchy = remember(selection) {
+        val ids = selection.mapTo(mutableSetOf()) { it.value.id }
+        selection.any { it.value.parentId != 0L && it.value.parentId in ids }
+    }
+    // KMK <--
     AlertDialog(
         onDismissRequest = onDismissRequest,
         confirmButton = {
@@ -516,22 +622,48 @@ fun ChangeCategoryDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
             ) {
                 // KMK -->
-                // Stable display order: each root category followed by its subcategories
-                val displayOrder = remember(initialSelection) {
-                    val roots = initialSelection.filter { it.value.parentId == 0L }.map { it.value.id }
-                    val subsByParent = initialSelection
-                        .filter { it.value.parentId != 0L }
-                        .associate { it.value.id to it.value.parentId }
-                    val ordered = mutableListOf<Long>()
-                    roots.forEach { rootId ->
-                        ordered.add(rootId)
-                        subsByParent.filterValues { it == rootId }.keys.forEach(ordered::add)
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text(stringResource(KMR.strings.category_manager_search)) },
+                    leadingIcon = { Icon(imageVector = Icons.Outlined.Search, contentDescription = null) },
+                    singleLine = true,
+                )
+                // KMK --> The dropdown owns the full width and the collapse pair sits on its own
+                // end-aligned line, mirroring the Edit Categories layout: sharing one row would
+                // squeeze a translated label to nothing on a 360dp phone.
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    CategorySortModeDropdown(
+                        sortMode = sortMode,
+                        onSortMode = { sortMode = it },
+                        modes = SET_CATEGORY_SORT_MODES,
+                        sortTitle = KMR.strings.set_categories_sort,
+                    )
+                    if (hasHierarchy) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            TextButton(onClick = { collapsedIds = emptySet() }) {
+                                Text(stringResource(KMR.strings.category_manager_expand_all))
+                            }
+                            TextButton(onClick = {
+                                val ids = selection.mapTo(mutableSetOf()) { it.value.id }
+                                collapsedIds = selection
+                                    .map { it.value }
+                                    .filter { it.parentId != 0L && it.parentId in ids }
+                                    .mapTo(mutableSetOf()) { it.parentId }
+                            }) {
+                                Text(stringResource(KMR.strings.category_manager_collapse_all))
+                            }
+                        }
                     }
-                    subsByParent.keys.forEach { subId -> if (subId !in ordered) ordered.add(subId) }
-                    ordered
                 }
                 // KMK <--
-                displayOrder.mapNotNull { id -> selection.find { it.value.id == id } }.forEach { checkbox ->
+                rows.forEach { row ->
+                    val checkbox = row.state
                     val onChange: (CheckboxState<Category>) -> Unit = {
                         val index = selection.indexOf(it)
                         if (index != -1) {
@@ -543,8 +675,10 @@ fun ChangeCategoryDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            // KMK -->
-                            .padding(start = if (checkbox.value.parentId != 0L) MaterialTheme.padding.medium else 0.dp)
+                            // KMK --> indent stays on subcategories only
+                            .padding(
+                                start = if (checkbox.value.parentId != 0L) MaterialTheme.padding.medium else 0.dp,
+                            )
                             // KMK <--
                             .clickable { onChange(checkbox) },
                         verticalAlignment = Alignment.CenterVertically,
@@ -566,14 +700,185 @@ fun ChangeCategoryDialog(
 
                         Text(
                             text = checkbox.value.visualName,
-                            modifier = Modifier.padding(horizontal = MaterialTheme.padding.medium),
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = MaterialTheme.padding.medium),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
+                        // KMK --> Role badge on subcategories, so two same-named rows
+                        // (author vs. artist) are tellable apart while assigning.
+                        if (checkbox.value.parentId != 0L) {
+                            CategoryTypeBadge(type = checkbox.value.type)
+                        }
+                        // KMK <--
+                        // KMK --> Collapse/expand a parent's subcategories without leaving the dialog.
+                        if (row.isTopLevel && row.subCount > 0) {
+                            IconButton(onClick = {
+                                collapsedIds = if (row.collapsed) {
+                                    collapsedIds - checkbox.value.id
+                                } else {
+                                    collapsedIds + checkbox.value.id
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = if (row.collapsed) Icons.Outlined.ExpandMore else Icons.Outlined.ExpandLess,
+                                    contentDescription = stringResource(
+                                        if (row.collapsed) KMR.strings.category_set_expand else KMR.strings.category_set_collapse,
+                                    ),
+                                )
+                            }
+                        }
+                        // KMK <--
                     }
                 }
             }
         },
     )
 }
+
+// KMK -->
+/** Modes the Set Categories dialog can offer: all of [CategoryManagerSort] except the two
+ * count-based ones, because a bare selection list has no counts to rank the rows by. */
+private val SET_CATEGORY_SORT_MODES = listOf(
+    CategoryManagerSort.MANUAL,
+    CategoryManagerSort.AZ,
+    CategoryManagerSort.ZA,
+    CategoryManagerSort.DATE_ADDED_NEWEST,
+    CategoryManagerSort.DATE_ADDED_OLDEST,
+    CategoryManagerSort.DATE_MODIFIED_NEWEST,
+    CategoryManagerSort.DATE_MODIFIED_OLDEST,
+)
+
+// KMK --> The full set, for callers that also have per-category counts (Edit Categories).
+internal val ALL_CATEGORY_SORT_MODES = listOf(
+    CategoryManagerSort.MANUAL,
+    CategoryManagerSort.AZ,
+    CategoryManagerSort.ZA,
+    CategoryManagerSort.MOST_ITEMS,
+    CategoryManagerSort.LEAST_ITEMS,
+    CategoryManagerSort.DATE_ADDED_NEWEST,
+    CategoryManagerSort.DATE_ADDED_OLDEST,
+    CategoryManagerSort.DATE_MODIFIED_NEWEST,
+    CategoryManagerSort.DATE_MODIFIED_OLDEST,
+)
+// KMK <--
+
+/** One rendered row of the Set Categories dialog: either a top-level category (optionally
+ * carrying its subcategories) or a subcategory row. */
+internal data class SetCategoryRow(
+    val state: CheckboxState<Category>,
+    val isTopLevel: Boolean,
+    val subCount: Int = 0,
+    val collapsed: Boolean = false,
+)
+
+/**
+ * Flattens [selection] into dialog rows: every root followed by its subcategories, both
+ * ordered by [sortOrder] (via [sortedByHierarchy]). A collapsed root hides its subs until
+ * expanded (or until a search is active, which ignores the collapse state like Edit
+ * Categories does). Subcategories whose root disappeared from the selection are appended
+ * at the end so they stay reachable.
+ */
+internal fun buildSetCategoryRows(
+    selection: List<CheckboxState<Category>>,
+    sortOrder: CategorySortOrder,
+    query: String,
+    collapsedIds: Set<Long>,
+): List<SetCategoryRow> {
+    if (selection.isEmpty()) return emptyList()
+    val ordered = selection.map { it.value }.sortedByHierarchy(sortOrder)
+    val byId = selection.associateBy { it.value.id }
+    val ids = ordered.mapTo(mutableSetOf()) { it.id }
+    val subsByParent = mutableMapOf<Long, MutableList<Category>>()
+    val orphans = mutableListOf<Category>()
+    ordered.filter { it.parentId != 0L }.forEach { sub ->
+        if (sub.parentId in ids) {
+            subsByParent.getOrPut(sub.parentId) { mutableListOf() }.add(sub)
+        } else {
+            orphans.add(sub)
+        }
+    }
+    return buildList {
+        ordered.filter { it.parentId == 0L }.forEach { parent ->
+            val subs = subsByParent[parent.id].orEmpty()
+            if (query.isEmpty()) {
+                val collapsed = parent.id in collapsedIds && subs.isNotEmpty()
+                add(SetCategoryRow(byId.getValue(parent.id), isTopLevel = true, subCount = subs.size, collapsed = collapsed))
+                if (!collapsed) {
+                    subs.forEach { add(SetCategoryRow(byId.getValue(it.id), isTopLevel = false)) }
+                }
+            } else {
+                // A root name match keeps the whole subtree visible for context; otherwise
+                // only the subcategories that matched, under their parent header.
+                val parentMatches = parent.name.contains(query, ignoreCase = true)
+                val matching = subs.filter { it.name.contains(query, ignoreCase = true) }
+                if (parentMatches || matching.isNotEmpty()) {
+                    add(SetCategoryRow(byId.getValue(parent.id), isTopLevel = true, subCount = subs.size))
+                    (if (parentMatches) subs else matching).forEach {
+                        add(SetCategoryRow(byId.getValue(it.id), isTopLevel = false))
+                    }
+                }
+            }
+        }
+        orphans.forEach { sub ->
+            if (query.isEmpty() || sub.name.contains(query, ignoreCase = true)) {
+                add(SetCategoryRow(byId.getValue(sub.id), isTopLevel = false))
+            }
+        }
+    }
+}
+// KMK <--
+
+/**
+ * The sort dropdown shared by the Edit Categories screen and the Set Categories dialog.
+ * [modes] selects the entries it offers; the count-based modes are only meaningful where
+ * per-category counts exist.
+ */
+@Composable
+internal fun CategorySortModeDropdown(
+    sortMode: Int,
+    onSortMode: (Int) -> Unit,
+    modes: List<Int>,
+    // KMK --> The manager sorts subcategories (and theirs); the Set Categories dialog sorts
+    // whole categories, so the prompt wording is the caller's choice.
+    sortTitle: StringResource = KMR.strings.category_manager_sort,
+    modifier: Modifier = Modifier,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    val labels = remember {
+        mapOf(
+            CategoryManagerSort.MANUAL to KMR.strings.category_manager_sort_manual,
+            CategoryManagerSort.AZ to KMR.strings.category_manager_sort_az,
+            CategoryManagerSort.ZA to KMR.strings.category_manager_sort_za,
+            CategoryManagerSort.MOST_ITEMS to KMR.strings.category_manager_sort_most,
+            CategoryManagerSort.LEAST_ITEMS to KMR.strings.category_manager_sort_least,
+            CategoryManagerSort.DATE_ADDED_NEWEST to KMR.strings.category_manager_sort_date_added_newest,
+            CategoryManagerSort.DATE_ADDED_OLDEST to KMR.strings.category_manager_sort_date_added_oldest,
+            CategoryManagerSort.DATE_MODIFIED_NEWEST to KMR.strings.category_manager_sort_date_modified_newest,
+            CategoryManagerSort.DATE_MODIFIED_OLDEST to KMR.strings.category_manager_sort_date_modified_oldest,
+        )
+    }
+    Box(modifier = modifier) {
+        TextButton(onClick = { menuOpen = true }) {
+            Text("${stringResource(sortTitle)}: ${stringResource(labels[sortMode] ?: KMR.strings.category_manager_sort_manual)}")
+        }
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+            modes.forEach { mode ->
+                labels[mode]?.let { labelRes ->
+                    DropdownMenuItem(
+                        text = { Text(stringResource(labelRes)) },
+                        onClick = {
+                            menuOpen = false
+                            onSortMode(mode)
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+// KMK <--
 
 /**
  * Returns [id] together with every ancestor category id up to the root, so marking a

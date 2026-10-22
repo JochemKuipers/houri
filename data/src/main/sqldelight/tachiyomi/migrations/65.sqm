@@ -1,0 +1,18 @@
+-- KMK -->
+-- Migration 65: give subcategories a role (issue #57).
+--
+-- Two subcategories can share a name while meaning different roles - "Jane Doe" as the
+-- author of one series and the artist of another - so Edit Categories needs to label each
+-- subcategory Author / Artist / Illustrator / Designer. The Set Categories dialog shows the
+-- same label so the user can tell the duplicates apart while assigning.
+--
+-- The role is stored as a raw Int on the row, mirroring track_status: the enum lives in the
+-- domain model (CategoryType), which must not depend on string resources. NULL means
+-- "unclassified" - every existing row keeps behaving exactly as before, and top-level
+-- categories stay unclassified because roles only make sense one nesting level down.
+--
+-- Added last to match categories.sq's CREATE TABLE, which appends the column at the same
+-- physical position for fresh installs.
+
+ALTER TABLE categories ADD COLUMN type INTEGER;
+-- KMK <--

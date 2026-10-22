@@ -1,7 +1,6 @@
 package eu.kanade.presentation.category
 
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
@@ -15,11 +14,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Checklist
-import androidx.compose.material.icons.outlined.ExpandLess
-import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,8 +31,10 @@ import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import eu.kanade.presentation.category.components.ALL_CATEGORY_SORT_MODES
 import eu.kanade.presentation.category.components.CategoryFloatingActionButton
 import eu.kanade.presentation.category.components.CategoryListItem
+import eu.kanade.presentation.category.components.CategorySortModeDropdown
 import eu.kanade.presentation.category.components.ReaderModePickerDialog
 import eu.kanade.presentation.category.components.TrackStatusPickerDialog
 import eu.kanade.presentation.category.components.UpdateIntervalPickerDialog
@@ -464,34 +461,8 @@ private fun CategoryContent(
 // KMK -->
 @Composable
 private fun SortModeDropdown(sortMode: Int, onSortMode: (Int) -> Unit, modifier: Modifier = Modifier) {
-    var menuOpen by remember { mutableStateOf(false) }
-    val labels = mapOf(
-        CategoryManagerSort.MANUAL to stringResource(KMR.strings.category_manager_sort_manual),
-        CategoryManagerSort.AZ to stringResource(KMR.strings.category_manager_sort_az),
-        CategoryManagerSort.ZA to stringResource(KMR.strings.category_manager_sort_za),
-        CategoryManagerSort.MOST_ITEMS to stringResource(KMR.strings.category_manager_sort_most),
-        CategoryManagerSort.LEAST_ITEMS to stringResource(KMR.strings.category_manager_sort_least),
-        CategoryManagerSort.DATE_ADDED_NEWEST to stringResource(KMR.strings.category_manager_sort_date_added_newest),
-        CategoryManagerSort.DATE_ADDED_OLDEST to stringResource(KMR.strings.category_manager_sort_date_added_oldest),
-        CategoryManagerSort.DATE_MODIFIED_NEWEST to stringResource(KMR.strings.category_manager_sort_date_modified_newest),
-        CategoryManagerSort.DATE_MODIFIED_OLDEST to stringResource(KMR.strings.category_manager_sort_date_modified_oldest),
-    )
-    Box(modifier = modifier) {
-        TextButton(onClick = { menuOpen = true }) {
-            Text("${stringResource(KMR.strings.category_manager_sort)}: ${labels[sortMode]}")
-        }
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            labels.forEach { (mode, label) ->
-                DropdownMenuItem(
-                    text = { Text(label) },
-                    onClick = {
-                        menuOpen = false
-                        onSortMode(mode)
-                    },
-                )
-            }
-        }
-    }
+    // Delegates to the dialog-shared dropdown so both screens' labels can't drift apart.
+    CategorySortModeDropdown(sortMode = sortMode, onSortMode = onSortMode, modes = ALL_CATEGORY_SORT_MODES, modifier = modifier)
 }
 // KMK <--
 

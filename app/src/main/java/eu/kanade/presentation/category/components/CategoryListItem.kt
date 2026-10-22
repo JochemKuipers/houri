@@ -42,6 +42,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.text.BidiFormatter
+import eu.kanade.presentation.category.CategoryTypeBadge
 import sh.calvin.reorderable.ReorderableCollectionItemScope
 import tachiyomi.domain.category.model.Category
 import tachiyomi.i18n.MR
@@ -146,6 +147,13 @@ fun ReorderableCollectionItemScope.CategoryListItem(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                // KMK --> Role tag on subcategories (issue #57): the same "Jane Doe" can be the
+                // author of one series and the artist of another, so two identically named rows
+                // under one root need their roles readable at a glance.
+                if (category.parentId != 0L) {
+                    CategoryTypeBadge(type = category.type)
+                }
+                // KMK <--
 
                 if (useOverflow) {
                     CategoryActionsOverflow(

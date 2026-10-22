@@ -24,7 +24,7 @@ class CreateCategoryWithName(
             return sort.type.flag or sort.direction.flag
         }
 
-    suspend fun await(name: String, parentId: Long = 0L): Result = withNonCancellableContext {
+    suspend fun await(name: String, parentId: Long = 0L, type: Int? = null): Result = withNonCancellableContext {
         val trimmed = name.trim()
         if (trimmed.isEmpty()) return@withNonCancellableContext Result.InternalError(IllegalArgumentException("Category name blank"))
         if (trimmed.length > 50) return@withNonCancellableContext Result.InternalError(IllegalArgumentException("Category name too long"))
@@ -45,6 +45,7 @@ class CreateCategoryWithName(
             // KMK -->
             hidden = false,
             parentId = parentId,
+            type = type,
             // KMK <--
         )
 

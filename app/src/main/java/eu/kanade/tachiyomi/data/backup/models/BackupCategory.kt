@@ -16,6 +16,7 @@ class BackupCategory(
     @ProtoNumber(901) var parentId: Long = 0L,
     @ProtoNumber(902) var trackStatus: Int? = null,
     @ProtoNumber(903) var updateInterval: Int? = null,
+    @ProtoNumber(904) var type: Int? = null,
     // KMK <--
     // SY specific values
     /*@ProtoNumber(600) var mangaOrder: List<Long> = emptyList(),*/
@@ -30,6 +31,7 @@ class BackupCategory(
         parentId = this@BackupCategory.parentId,
         trackStatus = this@BackupCategory.trackStatus,
         updateInterval = this@BackupCategory.updateInterval,
+        type = this@BackupCategory.type,
         // KMK <--
         /*mangaOrder = this@BackupCategory.mangaOrder*/
     )
@@ -46,6 +48,7 @@ val backupCategoryMapper = { category: Category ->
         parentId = category.parentId,
         trackStatus = category.trackStatus,
         updateInterval = category.updateInterval,
+        type = category.type,
         // KMK <--
     )
 }

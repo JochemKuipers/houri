@@ -46,5 +46,9 @@ interface CategoryRepository {
     // Same reason as updateTrackStatus: NULL clears the interval so the category goes back to
     // inheriting the global one, which a coalesce-style update could not express.
     suspend fun updateUpdateInterval(categoryId: Long, updateInterval: Int?)
+
+    // Same coalesce reasoning as the two above: a partial update could assign a role but never
+    // clear one back to unclassified. null here means "no role".
+    suspend fun updateType(categoryId: Long, type: Int?)
     // KMK <--
 }

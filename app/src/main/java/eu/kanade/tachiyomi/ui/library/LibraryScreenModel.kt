@@ -1896,13 +1896,13 @@ class LibraryScreenModel(
             .distinct()
             .singleOrNull()
 
-    fun createSubcategoryFromSelection(name: String) {
+    fun createSubcategoryFromSelection(name: String, type: Int? = null) {
         val parent = state.value.activeCategory ?: return
         val manga = state.value.selectedManga
         if (parent.id <= 0L || manga.isEmpty()) return
         clearSelection()
         screenModelScope.launchIO {
-            when (val result = createCategoryWithName.await(name, parent.id)) {
+            when (val result = createCategoryWithName.await(name, parent.id, type)) {
                 is CreateCategoryWithName.Result.Success -> {
                     setMangaCategories(manga, addCategories = listOf(result.category.id), removeCategories = emptyList())
                 }

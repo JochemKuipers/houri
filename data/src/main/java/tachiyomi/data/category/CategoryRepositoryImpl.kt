@@ -52,6 +52,7 @@ class CategoryRepositoryImpl(
                 // KMK -->
                 hidden = if (category.hidden) 1L else 0L,
                 parentId = category.parentId,
+                type = category.type?.toLong(),
                 // KMK <--
             )
             categoriesQueries.selectLastInsertedRowId()
@@ -81,6 +82,7 @@ class CategoryRepositoryImpl(
             // KMK -->
             hidden = update.hidden?.let { if (it) 1L else 0L },
             parentId = update.parentId,
+            type = update.type?.toLong(),
             // KMK <--
             categoryId = update.id,
         )
@@ -136,6 +138,15 @@ class CategoryRepositoryImpl(
         handler.await {
             categoriesQueries.updateUpdateInterval(
                 updateInterval = updateInterval?.toLong(),
+                categoryId = categoryId,
+            )
+        }
+    }
+
+    override suspend fun updateType(categoryId: Long, type: Int?) {
+        handler.await {
+            categoriesQueries.updateType(
+                type = type?.toLong(),
                 categoryId = categoryId,
             )
         }

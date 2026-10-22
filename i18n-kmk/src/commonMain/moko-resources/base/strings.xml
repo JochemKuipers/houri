@@ -139,6 +139,12 @@
     <string name="create_subcategory_from_artist">Artist: %1$s</string>
     <string name="create_subcategory_from_author">Author: %1$s</string>
     <string name="create_subcategory_from_manual">Manual name</string>
+    <string name="subcategory_type">Subcategory type</string>
+    <string name="subcategory_type_none">None</string>
+    <string name="subcategory_type_illustrator">Illustrator</string>
+    <string name="subcategory_type_designer">Designer</string>
+    <string name="category_set_expand">Expand</string>
+    <string name="category_set_collapse">Collapse</string>
     <string name="action_crop_use_original">Use original</string>
     <string name="crop_ratio_portrait">Portrait</string>
     <string name="crop_ratio_square">Square</string>
@@ -588,6 +594,7 @@
     <string name="pref_webgpu_eink_preset_summary">Grayscale pages, boosted contrast and calm transitions for e-ink screens.</string>
     <string name="category_manager_search">Search categories and subcategories…</string>
     <string name="category_manager_sort">Sort subcategories</string>
+    <string name="set_categories_sort">Sort categories</string>
     <string name="category_manager_sort_manual">Manual</string>
     <string name="category_manager_sort_az">A → Z</string>
     <string name="category_manager_sort_za">Z → A</string>

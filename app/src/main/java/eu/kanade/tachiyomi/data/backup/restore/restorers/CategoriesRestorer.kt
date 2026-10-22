@@ -69,6 +69,7 @@ class CategoriesRestorer(
                             it.flags,
                             hidden = if (it.hidden) 1L else 0L,
                             parentId = 0L,
+                            type = it.type?.toLong(),
                         )
                         categoriesQueries.selectLastInsertedRowId()
                     }
@@ -88,6 +89,8 @@ class CategoriesRestorer(
                             categoriesQueries.updateUpdateInterval(updateInterval.toLong(), newId)
                         }
                     }
+                    // KMK --> Type is not in this family: the insert itself accepts it, so a
+                    // restored subcategory keeps its role without a follow-up statement.
                     // KMK <--
                     if (it.id != 0L) restoredIdsByBackupId[it.id] = newId
                     if (it.parentId != 0L) pendingParents[newId] = it.parentId
@@ -109,6 +112,9 @@ class CategoriesRestorer(
                         flags = null,
                         hidden = null,
                         parentId = parentId,
+                        // KMK --> the update statement's partial-update column
+                        type = null,
+                        // KMK <--
                         categoryId = categoryId,
                     )
                 }

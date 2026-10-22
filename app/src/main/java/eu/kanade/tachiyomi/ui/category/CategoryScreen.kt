@@ -102,7 +102,13 @@ class CategoryScreen : Screen() {
             is CategoryDialog.CreateSubcategory -> {
                 CategoryCreateDialog(
                     onDismissRequest = screenModel::dismissDialog,
-                    onCreate = { name -> screenModel.createSubcategory(name, dialog.parent.id) },
+                    // KMK --> A subcategory can carry a role (issue #57); the root create above
+                    // stays name-only, so it keeps using onCreate untouched.
+                    subcategoryType = true,
+                    onCreateWithSubcategoryType = { name, type ->
+                        screenModel.createSubcategory(name, dialog.parent.id, type)
+                    },
+                    // KMK <--
                     categories = successState.categories.filter { it.parentId == dialog.parent.id }.fastMap { it.name }.toImmutableList(),
                     title = "Create subcategory in ${dialog.parent.name}",
                     extraMessage = "Subcategory will be inside \"${dialog.parent.name}\" and follows all library filter rules. \"All\" shows content from all subcategories.",
