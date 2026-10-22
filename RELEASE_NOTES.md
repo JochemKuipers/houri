@@ -23,6 +23,15 @@ files moved. See .github/scripts/release_notes.py.
 - **Anime-Planet**: rewired against the site's current pages — refreshing now reads your status,
   chapter progress and score back from your Anime-Planet list (true two-way sync), and freshly
   bound entries pick up the manga's total chapter count.
+- **WebGPU reader**: loads pages faster — each page's header is sniffed once instead of twice,
+  an oversized JXL page is refused before the upscale pass runs instead of after it, and a
+  decode adopting its image no longer releases the page it replaced while holding the
+  bookkeeping lock (less hitching while many pages resolve).
+- **WebGPU reader**: more decode-path speedups — page bytes reach the native decoder with a
+  single copy (byte-array ingest) and in 64 KB stream reads instead of 8 KB, its JNI bindings
+  are resolved once per process instead of per page, EXIF rotation is a straight-line pass
+  instead of a per-pixel formula dispatch, and two per-page lookups (WebGPU availability, page
+  identity keys) are cached.
 
 ### Fix
 - **Google Drive**: a revoked/expired refresh token no longer fails every sync attempt

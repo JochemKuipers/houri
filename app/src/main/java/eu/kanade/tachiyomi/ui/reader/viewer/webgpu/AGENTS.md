@@ -189,6 +189,10 @@ here too. Six hand-copied subsets used to exist and had already drifted — that
 Cleanup order matters: the spread and comparison pages are released *before* the image page,
 because their cleanup compares their contents against the current one.
 
+The three "throw the working set away" paths (`rebuildPageCache`, `destroy`,
+`resetDecodedPagesAfterDeviceLoss`) go through `releaseAllShellsAndClearResidency` in
+`WebGpuPageCache.kt` — see its landmine before adding any clearing of your own.
+
 ## SPLIT RECONCILIATION
 
 A page too tall for the decoder is replaced by segments mid-session, **after** the viewer
@@ -583,6 +587,7 @@ above — a type mismatch that a compiler will not catch.
 | `Re-driving ... last=no-stream` forever, same page, **no "Giving up on" ever** | Both halves of the `no-stream` ladder were inert: the retry was filtered out by the loader's `status == Queue` guard, and the re-query reset `attempts` so escalation never terminated. Fixed in both — see *Page loading*. Before that fix, this was the signature of a long-strip segment whose cache file the LRU had evicted. |
 | A long strip renders with a chunk missing, or scrambled, but no error anywhere | `TallPageSplitter.split` reported success with fewer segments than bounds — now impossible; if you see it, check `segmentNumberOf` and the contiguity guard. |
 | Scrolling down skips several pages at once, or `getPage(0)` names a page the reader is no longer on | A placeholder resolved *smaller* than its slot. `clampScrollWithinPage` in `captureRenderState` is the only thing that keeps them on the page. |
+| Content below the reading point shifts as pages decode (continuous mode) | Not a transform bug — the continuous walk never reads `page.scale/x/y`. The only thing that changes when a page resolves is its **slot height**: a placeholder reserves one viewport height, the real page re-measures it (growth keeps the reading point inside the slot, shrink overshoot is clamped). If it is *not* the placeholder swap (the content jumps with no decode nearby), look at the library's walk — not at `applyZoomPolicy`, which short-circuits for continuous; see the zoom-stack landmine. |
 | Page index and the index in the segment cache key disagree | They are separate identifiers; `splitOversizedPage` now orders by the key and refuses a non-contiguous run. |
 | Page spins on the placeholder forever, no log line at all | Should now log `Re-driving ... loading-stalled`. If it still does not, the page is not LOADING — check `wantedByRender` and whether `imagePage` is really a `ProgressPage`. |
 | `Re-driving ... last=threw` | The decode threw; read the exception above it in the log for the real reason. |
@@ -717,6 +722,48 @@ line, for instance, does not appear anywhere in the current tree.
   still allocate per call on purpose (their per-frame count is unbounded; transitions and
   placeholder pages use them, and those paths are transient). The submodule-side rules live in
   `external/webgpuviewer-houri/library/src/main/java/ca/mpreg/webgpuviewer/renderer/AGENTS.md`.
+- **The zoom/fit stack is paged-mode work; continuous mode must not run it.** `applyZoomPolicy`
+  short-circuits on `isContinuous` (WebGpuZoom.kt), and before that guard every decode paid the
+  wide-zoom/fit-mode policies' `pager.state` reads, a dozen transform writes and up to four
+  bounds walks on the worker's single thread — for properties the continuous reader never reads
+  back. That is the load-bearing fact, verified in the library: the walk sizes every slot from
+  the page's own dimensions (`ImageViewerContinuousState.getPageHeight` reads only
+  `page.width`/`height` and its crop) and places content with its own math, so
+  `page.scale`/`x`/`y` are inert there; and `ImageViewerState.getPage` → `attach()` supplies
+  `parent`/`scope`/`onInvalidate` for every page it hands out, so `isOnScreen` and the
+  drawn-page eviction immunity work without the app touching them either. **Rule: when
+  continuous-mode content appears misplaced, look at slot heights (the placeholder/real swap
+  family), never at page transforms — there is nothing there to fix, and applying a transform
+  there is a decode-thread cost with no reader.**
+- **One header parse per page.** `PageBytesValidator.inspect` is the only signature/dimension
+  reader in the decode path. The JXL oversize gate keys on its verdict
+  (`verdict.format == ImageFormat.JXL`), not on a second `ImageUtil.findImageType` pass over the
+  same bytes, and it runs *before* the upscale hook, so a page refused for its JXL size never
+  pays native inference first. Wave ordering note: a `JXL too large ...` throw now surfaces
+  between the `validate` and `upscale-check` stages — the stage any trace last names for it is
+  `validate`.
+- **The working set has one release body, and `cleanup()` still waits for the lock to end.**
+  `rebuildPageCache`, `destroy` and `resetDecodedPagesAfterDeviceLoss` share
+  `releaseAllShellsAndClearResidency` (WebGpuPageCache.kt): the snapshot-and-release walk plus
+  the map clears they used to hand-copy. A new piece of bookkeeping that names shells has to be
+  cleared *there* — that is the drift this closes (`requeryRecords` and the stuck-sweep re-arm
+  stay at the device-loss site on purpose; the other two do not want them). For the same
+  lock-free reason as [releasePageResources], the adoption swap in `decodeReaderPage` releases
+  the replaced page *after* its `synchronized` block, not inside it — folding it back in is the
+  frame-jank shape this was made lock-free to avoid.
+- **`ViewerPage.key` is computed once, at shell construction.** `ViewerTransitionPage` and
+  `ViewerReaderPage` build their `PageKey` in their own constructors and `pageKey(page)` just
+  reads `page.key` — sound while `Page.index` stays `val`, `ReaderChapter` stays a data class
+  whose identity is its `chapter` value, and renumbering happens by building fresh shells (as
+  split reconciliation does). If `ReaderChapter` grows a mutable field the key reads, or pages
+  are renumbered in place against existing shells, every memoized key lies — and eviction, the
+  stuck ladder, decode traces and `PageListWatch` all key on it.
+- **`WebGpuExtensions.active()` is a cached snapshot — state changes must clear `activeCache`.**
+  The double-checked `@Volatile` snapshot replaced a per-decode-call walk that re-counted the
+  installed extensions every time; `install`, `uninstall` and `setEnabled` are the three
+  invalidators. A new site that flips an extension's enabled state (a migration reinstall, a
+  settings import) must invalidate too, or the reader acts on a stale set for the life of the
+  process.
 - **Do not grow `WebGpuViewer.kt` past wiring.** A new state machine belongs in its own file
   as a `WebGpuViewer` extension.
 

@@ -133,6 +133,39 @@ internal fun WebGpuViewer.syncPageList(chapters: ViewerChapters): Boolean {
 }
 
 /**
+ * Releases what every cached shell holds and clears the residency bookkeeping that names them -
+ * the one shared body of [WebGpuViewer.rebuildPageCache], `resetDecodedPagesAfterDeviceLoss` and
+ * [WebGpuViewer.destroy]. All three walk [pageCache] dropping each shell, and all three must clear
+ * the same bookkeeping afterwards: a map any one of them forgets is a stale key that re-enters the
+ * working set later. The device-loss variant additionally clears `requeryRecords` (its re-query
+ * budget starts over against the new device) and re-arms the stuck sweep; those stay at its own
+ * site because the other two do not want them.
+ *
+ * Caller holds [lock]. Releasing a reader page also drops `wantedByRender`
+ * ([releasePageResources]) - the point of the device-loss variant is exactly that the render walk
+ * may ask for the shells again afterwards; harmless in the other two, whose cache is going away.
+ */
+internal fun WebGpuViewer.releaseAllShellsAndClearResidency() {
+    // Snapshot to avoid ConcurrentModification if cleanup triggers callbacks
+    val snapshot = pageCache.values.toList()
+    snapshot.forEach { page ->
+        // A transition page owns only its own placeholder; a reader page owns the spread,
+        // the rescale and the translation pair as well, so it goes through the one owner.
+        if (page is ViewerReaderPage) {
+            releasePageResources(page)
+        } else {
+            page.state = PageState.IDLE
+            runCatching { page.imagePage.cleanup() }
+        }
+    }
+    pageCache.clear()
+    stuckRecords.clear()
+    loadingSince.clear()
+    loneIndices.clear()
+    continuousPageWindow.reset(null)
+}
+
+/**
  * Everything a [ViewerReaderPage] owns, released in one place.
  *
  * A shell holds more than its [ImagePage]: a spread composed from it, the source bytes a

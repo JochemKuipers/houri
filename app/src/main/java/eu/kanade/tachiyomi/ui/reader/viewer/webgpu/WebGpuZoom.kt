@@ -136,6 +136,16 @@ internal fun resolveCutoutHomeY(
  * here rather than repeated at each of those call sites.
  */
 internal fun WebGpuViewer.applyZoomPolicy(page: ImagePage.ImageSingle) {
+    // Continuous mode lays every page out itself: the walk sizes each slot from the page's own
+    // dimensions (ImageViewerContinuousState.getPageHeight reads only page.width/height and its
+    // crop) and places content with its own math - it never reads page.scale/x/y. The library
+    // also attaches parent, scope and onInvalidate for every page it fetches (ImageViewerState
+    // getPage -> attach), so isOnScreen works without them too. Nothing the two policies below
+    // write is read back there, and they run per decode on the worker's single thread, which is
+    // the thread every other page queues behind - so the stack is paged-mode work, full stop.
+    // The guard mirrors applyDoubleTapZoomPolicy's own one; leave that here even though it
+    // returns for continuous too, so this stack's shape does not depend on that detail.
+    if (isContinuous) return
     if (!isDualPageMode()) {
         if (!applyWideZoomIfNeeded(page)) {
             applyFitModeAnchor(page)

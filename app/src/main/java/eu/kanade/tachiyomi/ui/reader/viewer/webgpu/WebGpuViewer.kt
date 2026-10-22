@@ -574,7 +574,6 @@ open class WebGpuViewer(
         startStuckPageSweep()
         // KMK --> Drives the live spin of the ProgressPage pineapple while a page is loading.
         startProgressSpinner()
-        // KMK -->
         // KMK --> Reports a decode stage that never finishes. Separate from the worker on purpose:
         // the worker is what gets stuck, so it cannot be the thing that notices.
         startDecodeStallWatchdog()
@@ -698,23 +697,7 @@ open class WebGpuViewer(
         synchronized(lock) {
             if (isDestroyed) return
             decodeQueue.clear()
-            // Snapshot to avoid ConcurrentModification if cleanup triggers callbacks
-            val snapshot = pageCache.values.toList()
-            snapshot.forEach { page ->
-                // A transition page owns only its own placeholder; a reader page owns the spread,
-                // the rescale and the translation pair as well, so it goes through the one owner.
-                if (page is ViewerReaderPage) {
-                    releasePageResources(page)
-                } else {
-                    page.state = PageState.IDLE
-                    runCatching { page.imagePage.cleanup() }
-                }
-            }
-            pageCache.clear()
-            stuckRecords.clear()
-            loadingSince.clear()
-            loneIndices.clear()
-            continuousPageWindow.reset(null)
+            releaseAllShellsAndClearResidency()
 
             currentPage = (currentPage as? ViewerReaderPage)?.page?.let { getPage(it) }
                 ?: (currentPage as? ViewerTransitionPage)?.let {
@@ -875,22 +858,7 @@ open class WebGpuViewer(
         chapterPreloadGuard.clear()
         synchronized(lock) {
             decodeQueue.clear()
-            val snapshot = pageCache.values.toList()
-            snapshot.forEach { page ->
-                // A transition page owns only its own placeholder; a reader page owns the spread,
-                // the rescale and the translation pair as well, so it goes through the one owner.
-                if (page is ViewerReaderPage) {
-                    releasePageResources(page)
-                } else {
-                    page.state = PageState.IDLE
-                    runCatching { page.imagePage.cleanup() }
-                }
-            }
-            pageCache.clear()
-            stuckRecords.clear()
-            loadingSince.clear()
-            loneIndices.clear()
-            continuousPageWindow.reset(null)
+            releaseAllShellsAndClearResidency()
             try {
                 lock.notifyAll()
             } catch (_: Exception) {

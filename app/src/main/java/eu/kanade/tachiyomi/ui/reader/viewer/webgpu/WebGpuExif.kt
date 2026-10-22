@@ -2,6 +2,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webgpu
 
 import java.nio.ByteBuffer
+import java.nio.IntBuffer
 
 // EXIF orientation for the WebGPU decode path.
 //
@@ -24,6 +25,12 @@ internal data class RotatedRgba(val buffer: ByteBuffer, val width: Int, val heig
  * Reorients an RGBA [src] (4 bytes/pixel) per EXIF orientation 1-8, moving 4-byte units
  * opaquely. Returns the input untouched for orientation 1/out-of-range, degenerate dims, or a
  * short buffer - never throws. 5-8 swap axes. Single pass, no intermediate allocation.
+ *
+ * Each orientation has its own loop rather than a `when` inside the pixel loops: the mapping is
+ * loop-invariant, so hoisting it drops two subtractions and two multiplies per pixel, and every
+ * loop advances source and destination with increments instead of recomputing `row * width`
+ * addresses. Pixel-for-pixel output is identical to the per-pixel `when` this replaced - each
+ * helper below is that `when`'s formula with the index algebra unfolded.
  */
 internal fun rotateRgbaForExif(src: ByteBuffer, width: Int, height: Int, orientation: Int): RotatedRgba {
     if (orientation !in 2..8 || width <= 0 || height <= 0) return RotatedRgba(src, width, height)
@@ -38,42 +45,11 @@ internal fun rotateRgbaForExif(src: ByteBuffer, width: Int, height: Int, orienta
         if (srcInts.remaining() < width * height) return RotatedRgba(src, width, height)
         val out = ByteBuffer.allocateDirect(dstWidth * dstHeight * 4)
         val outInts = out.asIntBuffer()
-        for (dy in 0 until dstHeight) {
-            for (dx in 0 until dstWidth) {
-                val sx: Int
-                val sy: Int
-                when (orientation) {
-                    2 -> {
-                        sx = width - 1 - dx
-                        sy = dy
-                    }
-                    3 -> {
-                        sx = width - 1 - dx
-                        sy = height - 1 - dy
-                    }
-                    4 -> {
-                        sx = dx
-                        sy = height - 1 - dy
-                    }
-                    5 -> {
-                        sx = dy
-                        sy = dx
-                    }
-                    6 -> {
-                        sx = dy
-                        sy = height - 1 - dx
-                    }
-                    7 -> {
-                        sx = width - 1 - dy
-                        sy = height - 1 - dx
-                    }
-                    else -> {
-                        sx = width - 1 - dy
-                        sy = dx
-                    }
-                }
-                outInts.put(dy * dstWidth + dx, srcInts.get(sy * width + sx))
-            }
+        when (orientation) {
+            2 -> copyFlippedHorizontally(srcInts, outInts, width, height)
+            3 -> copyRotated180(srcInts, outInts, width, height)
+            4 -> copyFlippedVertically(srcInts, outInts, width, height)
+            else -> rotateQuarterTurn(srcInts, outInts, orientation, width, height)
         }
         out.rewind()
         RotatedRgba(out, dstWidth, dstHeight)
@@ -82,6 +58,87 @@ internal fun rotateRgbaForExif(src: ByteBuffer, width: Int, height: Int, orienta
         RotatedRgba(src, width, height)
     } catch (_: Exception) {
         RotatedRgba(src, width, height)
+    }
+}
+
+/** Orientation 2: dst(dx, dy) = src(width-1-dx, dy). Each dst row is its src row reversed. */
+private fun copyFlippedHorizontally(srcInts: IntBuffer, dstInts: IntBuffer, width: Int, height: Int) {
+    var dy = 0
+    while (dy < height) {
+        val row = dy * width
+        var dx = 0
+        var sx = width - 1
+        while (dx < width) {
+            dstInts.put(row + dx, srcInts.get(row + sx))
+            dx++
+            sx--
+        }
+        dy++
+    }
+}
+
+/**
+ * Orientation 3: dst(dx, dy) = src(width-1-dx, height-1-dy). The src index of dst row-major
+ * index i is exactly (pixelCount - 1 - i), so the 180° case is one reverse sweep of the whole
+ * buffer - the cheapest orientation of the eight.
+ */
+private fun copyRotated180(srcInts: IntBuffer, dstInts: IntBuffer, width: Int, height: Int) {
+    val pixelCount = width * height
+    var dstIndex = 0
+    var srcIndex = pixelCount - 1
+    while (dstIndex < pixelCount) {
+        dstInts.put(dstIndex, srcInts.get(srcIndex))
+        dstIndex++
+        srcIndex--
+    }
+}
+
+/** Orientation 4: dst(dx, dy) = src(dx, height-1-dy). Rows copy forward, bottom-to-top. */
+private fun copyFlippedVertically(srcInts: IntBuffer, dstInts: IntBuffer, width: Int, height: Int) {
+    var dy = 0
+    while (dy < height) {
+        val srcRow = (height - 1 - dy) * width
+        val dstRow = dy * width
+        var dx = 0
+        while (dx < width) {
+            dstInts.put(dstRow + dx, srcInts.get(srcRow + dx))
+            dx++
+        }
+        dy++
+    }
+}
+
+/**
+ * Orientations 5-8 (axis swaps). dst(dx, dy) reads src along that source row or column while
+ * writes stride through the transposed dst column: with dx as the outer loop, the source index
+ * advances linearly (+1 or -1 per pixel) and the dst index advances by the dst row stride (the
+ * source height), so neither index is ever recomputed from multiplications.
+ *
+ * Base source indices and per-pixel steps, unfolded from the original formulas
+ * (dst(dx,dy) = src(sx, sy), dstWidth = height, dstHeight = width):
+ * | o | sx         | sy         | src index        | step |
+ * | 5 | dy         | dx         | dx*w + dy        | +1   |
+ * | 6 | dy         | height-1-dx| (h-1-dx)*w + dy  | +1   |
+ * | 7 | width-1-dy | height-1-dx| (h-1-dx)*w+w-1-dy| -1   |
+ * | 8 | width-1-dy | dx         | dx*w + w-1-dy    | -1   |
+ */
+private fun rotateQuarterTurn(srcInts: IntBuffer, dstInts: IntBuffer, orientation: Int, width: Int, height: Int) {
+    val mirrored = orientation == 7 || orientation == 8
+    val leading = !mirrored // 5/6 walk the source forward, 7/8 walk it backward
+    var dx = 0
+    while (dx < height) {
+        var srcIndex = (if (orientation == 5 || orientation == 8) dx else height - 1 - dx) * width
+        if (mirrored) srcIndex += width - 1
+        val step = if (leading) 1 else -1
+        var dstIndex = dx
+        var dy = 0
+        while (dy < width) {
+            dstInts.put(dstIndex, srcInts.get(srcIndex))
+            dstIndex += height
+            srcIndex += step
+            dy++
+        }
+        dx++
     }
 }
 // KMK <--

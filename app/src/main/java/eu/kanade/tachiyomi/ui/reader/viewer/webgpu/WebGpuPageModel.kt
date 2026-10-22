@@ -71,13 +71,27 @@ private class NeighborLink {
     }
 }
 
-fun pageKey(page: ViewerPage): PageKey = when (page) {
-    is ViewerReaderPage -> PageKey.Reader(page.page.chapter.chapter.id, page.page.index)
-    is ViewerTransitionPage -> PageKey.Transition(page.prevChapter?.chapter?.id, page.nextChapter?.chapter?.id)
-    else -> PageKey.Transition(null, null)
-}
+/**
+ * The page's stable identity, used as the map key everywhere ([pageCache], the stuck ladder,
+ * the loading deadlines, the requery records and the outcome ledger all key on it).
+ *
+ * It is computed once at shell construction (`ViewerPage.key`) rather than rebuilt per lookup:
+ * both inputs are immutable for the life of a shell - `Page.index` is a val, and a shell only
+ * ever wraps one chapter - so this is a pure accessor now. That matters because a key used to
+ * be allocated on every single lookup, and lookups sit in per-frame paths (`pageInCache` runs
+ * for every page in the render window every frame) besides the per-decode ones (`ensureDecoding`,
+ * the stuck ladder); the reused instance additionally hits the plain data-class identity
+ * fast path in equals.
+ */
+fun pageKey(page: ViewerPage): PageKey = page.key
 
 abstract class ViewerPage {
+    /**
+     * This shell's [PageKey], computed at construction. See [pageKey] for why it is not derived
+     * per call.
+     */
+    internal abstract val key: PageKey
+
     abstract val prevChapter: ReaderChapter?
     abstract val nextChapter: ReaderChapter?
     abstract val prev: ViewerPage?
@@ -97,6 +111,8 @@ class ViewerTransitionPage(
     override val prevChapter: ReaderChapter?,
     override val nextChapter: ReaderChapter?,
 ) : ViewerPage() {
+    override val key = PageKey.Transition(prevChapter?.chapter?.id, nextChapter?.chapter?.id)
+
     @Volatile
     override var imagePage: ImagePage = TransitionPage(viewer, prevChapter, nextChapter)
 
@@ -128,6 +144,12 @@ class ViewerReaderPage(
     private val viewer: WebGpuViewer,
     val page: ReaderPage,
 ) : ViewerPage() {
+    /**
+     * Computed once here rather than per lookup - the inputs (`Page.index` a val, the wrapping
+     * chapter fixed at shell construction) cannot change under an existing shell.
+     */
+    override val key = PageKey.Reader(page.chapter.chapter.id, page.index)
+
     /**
      * Cached spread ImagePage when this page is the anchor of a dual-page spread.
      *

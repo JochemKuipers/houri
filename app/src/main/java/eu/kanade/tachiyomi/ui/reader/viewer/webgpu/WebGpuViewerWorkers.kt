@@ -294,23 +294,10 @@ internal fun WebGpuViewer.resetDecodedPagesAfterDeviceLoss() {
         if (isDestroyed) return
         decodeQueue.clear()
         stuckSignal.trySend(Unit)
-        val snapshot = pageCache.values.toList()
-        snapshot.forEach { page ->
-            // Releasing wantedByRender is what lets the renderer ask for these again once the new
-            // device is drawing.
-            if (page is ViewerReaderPage) {
-                releasePageResources(page)
-            } else {
-                page.state = PageState.IDLE
-                runCatching { page.imagePage.cleanup() }
-            }
-        }
-        pageCache.clear()
-        stuckRecords.clear()
-        loadingSince.clear()
+        releaseAllShellsAndClearResidency()
+        // Device-scoped re-query history starts over against the new device - a page worth
+        // one eviction-and-refetch before the loss is worth it again afterwards.
         requeryRecords.clear()
-        loneIndices.clear()
-        continuousPageWindow.reset(null)
         val previous = currentPage
         currentPage = (previous as? ViewerReaderPage)?.page?.let { getPage(it, previous) }
             ?: (previous as? ViewerTransitionPage)?.let {

@@ -319,6 +319,17 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
             trace?.complete("rejected:${verdict.fault}")
             throw Exception("Corrupt page data: $detail")
         }
+
+        // The JXL ceiling can go where the format is already known: the validator that just ran
+        // sniffed the signature, so this is one enum comparison instead of the second full
+        // header parse ImageUtil.findImageType used to make over the same bytes. Kept ahead of
+        // the upscale hook on purpose - a page refused for its JXL size should not first pay for
+        // native inference on the worker's single thread.
+        val isJxlBytes = verdict.format == ImageFormat.JXL
+        if (isJxlBytes && decodeBytes.size > jxlLimitBytes) {
+            throw Exception("JXL too large for this device right now: ${decodeBytes.size} bytes >${jxlLimitBytes / (1024 * 1024)}MB (downsample via Tachiyomi decoder instead)")
+        }
+
         traceStage(trace, "upscale-check", "format=${verdict.format?.label} dims=${verdict.width}x${verdict.height}")
         // KMK <--
         // KMK -->
@@ -340,15 +351,6 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
         trace?.transformed = (displayBytes !== decodeBytes)
         // KMK <--
         // KMK <--
-        traceStage(trace, "jxl-sniff")
-        val isJxlBytes = try {
-            tachiyomi.core.common.util.system.ImageUtil.findImageType(decodeBytes.inputStream()) == tachiyomi.core.common.util.system.ImageUtil.ImageType.JXL
-        } catch (_: Exception) {
-            false
-        }
-        if (isJxlBytes && decodeBytes.size > jxlLimitBytes) {
-            throw Exception("JXL too large for this device right now: ${decodeBytes.size} bytes >${jxlLimitBytes / (1024 * 1024)}MB (downsample via Tachiyomi decoder instead)")
-        }
         // Translation gate: only small-enough pages are sent to LLM/cache
         val translationBytes: ByteArray? = if (decodeBytes.size in 1..32 * 1024 * 1024) decodeBytes else null
 
@@ -408,7 +410,9 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
 
         traceStage(trace, "decoderInit", "bytes=${displayBytes.size}")
         val dec = try {
-            ImageDecoder.new(displayBytes.inputStream()).also { d ->
+            // KMK --> Bytes already sit in a heap array; newBytes hands them over in one native
+            // copy instead of wrapping them in a stream and re-reading them 8 KiB at a time.
+            ImageDecoder.newBytes(displayBytes).also { d ->
                 if (d.pages <= 0) {
                     try {
                         d.close()
@@ -416,6 +420,7 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
                     throw Exception("No pages reported by decoder")
                 }
             }
+            // KMK <--
         } catch (e: ImageDecoder.UnknownFormatException) {
             throw Exception("Unsupported image format: ${e.message}", e)
         } catch (e: ImageDecoder.DecodeException) {
@@ -599,13 +604,21 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
         // per wasted split-segment decode, on a path that a split triggers by construction.
         traceStage(trace, "adopt")
         var adopted = false
+        var replaced: ImagePage? = null
         synchronized(lock) {
             if (pageInCache(page) && !page.isDecoded && !page.imagePage.destroyed) {
                 val oldImagePage = page.imagePage
                 page.imagePage = imagePage
                 noteIfLone(page)
                 page.state = PageState.IDLE
-                oldImagePage.cleanup()
+                // The old page's cleanup waits until after the lock: it is cleanup()-bearing
+                // work held under the viewer lock, which releasePageResources is deliberately
+                // lock-free to avoid. The swap above has already published the new page to
+                // everything reading page.imagePage, and any snapshot that still carries the
+                // old one outlives it by design (the render path checks destroyed for exactly
+                // this), so releasing one lock-cycle late is safe and keeps the worker from
+                // stalling every other shell's bookkeeping behind a page's own monitor.
+                replaced = oldImagePage
                 val decodedSingle = page.imagePage as? ImagePage.ImageSingle
                 if (decodedSingle != null) {
                     // KMK -->
@@ -624,6 +637,8 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
                 page.state = PageState.IDLE
             }
         }
+        // Outside the lock, for the reason above.
+        runCatching { replaced?.cleanup() }
         if (!adopted) {
             page.wantedByRender = false
             imagePage.cleanup()

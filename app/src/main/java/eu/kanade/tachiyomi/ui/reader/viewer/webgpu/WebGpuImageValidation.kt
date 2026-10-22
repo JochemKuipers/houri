@@ -141,15 +141,6 @@ private fun leU32(bytes: ByteArray, offset: Int): Long? {
 private fun magnitude32(raw: Long): Long =
     if (raw >= 0x80000000L) 0x1_0000_0000L - raw else raw
 
-/** True when [bytes] starts with [magic], as unsigned bytes. */
-private fun startsWith(bytes: ByteArray, magic: IntArray): Boolean {
-    if (bytes.size < magic.size) return false
-    for (i in magic.indices) {
-        if ((bytes[i].toInt() and 0xFF) != magic[i]) return false
-    }
-    return true
-}
-
 /** True when [bytes] starts with [ascii], compared as unsigned bytes. */
 private fun startsWithAscii(bytes: ByteArray, ascii: String, offset: Int = 0): Boolean {
     if (offset < 0 || offset + ascii.length > bytes.size) return false
@@ -231,11 +222,25 @@ internal object PageBytesValidator {
         return "[$hex] \"$ascii\""
     }
 
-    /** Recognised format plus its dimensions when they sit at a fixed offset, else null dimensions. */
+    /**
+     * Recognised format plus its dimensions when they sit at a fixed offset, else null dimensions.
+     *
+     * Byte bands are compared literally rather than via an [IntArray]-backed magic check: every
+     * probe offset here is below [SNIFF_BYTES], and `inspect` guarantees that many bytes before
+     * reaching this, so the signatures are simply read in place - the per-inspect `intArrayOf`
+     * allocations (up to five per page, on the decode thread) are gone.
+     */
     private fun sniff(bytes: ByteArray): Pair<ImageFormat, Pair<Int, Int>?>? {
         return when {
-            startsWith(bytes, intArrayOf(0xFF, 0xD8, 0xFF)) -> ImageFormat.JPEG to jpegDimensions(bytes)
-            startsWith(bytes, intArrayOf(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)) ->
+            // JPEG: FFD8FF.
+            (bytes[0].toInt() and 0xFF) == 0xFF && (bytes[1].toInt() and 0xFF) == 0xD8 &&
+                (bytes[2].toInt() and 0xFF) == 0xFF ->
+                ImageFormat.JPEG to jpegDimensions(bytes)
+            // PNG: 89504E470D0A1A0A.
+            (bytes[0].toInt() and 0xFF) == 0x89 && (bytes[1].toInt() and 0xFF) == 0x50 &&
+                (bytes[2].toInt() and 0xFF) == 0x4E && (bytes[3].toInt() and 0xFF) == 0x47 &&
+                (bytes[4].toInt() and 0xFF) == 0x0D && (bytes[5].toInt() and 0xFF) == 0x0A &&
+                (bytes[6].toInt() and 0xFF) == 0x1A && (bytes[7].toInt() and 0xFF) == 0x0A ->
                 ImageFormat.PNG to pngDimensions(bytes)
 
             startsWithAscii(bytes, "GIF87a") || startsWithAscii(bytes, "GIF89a") ->
@@ -251,9 +256,14 @@ internal object PageBytesValidator {
             startsWithAscii(bytes, "MM", 0) && beU16(bytes, 2)?.let { it == 42 } == true ->
                 ImageFormat.TIFF to null
 
-            startsWith(bytes, intArrayOf(0x00, 0x00, 0x01, 0x00)) -> ImageFormat.ICO to null
+            // ICO: 00000100 (byte 2 is 0x01, not 0x001; same read as the old intArrayOf check).
+            bytes[0].toInt() == 0 && bytes[1].toInt() == 0 && bytes[2].toInt() == 1 &&
+                bytes[3].toInt() == 0 ->
+                ImageFormat.ICO to null
             isJxlContainer(bytes) -> ImageFormat.JXL to null
-            startsWith(bytes, intArrayOf(0xFF, 0x0A)) -> ImageFormat.JXL to null
+            // JXL raw codestream: FF0A.
+            (bytes[0].toInt() and 0xFF) == 0xFF && (bytes[1].toInt() and 0xFF) == 0x0A ->
+                ImageFormat.JXL to null
             isIsoBmff(bytes) -> isoBmffFormat(bytes) to null
             else -> null
         }

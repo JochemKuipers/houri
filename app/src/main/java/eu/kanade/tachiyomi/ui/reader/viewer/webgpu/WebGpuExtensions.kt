@@ -101,6 +101,14 @@ object WebGpuExtensions {
     private val installed = CopyOnWriteArrayList<WebGpuExtension>()
     private val switchedOff = ConcurrentHashMap.newKeySet<String>()
 
+    // Guards [activeCache]: a reader's cached-list write and a mutation's invalidation write must
+    // not interleave, or a stale snapshot could clobber the invalidation and survive until the
+    // next mutation. Both writes sit under this one lock, so their order is total.
+    private val activeLock = Any()
+
+    @Volatile
+    private var activeCache: List<WebGpuExtension>? = null
+
     /**
      * Adds [extension], replacing any extension already registered under the same id.
      *
@@ -111,10 +119,17 @@ object WebGpuExtensions {
         installed.removeAll { it.id == extension.id }
         installed.add(extension)
         installed.sortBy { it.order }
+        synchronized(activeLock) { activeCache = null }
     }
 
     /** Removes the extension registered under [id]. Returns whether anything was removed. */
-    fun uninstall(id: String): Boolean = installed.removeAll { it.id == id }
+    fun uninstall(id: String): Boolean {
+        val removed = installed.removeAll { it.id == id }
+        if (removed) {
+            synchronized(activeLock) { activeCache = null }
+        }
+        return removed
+    }
 
     /**
      * Switches a registered extension off without removing it.
@@ -123,9 +138,17 @@ object WebGpuExtensions {
      * installed so it can be switched back on without re-registering it.
      */
     fun setEnabled(id: String, enabled: Boolean): Boolean {
-        if (enabled) return switchedOff.remove(id)
-        if (installed.none { it.id == id }) return false
-        return switchedOff.add(id)
+        val changed =
+            if (enabled) {
+                switchedOff.remove(id)
+            } else {
+                if (installed.none { it.id == id }) return false
+                switchedOff.add(id)
+            }
+        if (changed) {
+            synchronized(activeLock) { activeCache = null }
+        }
+        return changed
     }
 
     fun isEnabled(id: String): Boolean = installed.any { it.id == id } && id !in switchedOff
@@ -139,8 +162,23 @@ object WebGpuExtensions {
      * Callers iterate this rather than the live list. Copy-on-write makes that safe, but taking a
      * snapshot also means the order read here is the order used, rather than one that can shift
      * underneath the loop.
+     *
+     * The snapshot is cached and dropped by [install]/[uninstall]/[setEnabled], so a page no
+     * longer pays a fresh filtered copy per compartment call (transform chain + decoded callback =
+     * two list allocations per decode). A reader that has already taken the lock when a mutation
+     * lands keeps the previous snapshot for that page - the same one-consistent-view guarantee the
+     * live copy-on-write list gave, realized once per change instead of once per call. The fast
+     * path is a single volatile read; the double-checked recompute only runs on the miss.
      */
-    fun active(): List<WebGpuExtension> = installed.filter { it.id !in switchedOff }
+    fun active(): List<WebGpuExtension> {
+        activeCache?.let { return it }
+        synchronized(activeLock) {
+            activeCache?.let { return it }
+            val snapshot = installed.filter { it.id !in switchedOff }
+            activeCache = snapshot
+            return snapshot
+        }
+    }
 }
 
 /**

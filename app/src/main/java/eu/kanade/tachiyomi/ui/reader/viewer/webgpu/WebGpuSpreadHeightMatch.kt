@@ -272,7 +272,10 @@ internal suspend fun WebGpuViewer.rescaleImageToHeight(bytes: ByteArray, targetH
     var frameToClose: ImageDecoder? = null
     try {
         dec = try {
-            ImageDecoder.new(bytes.inputStream())
+            // KMK --> newBytes: one native copy of the bytes the caller already holds, no
+            // stream wrapper, no chunked read.
+            ImageDecoder.newBytes(bytes)
+            // KMK <--
         } catch (e: Exception) {
             null
         }
