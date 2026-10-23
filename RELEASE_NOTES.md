@@ -38,6 +38,10 @@ files moved. See .github/scripts/release_notes.py.
   offers Simple upscaling (with the per-manga "Upscale Manga" toggle), but its settings category
   was accidentally hidden along with the AI-translation ones, so global upscaling could never be
   turned on.
+- **On-device LLM (mtl)**: an `external/llamatik` submodule checked out past the pinned
+  commit no longer breaks the `:llamatik-native` build with a bare "Cannot find source file /
+  No SOURCES given to target: llama_jni" — CMake now detects the missing JNI sources and
+  reports the one-command fix instead; the submodule pin itself was restored.
 - **Google Drive**: a revoked/expired refresh token no longer fails every sync attempt
   forever — the app signs itself out cleanly so you can sign in again; and on devices
   without a browser, tapping Sign-in toasts a friendly error instead of crashing.

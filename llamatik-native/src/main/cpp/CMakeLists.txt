@@ -37,6 +37,18 @@ if(NOT EXISTS "${LLAMA_CPP_DIR}/CMakeLists.txt")
         "  git submodule update --init --recursive external/llamatik")
 endif()
 
+# The fork's "Llamatik 2.0" restructure moved these from library/ to core/; the
+# superproject pins the pre-restructure commit, so a checkout that drifted onto
+# the fork's main branch loses the JNI sources and add_library() below dies with
+# a bare "Cannot find source file / No SOURCES given to target" instead.
+if(NOT EXISTS "${LLAMATIK_CPP_DIR}/llama_jni.cpp")
+    message(FATAL_ERROR
+        "llamatik JNI sources not found at ${LLAMATIK_CPP_DIR}.\n"
+        "external/llamatik is checked out past the commit this repo pins; the Llamatik\n"
+        "2.0 restructure moved library/src/commonMain/cpp to core/. Restore the pin:\n"
+        "  git submodule update --force external/llamatik")
+endif()
+
 # ---- Windows / WSL interop ---------------------------------------------------
 # This module is pure CMake driven by AGP's own NDK toolchain, so a CPU-only build needs
 # no interop at all: cmake.exe + the Windows NDK work natively, and so do WSL cmake + the
