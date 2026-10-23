@@ -127,9 +127,15 @@ fun ScreenTransition(
         val composition = remember { Any() }
         val slot = slots.acquire(screen, composition)
         DisposableEffect(composition) {
-            onDispose { slots.release(composition) }
+            onDispose { slots.release(screen, composition) }
         }
-        val saveableKey = "screen-transition-${screen.key}@${System.identityHashCode(slot)}"
+        // The slot reaches the key as its INDEX, never as its object identity: a rotation rebuilds
+        // the composition from scratch, so an identity hash would rename every key under which
+        // anything was saved, and the recreated activity would restore nothing. The tab navigator
+        // nested inside HomeScreen is saved under this key - an unstable suffix here is what sent
+        // the app back to the library tab whenever the device was rotated on another tab, or
+        // rotated in the reader on the way out of a chapter opened from Updates.
+        val saveableKey = "screen-transition-${screen.key}@$slot"
         navigator.saveableState(saveableKey, screen) {
             androidx.compose.foundation.layout.Box(
                 modifier = Modifier
@@ -161,29 +167,44 @@ fun ScreenTransition(
  * than a duplicate registration, which [androidx.compose.runtime.saveable.SaveableStateHolder]
  * rejects outright.
  *
- * Entries are weak: a screen that leaves the stack is dropped along with its slot, which is also
+ * The slot is an index counted per screen, and it is the index - never the slot object's
+ * identity - that goes into the key. An identity hash renames the key on every activity
+ * recreation: a rotation discards this whole object along with the composition, so a fresh
+ * slot would take a fresh hash, [androidx.compose.runtime.saveable.SaveableStateProvider]
+ * would be handed a key it has no saved state for, and everything under the old one would be
+ * dropped. That state includes the tab navigator nested inside HomeScreen - its saved back
+ * stack is what remembers the selected tab - so an unstable suffix is what landed the app
+ * back on the library tab when the device was rotated on another tab, or rotated in the
+ * reader before leaving a chapter opened from Updates. An index does not rename: after a
+ * recreation exactly one composition of a screen exists, so it takes slot 0 - the same slot,
+ * and so the same key, the previous lifetime saved under - while a second simultaneous copy
+ * still takes 1 and still cannot collide with it.
+ *
+ * Entries are weak: a screen that leaves the stack is dropped along with its slots, which is also
  * when Voyager drops the saved state itself (`Navigator.dispose` clears every key under
  * `screen.key`), so nothing is kept alive for a screen nobody can return to.
  */
 private class ScreenSaveableSlots {
-    private val slotOfScreen = WeakHashMap<Screen, Any>()
+    /** Slots currently held by live compositions of each screen; a released slot is free again. */
+    private val slotsOfScreen = WeakHashMap<Screen, MutableSet<Int>>()
 
     /** Slot each live composition holds, keyed by that composition's own token. */
-    private val slotOfComposition = mutableMapOf<Any, Any>()
+    private val slotOfComposition = mutableMapOf<Any, Int>()
 
-    fun acquire(screen: Screen, composition: Any): Any {
+    fun acquire(screen: Screen, composition: Any): Int {
         // Already asked on an earlier recomposition of this same composition: the key it registered
         // under must not change under it, or the holder would drop everything saved so far.
         slotOfComposition[composition]?.let { return it }
-        val known = slotOfScreen[screen]
-        val held = known != null && slotOfComposition.any { it.value === known }
-        val slot = if (held) Any() else (known ?: Any())
+        val held = slotsOfScreen.getOrPut(screen) { mutableSetOf() }
+        var slot = 0
+        while (slot in held) slot++
+        held += slot
         slotOfComposition[composition] = slot
-        slotOfScreen[screen] = slot
         return slot
     }
 
-    fun release(composition: Any) {
-        slotOfComposition.remove(composition)
+    fun release(screen: Screen, composition: Any) {
+        val slot = slotOfComposition.remove(composition) ?: return
+        slotsOfScreen[screen]?.remove(slot)
     }
 }

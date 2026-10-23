@@ -34,6 +34,9 @@ files moved. See .github/scripts/release_notes.py.
   identity keys) are cached.
 
 ### Fix
+- **Rotation**: rotating the device (or rotating in the reader and then leaving a chapter) no
+  longer drops you back on the Library tab — the tab you were on, along with the scroll
+  position and other saved state of every screen, now survives the orientation change.
 - **Upscaling (no-MTL build)**: the Upscaler category is back in Settings — the no-MTL build
   offers Simple upscaling (with the per-manga "Upscale Manga" toggle), but its settings category
   was accidentally hidden along with the AI-translation ones, so global upscaling could never be
