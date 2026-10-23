@@ -77,6 +77,22 @@ class MigrateMangaUseCase(
                 // SY <--
             ).getOrThrow()
 
+            // KMK -->
+            // Pass the current entry's edited series details through to the migrated one.
+            // Those edits (title/author/artist/description/genre/status overrides) live in
+            // `custom_manga_info`, keyed by manga id, and the migrated entry has a different
+            // id - so its row starts empty and everything the user cleaned or corrected fell
+            // back to raw source metadata. The row is copied, not moved, like notes and
+            // categories; `updateMangaFromRemote` has just refreshed the target's source-side
+            // fields, and the edit resolves over them. Unconditional rather than behind a
+            // MigrationFlag: this is user-entered data that must not silently vanish, not a
+            // setting. Resolved through `globalAppGraph` like `appEventBus` so the legacy
+            // Injekt factory still shares Metro's single CustomMangaRepositoryImpl.
+            globalAppGraph.getCustomMangaInfo.get(current.id)?.let { editedInfo ->
+                globalAppGraph.setCustomMangaInfo.set(editedInfo.copy(id = target.id))
+            }
+            // KMK <--
+
             // Update chapters read, bookmark and dateFetch
             if (MigrationFlag.CHAPTER in flags) {
                 val prevMangaChapters = getChaptersByMangaId.await(current.id)

@@ -51,3 +51,7 @@ files moved. See .github/scripts/release_notes.py.
 - **EPUB books**: a book's description no longer prints raw HTML — the `<p>` tags and `&#8212;`-style
   entities that producers author into it now show as readable prose with proper paragraph breaks
   in the manga details screen.
+- **Migration**: edited series details now follow the entry when it is migrated or copied to another
+  source — a manually cleaned title, corrected author/artist, description, tags or status used to
+  stay behind on the old entry (edits are stored against the entry's ID), so the migrated one came
+  back with raw source metadata.
