@@ -66,7 +66,11 @@ matter**. Stopping at `< startDepth` is one tag too far: the element's own end t
 are simple literals by spec (Dublin Core title/creator/publisher/date/…, TOC labels) it drops child
 markup to a separating space, strips tag-shaped sequences that arrived hand-escaped as text, and
 collapses whitespace to one line. `dc:description` is authored HTML and keeps `textContent()`, which
-re-serialises it losslessly.
+re-serialises it losslessly. Turning that markup into displayable prose is
+`EpubMarkup.descriptionTextOf` — tags and HTML entities decoded, paragraph breaks kept as blank
+lines — applied by the field's only consumer (`fillMetadata` in `source-local`), because the manga
+screen renders the description as markdown rather than HTML. The parser's lossless contract stays
+intact; the presentation decision lives where the field is filled.
 
 It was written that way, and the damage was silent and structural rather than visible:
 

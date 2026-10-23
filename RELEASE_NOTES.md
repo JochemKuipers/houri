@@ -40,3 +40,6 @@ files moved. See .github/scripts/release_notes.py.
 - **Anime-Planet**: rating writes now hit the site's real `rate` endpoint and use its half-star
   (0.5–5.0) scale — scores previously never persisted.
 - **Anime-Planet**: starting a re-read no longer marks the entry "Won't Read" on the site.
+- **EPUB books**: a book's description no longer prints raw HTML — the `<p>` tags and `&#8212;`-style
+  entities that producers author into it now show as readable prose with proper paragraph breaks
+  in the manga details screen.

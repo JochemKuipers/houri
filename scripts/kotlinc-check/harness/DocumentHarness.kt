@@ -13,6 +13,7 @@ import mihon.core.archive.EpubDoctype
 import mihon.core.archive.EpubMimeSniff
 import mihon.core.archive.MAX_SEARCH_HITS
 import tachiyomi.source.local.io.LocalBookFolder
+import mihon.core.archive.descriptionTextOf
 import mihon.core.archive.indexesOf
 import mihon.core.archive.plainTextOf
 import mihon.core.archive.stripImages
@@ -540,6 +541,21 @@ fun main() {
     absent("style contents are not prose", plainTextOf("<style>body{color:red}</style><p>a</p>"), "color:red")
     absent("head contents are not prose", plainTextOf("<head><title>t</title></head><p>a</p>"), "<title>")
     check("whitespace collapsed", plainTextOf("<p>a</p>\n\n<p>b</p>"), " a b ")
+
+    // A dc:description is authored HTML stored as markdown-rendered text, so tags and entities
+    // that reach the manga screen print literally. These are the shapes the screenshots showed.
+    check("paragraph tags become a paragraph break", descriptionTextOf("<p>a</p><p>b</p>"), "a\n\nb")
+    check("an unclosed paragraph also breaks", descriptionTextOf("<p>a<p>b"), "a\n\nb")
+    check("br becomes a line break", descriptionTextOf("line one<br/>line two"), "line one\nline two")
+    check("numeric entity decodes", descriptionTextOf("<p>south&#8212;and</p>"), "south\u2014and")
+    check("hex entity decodes", descriptionTextOf("<p>a&#x2014;b</p>"), "a\u2014b")
+    check("named entity decodes", descriptionTextOf("<p>one &amp; two</p>"), "one & two")
+    check("unknown named entity passes through", descriptionTextOf("<p>&weird; ok</p>"), "&weird; ok")
+    check("inline tags leave their words", descriptionTextOf("<p>the <b>hero</b> returns</p>"), "the hero returns")
+    // A stray `<` in prose (a comparison, a bit of math) is not a tag and must not eat the line.
+    check("stray < in prose survives", descriptionTextOf("<p>5 < 10 and all</p>"), "5 < 10 and all")
+    absent("script contents are not a description", descriptionTextOf("<p>a</p><script>evil()</script>"), "evil")
+    check("no markup is left behind", descriptionTextOf("<div><p>x</p></div>"), "x")
 
     // Images are removed, not broken: a broken image still occupies a line and leaves a gap.
     absent("img removed", stripImages("""<p>a<img src="x.png"/>b</p>"""), "img")

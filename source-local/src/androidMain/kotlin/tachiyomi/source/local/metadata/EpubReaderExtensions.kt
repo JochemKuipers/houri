@@ -3,6 +3,7 @@ package tachiyomi.source.local.metadata
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import mihon.core.archive.EpubReader
+import mihon.core.archive.descriptionTextOf
 import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -35,7 +36,15 @@ fun EpubReader.fillMetadata(manga: SManga, chapter: SChapter) {
     // Multiple authors are joined rather than first-picked: the OPF allows any number of
     // dc:creator elements, and dropping all but the first is information the book did carry.
     metadata.authors.takeIf { it.isNotEmpty() }?.let { manga.author = it.joinToString(", ") }
-    metadata.description?.takeIf { it.isNotBlank() }?.let { manga.description = it }
+    // The description arrives as authored HTML (`dc:description` is markup by spec, kept losslessly
+    // by the parser) while the manga screen renders the field as markdown, so the tags and numeric
+    // entities would print literally — `<p>`, `</p>` and `&#8212;` as text. Converted here, where
+    // the only consumer of this field lives, rather than at parse time, where the lossless contract
+    // belongs (see `core/archive/AGENTS.md`).
+    metadata.description
+        ?.let { descriptionTextOf(it) }
+        ?.takeIf { it.isNotBlank() }
+        ?.let { manga.description = it }
 
     // KMK --> The chapter name is the book's own title. `displayTitle` joins every `dc:title` the
     // OPF declares, so a title the producer wrote as two elements ("Harry Potter" / "and the

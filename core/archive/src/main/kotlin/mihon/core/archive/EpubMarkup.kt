@@ -27,6 +27,44 @@ private val EMPTY_FIGURE = Regex("(?is)<figure\\b[^>]*>\\s*</figure>")
 private val EMPTY_PICTURE = Regex("(?is)<picture\\b[^>]*>\\s*</picture>")
 private val CSS_IMAGE_URL = Regex("(?i)url\\(\\s*['\"]?[^)'\"]+\\.(?:jpe?g|png|gif|webp|bmp|svg)['\"]?\\s*\\)")
 
+// The block elements a description breaks its paragraphs on, opening or closed: textContent()
+// emits opening tags but not the nested ones' closing tags, so both spellings have to break.
+private val BLOCK_TAG = Regex(
+    "(?i)</?\\s*(?:p|div|h[1-6]|li|ul|ol|blockquote|section|article|figure|figcaption|table|tr|pre|hr)" +
+        "\\b[^>]{0,127}>",
+)
+private val BREAK_TAG = Regex("(?i)<\\s*br\\s*/?\\s*>")
+
+/** Bounded to a name and a short run of attributes, so a stray `<` in prose is left alone. */
+private val TAG_SHAPED = Regex("</?[A-Za-z][^>]{0,127}>")
+
+/** The body between `&` and `;` — `#8212`, `#x2014` or a name — so one group feeds every case. */
+private val ENTITY = Regex("&(#[xX][0-9A-Fa-f]{1,6}|#[0-9]{1,7}|[a-zA-Z]+);")
+
+private val NAMED_ENTITIES = mapOf(
+    "amp" to "&",
+    "lt" to "<",
+    "gt" to ">",
+    "quot" to "\"",
+    "apos" to "'",
+    "nbsp" to " ",
+    "mdash" to "\u2014",
+    "ndash" to "\u2013",
+    "hellip" to "\u2026",
+    "lsquo" to "\u2018",
+    "rsquo" to "\u2019",
+    "ldquo" to "\u201C",
+    "rdquo" to "\u201D",
+    "copy" to "\u00A9",
+    "trade" to "\u2122",
+    "reg" to "\u00AE",
+    "bull" to "\u2022",
+)
+
+private val SPACE_RUN = Regex("[ \\t\\r\\u00A0]+")
+private val SPACE_AROUND_BREAK = Regex(" *\\n *")
+private val BLANK_LINES = Regex("\\n{3,}")
+
 /**
  * Strips markup down to the words a reader would search for.
  *
@@ -40,6 +78,59 @@ fun plainTextOf(markup: String): String =
         .replace(SCRIPT_OR_STYLE, " ")
         .replace(TAG, " ")
         .replace(WHITESPACE, " ")
+
+/**
+ * Turns a `dc:description` into the plain prose the details screen renders.
+ *
+ * The description field is shown as markdown, not HTML: handed the producer's authored markup,
+ * the screen prints the tags and entities as literal text — `<p>When Harry Potter…` and
+ * `south&#8212;and`. The parser keeps the markup on purpose (the round-trip stays lossless and the
+ * caller decides how to present it); this is that decision for the library.
+ *
+ * Paragraph breaks survive as blank lines, which is how markdown separates paragraphs, and the
+ * entities a producer wrote as `&#8212;` decode to their character. A tag-shaped sequence is only
+ * stripped when it names a plausible element, so a stray `<` in prose is not eaten. Regex rather
+ * than a parse, for the same reason [stripImages] is: a malformed description costs the reader
+ * their formatting, never the whole library refresh.
+ */
+fun descriptionTextOf(markup: String): String =
+    markup
+        .replace(SCRIPT_OR_STYLE, " ")
+        .replace(BREAK_TAG, "\n")
+        .replace(BLOCK_TAG, "\n\n")
+        .replace(TAG_SHAPED, " ")
+        .decodeEntities()
+        .replace(SPACE_RUN, " ")
+        .replace(SPACE_AROUND_BREAK, "\n")
+        .replace(BLANK_LINES, "\n\n")
+        .trim()
+
+/**
+ * Resolves the HTML entities a book's producer wrote into the characters they name.
+ *
+ * Numeric references are the long tail — `&#8212;` for an em dash appears in every description
+ * that passed through a tool that escaped its own markup — and decode fully, including hex. The
+ * named table is the short list that actually occurs in book metadata; an unlisted name passes
+ * through untouched rather than being eaten, because losing a word to a failed lookup is worse
+ * than showing an odd `&mdash;` the eye skips over.
+ */
+private fun String.decodeEntities(): String = replace(ENTITY) { match ->
+    val body = match.groupValues[1]
+    val decoded = when {
+        body.startsWith("#x") || body.startsWith("#X") -> body.substring(2).toIntOrNull(16)
+        body.startsWith("#") -> body.substring(1).toIntOrNull()
+        else -> null
+    }
+    when {
+        decoded != null -> decoded.asStringOrNull() ?: match.value
+        body.startsWith("#") -> match.value
+        else -> NAMED_ENTITIES[body] ?: match.value
+    }
+}
+
+/** A code point as text, or null when it is not one a string may hold (surrogates, zero, too big). */
+private fun Int.asStringOrNull(): String? =
+    if (this in 1..0x10FFFF && this !in 0xD800..0xDFFF) String(Character.toChars(this)) else null
 
 /**
  * Removes a book's inline images, for a reader who wants the prose without the plates.
