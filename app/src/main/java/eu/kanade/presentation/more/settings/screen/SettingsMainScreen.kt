@@ -282,6 +282,10 @@ object SettingsMainScreen : Screen() {
         // SY <--
         // KMK --> AI feature categories. Off-device MTL needs no local engine, but the no-MTL
         // build is meant to be the one without AI features at all, so they are hidden there.
+        // The upscaler is the exception: no-MTL builds force Simple mode (no MTL runtime, no
+        // model weights) via UpscalePreferences.isSimpleMode, and the screen drops its
+        // native-only rows itself — plus UpscaleMangaToggle already shows the per-manga toggle
+        // on that flavor, which is unreachable if the category it depends on is hidden.
         Item(
             titleRes = KMR.strings.pref_yakuyomi_enabled,
             subtitleRes = KMR.strings.pref_yakuyomi_enabled_summary,
@@ -294,7 +298,6 @@ object SettingsMainScreen : Screen() {
             subtitleRes = KMR.strings.pref_upscale_enabled_summary,
             icon = Icons.Outlined.AutoFixHigh,
             screen = SettingsUpscalerScreen,
-            mtlOnly = true,
         ),
         Item(
             titleRes = KMR.strings.label_achievements,

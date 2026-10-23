@@ -34,6 +34,10 @@ files moved. See .github/scripts/release_notes.py.
   identity keys) are cached.
 
 ### Fix
+- **Upscaling (no-MTL build)**: the Upscaler category is back in Settings — the no-MTL build
+  offers Simple upscaling (with the per-manga "Upscale Manga" toggle), but its settings category
+  was accidentally hidden along with the AI-translation ones, so global upscaling could never be
+  turned on.
 - **Google Drive**: a revoked/expired refresh token no longer fails every sync attempt
   forever — the app signs itself out cleanly so you can sign in again; and on devices
   without a browser, tapping Sign-in toasts a friendly error instead of crashing.
