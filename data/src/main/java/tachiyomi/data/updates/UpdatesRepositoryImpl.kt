@@ -25,12 +25,7 @@ class UpdatesRepositoryImpl(
         limit: Long,
     ): List<UpdatesWithRelations> {
         return databaseHandler.awaitList {
-            updatesViewQueries.getUpdatesByReadStatus(
-                read = read,
-                after = after,
-                limit = limit,
-                mapper = ::mapUpdatesWithRelations,
-            )
+            getUpdatesByReadStatus(read, after, limit)
         }
     }
 
@@ -62,13 +57,31 @@ class UpdatesRepositoryImpl(
         limit: Long,
     ): Flow<List<UpdatesWithRelations>> {
         return databaseHandler.subscribeToList {
-            updatesViewQueries.getUpdatesByReadStatus(
-                read = read,
-                after = after,
-                limit = limit,
-                mapper = ::mapUpdatesWithRelations,
-            )
+            getUpdatesByReadStatus(read, after, limit)
         }
+    }
+
+    // KMK: Mihon's #4022 split - SQLite only uses a partial index when the query's own
+    // condition matches it, which a bound parameter never does, so the read and unread
+    // lookups are separate queries with the status written into each: the unread one is
+    // served by the partial index over unread chapters instead of walking the whole
+    // fetch-date index.
+    private fun tachiyomi.data.Database.getUpdatesByReadStatus(
+        read: Boolean,
+        after: Long,
+        limit: Long,
+    ) = if (read) {
+        updatesViewQueries.getReadUpdates(
+            after = after,
+            limit = limit,
+            mapper = ::mapUpdatesWithRelations,
+        )
+    } else {
+        updatesViewQueries.getUnreadUpdates(
+            after = after,
+            limit = limit,
+            mapper = ::mapUpdatesWithRelations,
+        )
     }
 
     private fun mapUpdatesWithRelations(
@@ -81,7 +94,7 @@ class UpdatesRepositoryImpl(
         read: Boolean,
         bookmark: Boolean,
         // KMK --> Positional in the SELECT list, so it sits between `bookmark` and
-        // `last_page_read` exactly as updatesView orders it.
+        // `lastPageRead` exactly as updatesView orders it.
         bookmarkColor: Long,
         lastPageRead: Long,
         sourceId: Long,

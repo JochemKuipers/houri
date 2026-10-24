@@ -30,13 +30,13 @@ import tachiyomi.core.common.preference.AndroidPreferenceStore
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.storage.AndroidStorageFolderProvider
 import tachiyomi.core.common.storage.FolderProvider
-import tachiyomi.data.Chapters
+import tachiyomi.data.Chapter
 import tachiyomi.data.Custom_manga_info
 import tachiyomi.data.Database
 import tachiyomi.data.DateColumnAdapter
 import tachiyomi.data.History
+import tachiyomi.data.Manga
 import tachiyomi.data.Manga_recommendations
-import tachiyomi.data.Mangas
 import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.StringListColumnAdapter
 import tachiyomi.data.UpdateStrategyColumnAdapter
@@ -115,20 +115,20 @@ object AppBindings {
         return Database(
             driver = driver,
             historyAdapter = History.Adapter(
-                last_readAdapter = DateColumnAdapter,
+                read_atAdapter = DateColumnAdapter,
             ),
-            mangasAdapter = Mangas.Adapter(
-                genreAdapter = StringListColumnAdapter,
-                update_strategyAdapter = UpdateStrategyColumnAdapter,
-                memoAdapter = MemoColumnAdapter,
+            mangaAdapter = Manga.Adapter(
+                remote_genreAdapter = StringListColumnAdapter,
+                remote_update_strategyAdapter = UpdateStrategyColumnAdapter,
+                remote_memoAdapter = MemoColumnAdapter,
                 // KMK -->
                 scanlator_priorityAdapter = StringListColumnAdapter,
                 blacklisted_chaptersAdapter = StringListColumnAdapter,
                 scanlator_range_rulesAdapter = StringListColumnAdapter,
                 // KMK <--
             ),
-            chaptersAdapter = Chapters.Adapter(
-                memoAdapter = MemoColumnAdapter,
+            chapterAdapter = Chapter.Adapter(
+                remote_memoAdapter = MemoColumnAdapter,
             ),
             // KMK -->
             manga_recommendationsAdapter = Manga_recommendations.Adapter(

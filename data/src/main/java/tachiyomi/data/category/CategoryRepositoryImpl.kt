@@ -19,33 +19,33 @@ class CategoryRepositoryImpl(
 ) : CategoryRepository {
 
     override suspend fun get(id: Long): Category? {
-        return handler.awaitOneOrNull { categoriesQueries.getCategory(id, CategoryMapper::mapCategory) }
+        return handler.awaitOneOrNull { categoryQueries.getCategory(id, CategoryMapper::mapCategory) }
     }
 
     override suspend fun getAll(): List<Category> {
-        return handler.awaitList { categoriesQueries.getCategories(CategoryMapper::mapCategory) }
+        return handler.awaitList { categoryQueries.getCategories(CategoryMapper::mapCategory) }
     }
 
     override fun getAllAsFlow(): Flow<List<Category>> {
-        return handler.subscribeToList { categoriesQueries.getCategories(CategoryMapper::mapCategory) }
+        return handler.subscribeToList { categoryQueries.getCategories(CategoryMapper::mapCategory) }
     }
 
     override suspend fun getCategoriesByMangaId(mangaId: Long): List<Category> {
         return handler.awaitList {
-            categoriesQueries.getCategoriesByMangaId(mangaId, CategoryMapper::mapCategory)
+            categoryQueries.getCategoriesByMangaId(mangaId, CategoryMapper::mapCategory)
         }
     }
 
     override fun getCategoriesByMangaIdAsFlow(mangaId: Long): Flow<List<Category>> {
         return handler.subscribeToList {
-            categoriesQueries.getCategoriesByMangaId(mangaId, CategoryMapper::mapCategory)
+            categoryQueries.getCategoriesByMangaId(mangaId, CategoryMapper::mapCategory)
         }
     }
 
     // SY -->
     override suspend fun insert(category: Category): Long {
         return handler.awaitOneExecutable(true) {
-            categoriesQueries.insert(
+            categoryQueries.insert(
                 name = category.name,
                 order = category.order,
                 flags = category.flags,
@@ -55,7 +55,7 @@ class CategoryRepositoryImpl(
                 type = category.type?.toLong(),
                 // KMK <--
             )
-            categoriesQueries.selectLastInsertedRowId()
+            categoryQueries.selectLastInsertedRowId()
         }
     }
     // SY <--
@@ -75,7 +75,7 @@ class CategoryRepositoryImpl(
     }
 
     private fun Database.updatePartialBlocking(update: CategoryUpdate) {
-        categoriesQueries.update(
+        categoryQueries.update(
             name = update.name,
             order = update.order,
             flags = update.flags,
@@ -84,70 +84,70 @@ class CategoryRepositoryImpl(
             parentId = update.parentId,
             type = update.type?.toLong(),
             // KMK <--
-            categoryId = update.id,
+            id = update.id,
         )
     }
 
-    override suspend fun updateAllFlags(flags: Long?) {
+    override suspend fun updateAllFlags(flags: Long) {
         handler.await {
-            categoriesQueries.updateAllFlags(flags)
+            categoryQueries.updateAllFlags(flags)
         }
     }
 
     override suspend fun delete(categoryId: Long) {
         handler.await {
-            categoriesQueries.delete(
-                categoryId = categoryId,
+            categoryQueries.delete(
+                id = categoryId,
             )
         }
     }
 
     // KMK -->
     override suspend fun getSubcategories(parentId: Long): List<Category> {
-        return handler.awaitList { categoriesQueries.getSubcategories(parentId, CategoryMapper::mapCategory) }
+        return handler.awaitList { categoryQueries.getSubcategories(parentId, CategoryMapper::mapCategory) }
     }
 
     override fun getSubcategoriesAsFlow(parentId: Long): Flow<List<Category>> {
-        return handler.subscribeToList { categoriesQueries.getSubcategories(parentId, CategoryMapper::mapCategory) }
+        return handler.subscribeToList { categoryQueries.getSubcategories(parentId, CategoryMapper::mapCategory) }
     }
 
     override suspend fun getTopLevelCategories(): List<Category> {
-        return handler.awaitList { categoriesQueries.getTopLevelCategories(CategoryMapper::mapCategory) }
+        return handler.awaitList { categoryQueries.getTopLevelCategories(CategoryMapper::mapCategory) }
     }
 
     override suspend fun getMangaIdsInCategoryTree(categoryId: Long): List<Long> {
-        return handler.awaitList { categoriesQueries.getMangaIdsInCategoryTree(categoryId) }
+        return handler.awaitList { categoryQueries.getMangaIdsInCategoryTree(categoryId) }
     }
 
     override suspend fun deleteOrphanedSubcategories() {
         handler.await {
-            categoriesQueries.deleteOrphanedSubcategories()
+            categoryQueries.deleteOrphanedSubcategories()
         }
     }
 
     override suspend fun updateTrackStatus(categoryId: Long, trackStatus: Int?) {
         handler.await {
-            categoriesQueries.updateTrackStatus(
+            categoryQueries.updateTrackStatus(
                 trackStatus = trackStatus?.toLong(),
-                categoryId = categoryId,
+                id = categoryId,
             )
         }
     }
 
     override suspend fun updateUpdateInterval(categoryId: Long, updateInterval: Int?) {
         handler.await {
-            categoriesQueries.updateUpdateInterval(
+            categoryQueries.updateUpdateInterval(
                 updateInterval = updateInterval?.toLong(),
-                categoryId = categoryId,
+                id = categoryId,
             )
         }
     }
 
     override suspend fun updateType(categoryId: Long, type: Int?) {
         handler.await {
-            categoriesQueries.updateType(
+            categoryQueries.updateType(
                 type = type?.toLong(),
-                categoryId = categoryId,
+                id = categoryId,
             )
         }
     }

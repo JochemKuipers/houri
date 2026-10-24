@@ -53,26 +53,29 @@ class BackupChapter(
     }
 }
 
+// KMK: parameters in the chapter table's column order, as every chapter query projects them
 val backupChapterMapper = {
         _: Long,
         _: Long,
         url: String,
         name: String,
         scanlator: String?,
+        chapterNumber: Double,
+        dateUpload: Long,
+        sourceOrder: Long,
+        memo: JsonObject,
         read: Boolean,
         bookmark: Boolean,
         // KMK --> bookmark_color
         bookmarkColor: Long,
         // KMK <--
         lastPageRead: Long,
-        chapterNumber: Double,
-        sourceOrder: Long,
         dateFetch: Long,
-        dateUpload: Long,
+        // SY --> the sync-era columns this fork still ships
         lastModifiedAt: Long,
         version: Long,
         _: Long,
-        memo: JsonObject,
+    // SY <--
     ->
     BackupChapter(
         url = url,

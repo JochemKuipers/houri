@@ -1,10 +1,13 @@
+import kotlin.Boolean;
 import kotlin.Long;
 import kotlin.collections.List;
 
-CREATE TABLE categories(
-    _id INTEGER NOT NULL PRIMARY KEY,
+CREATE TABLE category(
+    id INTEGER NOT NULL PRIMARY KEY,
     name TEXT NOT NULL,
-    sort INTEGER NOT NULL,
+    -- KMK --> No UNIQUE here, unlike Mihon: subcategories number their `order` per parent,
+    -- so a root and its first child are both 0 and every level restarts the count.
+    `order` INTEGER NOT NULL,
     flags INTEGER NOT NULL,
     manga_order TEXT AS List<Long> NOT NULL,
     -- KMK -->
@@ -32,28 +35,28 @@ CREATE TABLE categories(
 );
 
 -- Insert system category
-INSERT OR IGNORE INTO categories(_id, name, sort, flags, manga_order, hidden, parent_id) VALUES (0, "", -1, 0, "", 0, 0);
+INSERT OR IGNORE INTO category(id, name, `order`, flags, manga_order, hidden, parent_id) VALUES (0, "", -1, 0, "", 0, 0);
 -- Disallow deletion of default category
 CREATE TRIGGER IF NOT EXISTS system_category_delete_trigger BEFORE DELETE
-ON categories
+ON category
 BEGIN SELECT CASE
-    WHEN old._id <= 0 THEN
+    WHEN old.id <= 0 THEN
         RAISE(ABORT, "System category can't be deleted")
     END;
 END;
 
+-- Keyed on the primary key, so there is never more than one row to return
 getCategory:
-SELECT _id,name,sort,flags,hidden,parent_id,date_added,date_modified,track_status,update_interval,type
-FROM categories
-WHERE _id = :id
-LIMIT 1;
+SELECT id, name, `order`, flags, hidden, parent_id, date_added, date_modified, track_status, update_interval, type
+FROM category
+WHERE id = :id;
 
 getCategories:
 SELECT
-_id AS id,
+id AS id,
 name,
-sort AS `order`,
-flags,
+`order` AS `order`,
+flags AS flags,
 -- KMK -->
 hidden,
 parent_id,
@@ -63,15 +66,15 @@ track_status,
 update_interval,
 type
 -- KMK <--
-FROM categories
-ORDER BY sort;
+FROM category
+ORDER BY `order`;
 
 getCategoriesByMangaId:
 SELECT
-C._id AS id,
+C.id AS id,
 C.name,
-C.sort AS `order`,
-C.flags,
+C.`order` AS `order`,
+C.flags AS flags,
 -- KMK -->
 C.hidden,
 C.parent_id,
@@ -81,17 +84,17 @@ C.track_status,
 C.update_interval,
 C.type
 -- KMK <--
-FROM categories C
-JOIN mangas_categories MC
-ON C._id = MC.category_id
+FROM category C
+JOIN manga_category MC
+ON C.id = MC.category_id
 WHERE MC.manga_id = :mangaId;
 
 -- KMK -->
 getSubcategories:
 SELECT
-_id AS id,
+id AS id,
 name,
-sort AS `order`,
+`order` AS `order`,
 flags,
 hidden,
 parent_id,
@@ -100,15 +103,15 @@ date_modified,
 track_status,
 update_interval,
 type
-FROM categories
+FROM category
 WHERE parent_id = :parentId
-ORDER BY sort;
+ORDER BY `order`;
 
 getTopLevelCategories:
 SELECT
-_id AS id,
+id AS id,
 name,
-sort AS `order`,
+`order` AS `order`,
 flags,
 hidden,
 parent_id,
@@ -117,35 +120,39 @@ date_modified,
 track_status,
 update_interval,
 type
-FROM categories
+FROM category
 WHERE parent_id = 0
-ORDER BY sort;
+ORDER BY `order`;
 
 getMangaIdsInCategoryTree:
 SELECT MC.manga_id
-FROM mangas_categories MC
-JOIN categories C ON C._id = MC.category_id
-WHERE C._id = :categoryId OR C.parent_id = :categoryId;
+FROM manga_category MC
+JOIN category C ON C.id = MC.category_id
+WHERE C.id = :categoryId OR C.parent_id = :categoryId;
 
 deleteOrphanedSubcategories:
-DELETE FROM categories
-WHERE parent_id != 0 AND parent_id NOT IN (SELECT _id FROM categories);
+DELETE FROM category
+WHERE parent_id != 0 AND parent_id NOT IN (SELECT id FROM category);
 -- KMK <--
 
+-- KMK --> The position is passed by the caller rather than taken from max(`order`) + 1 here:
+-- subcategories number per parent, so the next position is not a table-wide fact.
 insert:
-INSERT INTO categories(name, sort, flags, manga_order, hidden, parent_id, type, date_added, date_modified)
+INSERT INTO category(name, `order`, flags, manga_order, hidden, parent_id, type, date_added, date_modified)
 VALUES (:name, :order, :flags, "", :hidden, :parentId, :type, strftime('%s', 'now'), strftime('%s', 'now'));
 
 delete:
-DELETE FROM categories
-WHERE _id = :categoryId;
+DELETE FROM category
+WHERE id = :id;
 
+-- KMK --> One statement for the partial update the reorder/rename/settings flows share;
+-- coalesce assigns a value but cannot clear one (NULL means "leave alone"), which is what
+-- the standalone updateTrackStatus / updateUpdateInterval / updateType statements are for.
 update:
-UPDATE categories
+UPDATE category
 SET name = coalesce(:name, name),
-    sort = coalesce(:order, sort),
+    `order` = coalesce(:order, `order`),
     flags = coalesce(:flags, flags),
-    -- KMK -->
     hidden = coalesce(:hidden, hidden),
     parent_id = coalesce(:parentId, parent_id),
     -- Same partial-update rule as the other columns: coalesce assigns a role but cannot
@@ -158,37 +165,35 @@ SET name = coalesce(:name, name),
         WHEN :name IS NOT NULL AND :name != name THEN strftime('%s', 'now')
         ELSE date_modified
     END
-    -- KMK <--
-WHERE _id = :categoryId;
+WHERE id = :id;
+-- KMK <--
 
 updateAllFlags:
-UPDATE categories SET
-flags = coalesce(?, flags);
+UPDATE category
+SET flags = :flags;
 
 -- KMK --> Deliberately not folded into `update`: that statement's partial-update idiom is
 -- coalesce(:param, col), which cannot express "unbind this category" because NULL would
 -- mean "leave it alone" rather than "set it to nothing". Binding and unbinding need their
 -- own statement that assigns the value unconditionally.
--- KMK <--
--- KMK -->
 updateTrackStatus:
-UPDATE categories
+UPDATE category
 SET track_status = :trackStatus
-WHERE _id = :categoryId;
+WHERE id = :id;
 
 -- Same reasoning as updateTrackStatus: assigning unconditionally is what lets NULL clear the
 -- interval back to inheriting the global one.
 updateUpdateInterval:
-UPDATE categories
+UPDATE category
 SET update_interval = :updateInterval
-WHERE _id = :categoryId;
+WHERE id = :id;
 
--- KMK --> Same reasoning as updateTrackStatus: only an unconditional assignment can express
+-- Same reasoning as updateTrackStatus: only an unconditional assignment can express
 -- clearing a role back to unclassified; the coalesce idiom would treat NULL as "leave alone".
 updateType:
-UPDATE categories
+UPDATE category
 SET type = :type
-WHERE _id = :categoryId;
+WHERE id = :id;
 -- KMK <--
 
 selectLastInsertedRowId:

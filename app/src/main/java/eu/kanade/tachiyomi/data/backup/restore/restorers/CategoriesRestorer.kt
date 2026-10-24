@@ -26,7 +26,7 @@ class CategoriesRestorer(
             var nextOrder = dbCategories.maxOfOrNull { it.order }?.plus(1) ?: 0L
 
             val pendingParents = mutableMapOf<Long, Long>()
-            val allCurrent = (dbCategories + handler.awaitList { categoriesQueries.getCategories(tachiyomi.data.category.CategoryMapper::mapCategory) }).distinctBy { it.id }
+            val allCurrent = (dbCategories + handler.awaitList { categoryQueries.getCategories(tachiyomi.data.category.CategoryMapper::mapCategory) }).distinctBy { it.id }
             val existingNamesByParent = allCurrent.groupBy { it.parentId }.mapValues { e -> e.value.map { it.name.lowercase() }.toMutableSet() }.toMutableMap()
 
             val nextOrderPerParent = mutableMapOf<Long, Long>()
@@ -63,7 +63,7 @@ class CategoriesRestorer(
                     nextOrderPerParent[effectiveParentId] = perParentNext + 1
                     nextOrder++
                     val newId = handler.awaitOneExecutable {
-                        categoriesQueries.insert(
+                        categoryQueries.insert(
                             trimmed,
                             orderForParent,
                             it.flags,
@@ -71,7 +71,7 @@ class CategoriesRestorer(
                             parentId = 0L,
                             type = it.type?.toLong(),
                         )
-                        categoriesQueries.selectLastInsertedRowId()
+                        categoryQueries.selectLastInsertedRowId()
                     }
                     siblings.add(trimmed.lowercase())
                     // KMK --> The insert statement leaves track_status NULL, and it cannot be passed
@@ -81,12 +81,12 @@ class CategoriesRestorer(
                     // smart-cast after the null check.
                     it.trackStatus?.let { trackStatus ->
                         handler.await {
-                            categoriesQueries.updateTrackStatus(trackStatus.toLong(), newId)
+                            categoryQueries.updateTrackStatus(trackStatus = trackStatus.toLong(), id = newId)
                         }
                     }
                     it.updateInterval?.let { updateInterval ->
                         handler.await {
-                            categoriesQueries.updateUpdateInterval(updateInterval.toLong(), newId)
+                            categoryQueries.updateUpdateInterval(updateInterval = updateInterval.toLong(), id = newId)
                         }
                     }
                     // KMK --> Type is not in this family: the insert itself accepts it, so a
@@ -97,7 +97,7 @@ class CategoriesRestorer(
                     it.toCategory(newId).copy(order = orderForParent, parentId = 0L, name = trimmed)
                 }
 
-            val byIdAfterInsert = handler.awaitList { categoriesQueries.getCategories(tachiyomi.data.category.CategoryMapper::mapCategory) }.associateBy { it.id }
+            val byIdAfterInsert = handler.awaitList { categoryQueries.getCategories(tachiyomi.data.category.CategoryMapper::mapCategory) }.associateBy { it.id }
             pendingParents.forEach { (categoryId, backupParentId) ->
                 val parentId = restoredIdsByBackupId[backupParentId] ?: return@forEach
                 val cat = byIdAfterInsert[categoryId] ?: return@forEach
@@ -106,7 +106,7 @@ class CategoriesRestorer(
                 if (parentId == categoryId) return@forEach
                 if (tachiyomi.domain.category.service.CategoryTreeHandler.descendants(categoryId, byIdAfterInsert.values.toList()).contains(parentId)) return@forEach
                 handler.await {
-                    categoriesQueries.update(
+                    categoryQueries.update(
                         name = null,
                         order = null,
                         flags = null,
@@ -115,11 +115,11 @@ class CategoriesRestorer(
                         // KMK --> the update statement's partial-update column
                         type = null,
                         // KMK <--
-                        categoryId = categoryId,
+                        id = categoryId,
                     )
                 }
             }
-            handler.await { categoriesQueries.deleteOrphanedSubcategories() }
+            handler.await { categoryQueries.deleteOrphanedSubcategories() }
             // KMK <--
 
             libraryPreferences.categorizedDisplaySettings().set(

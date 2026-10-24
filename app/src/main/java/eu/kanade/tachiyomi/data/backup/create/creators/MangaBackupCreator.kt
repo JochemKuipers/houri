@@ -21,6 +21,7 @@ import mihon.app.di.globalAppGraph
 import mihon.core.concurrency.AppDispatchersHolder
 import tachiyomi.data.DatabaseHandler
 import tachiyomi.data.MemoColumnAdapter
+import tachiyomi.data.chapter.ChapterMapper
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.history.interactor.GetHistory
 import tachiyomi.domain.manga.interactor.GetCustomMangaInfo
@@ -81,15 +82,15 @@ class MangaBackupCreator(
         // SY <--
 
         mangaObject.excludedScanlators = handler.awaitList {
-            excluded_scanlatorsQueries.getExcludedScanlatorsByMangaId(manga.id)
+            excluded_scanlatorQueries.getExcludedScanlatorsByMangaId(manga.id)
         }
 
         if (options.chapters) {
             // Backup all the chapters
             handler.awaitList {
-                chaptersQueries.getChaptersByMangaId(
+                chapterQueries.getChaptersByMangaId(
                     mangaId = manga.id,
-                    applyFilter = 0, // false
+                    applyScanlatorFilter = 0, // false
                     // KMK -->
                     Manga.CHAPTER_SHOW_NOT_BOOKMARKED,
                     Manga.CHAPTER_SHOW_BOOKMARKED,
@@ -114,7 +115,7 @@ class MangaBackupCreator(
         }
 
         if (options.tracking) {
-            val tracks = handler.awaitList { manga_syncQueries.getTracksByMangaId(manga.id, backupTrackMapper) }
+            val tracks = handler.awaitList { manga_trackQueries.getTracksByMangaId(manga.id, backupTrackMapper) }
             if (tracks.isNotEmpty()) {
                 mangaObject.tracking = tracks
             }
@@ -123,9 +124,21 @@ class MangaBackupCreator(
         if (options.history) {
             val historyByMangaId = getHistory.await(manga.id)
             if (historyByMangaId.isNotEmpty()) {
-                val history = historyByMangaId.map { history ->
-                    val chapter = handler.awaitOne { chaptersQueries.getChapterById(history.chapterId) }
-                    BackupHistory(chapter.url, history.readAt?.time ?: 0L, history.readDuration)
+                // Two queries for the whole entry rather than one per history row, and a
+                // chapter removed since its history was read takes that history with it
+                // (mihon#4022) instead of failing the whole backup
+                val chapterUrlsById = handler.awaitList {
+                    chapterQueries.getChaptersByMangaId(
+                        mangaId = manga.id,
+                        applyScanlatorFilter = 0,
+                        bookmarkUnmask = Manga.CHAPTER_SHOW_NOT_BOOKMARKED,
+                        bookmarkMask = Manga.CHAPTER_SHOW_BOOKMARKED,
+                        mapper = ChapterMapper::mapChapter,
+                    )
+                }.associate { it.id to it.url }
+                val history = historyByMangaId.mapNotNull { history ->
+                    val url = chapterUrlsById[history.chapterId] ?: return@mapNotNull null
+                    BackupHistory(url, history.readAt?.time ?: 0L, history.readDuration)
                 }
                 if (history.isNotEmpty()) {
                     mangaObject.history = history

@@ -32,11 +32,11 @@ class MoveSortingModeSettingsMigration : Migration {
             putString(libraryPreferences.sortingMode().key(), newSortingMode)
         }
         handler.await(true) {
-            categoriesQueries.getCategories(CategoryMapper::mapCategory).executeAsList()
+            categoryQueries.getCategories(CategoryMapper::mapCategory).executeAsList()
                 .filter { (it.flags and 0b00111100L) == 0b00100000L }
                 .forEach {
-                    categoriesQueries.update(
-                        categoryId = it.id,
+                    categoryQueries.update(
+                        id = it.id,
                         flags = it.flags and 0b00111100L.inv(),
                         name = null,
                         order = null,

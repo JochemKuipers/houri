@@ -42,6 +42,7 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.WhileSubscribed
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
@@ -89,6 +90,7 @@ import tachiyomi.i18n.sy.SYMR
 import tachiyomi.source.local.isLocal
 import xyz.nulldev.ts.api.http.serializer.FilterSerializer
 import java.time.Instant
+import kotlin.time.Duration.Companion.seconds
 import eu.kanade.tachiyomi.source.model.Filter as SourceModelFilter
 
 open class BrowseSourceScreenModel(
@@ -290,7 +292,11 @@ open class BrowseSourceScreenModel(
                         // SY -->
                         .combineMetadata(metadata)
                         // SY <--
-                        .stateIn(ioCoroutineScope)
+                        // Each loaded entry kept a live query for as long as the screen
+                        // existed, so every write to manga re-ran all of them; it now
+                        // starts from the listing's row and queries only while shown,
+                        // stopping five seconds after it leaves the screen (mihon#4022).
+                        .stateIn(ioCoroutineScope, SharingStarted.WhileSubscribed(5.seconds), manga to metadata)
                 }
                     .filter { !hideInLibraryItems || !it.value.first.favorite }
             }

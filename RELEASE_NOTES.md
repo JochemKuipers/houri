@@ -16,6 +16,13 @@ files moved. See .github/scripts/release_notes.py.
   Edit Categories and in the Set Categories dialog.
 
 ### Improve
+- **Database (under the hood)**: the library database now uses Mihon's reworked schema, so the
+  fork stays mergeable with upstream. Updating merges duplicate entries — the same series twice
+  under one source — into the copy in your library, carrying read state, history, categories and
+  tracking to the survivor, and chapter listings can no longer split one chapter into two rows.
+  The Updates tab and the widget's unread count also read from the partial unread index instead
+  of scanning every fetched chapter, which makes them noticeably snappier on large libraries
+  (upstream mihonapp/mihon#3805, mihonapp/mihon#4022).
 - **Set Categories**: the dialog now has the same navigation aids as Edit Categories —
   a search field, a sort dropdown (manual / name / date-added / date-modified), and
   expand/collapse chevrons with Expand all / Collapse all, so large category trees are

@@ -25,26 +25,46 @@ class ChapterRepositoryImpl(
     override suspend fun addAll(chapters: List<Chapter>): List<Chapter> {
         return try {
             handler.await(inTransaction = true) {
-                chapters.map { chapter ->
-                    chaptersQueries.insert(
-                        chapter.mangaId,
-                        chapter.url,
-                        chapter.name,
-                        chapter.scanlator,
-                        chapter.read,
-                        chapter.bookmark,
+                // KMK: (manga_id, remote_url) is unique now, so a chapter another sync of the
+                // same entry already stored - or a second copy within this very batch - would
+                // trip the constraint and fail the whole update. Everything already in the
+                // table is collected first and the batch keeps only what is not in it, the
+                // same pre-filter Mihon's #4022 put in front of its insert.
+                val existing = chapters.map { it.mangaId }
+                    .distinct()
+                    .flatMap { mangaId ->
+                        chapterQueries
+                            .getChaptersByMangaId(
+                                mangaId = mangaId,
+                                applyScanlatorFilter = 0,
+                                bookmarkUnmask = Manga.CHAPTER_SHOW_NOT_BOOKMARKED,
+                                bookmarkMask = Manga.CHAPTER_SHOW_BOOKMARKED,
+                                mapper = ChapterMapper::mapChapter,
+                            )
+                            .executeAsList()
+                            .map { mangaId to it.url }
+                    }
+                    .toMutableSet()
+                chapters.filter { existing.add(it.mangaId to it.url) }.map { chapter ->
+                    chapterQueries.insert(
+                        mangaId = chapter.mangaId,
+                        url = chapter.url,
+                        name = chapter.name,
+                        scanlator = chapter.scanlator,
+                        read = chapter.read,
+                        bookmark = chapter.bookmark,
                         // KMK -->
-                        chapter.bookmarkColor.value.toLong(),
+                        bookmarkColor = chapter.bookmarkColor.value.toLong(),
                         // KMK <--
-                        chapter.lastPageRead,
-                        chapter.chapterNumber,
-                        chapter.sourceOrder,
-                        chapter.dateFetch,
-                        chapter.dateUpload,
-                        chapter.version,
-                        chapter.memo,
+                        lastPageRead = chapter.lastPageRead,
+                        chapterNumber = chapter.chapterNumber,
+                        sourceOrder = chapter.sourceOrder,
+                        dateFetch = chapter.dateFetch,
+                        dateUpload = chapter.dateUpload,
+                        version = chapter.version,
+                        memo = chapter.memo,
                     )
-                    val lastInsertId = chaptersQueries.selectLastInsertedRowId().executeAsOne()
+                    val lastInsertId = chapterQueries.selectLastInsertedRowId().executeAsOne()
                     chapter.copy(id = lastInsertId)
                 }
             }
@@ -65,7 +85,7 @@ class ChapterRepositoryImpl(
     private suspend fun partialUpdate(vararg chapterUpdates: ChapterUpdate) {
         handler.await(inTransaction = true) {
             chapterUpdates.forEach { chapterUpdate ->
-                chaptersQueries.update(
+                chapterQueries.update(
                     mangaId = chapterUpdate.mangaId,
                     url = chapterUpdate.url,
                     name = chapterUpdate.name,
@@ -91,7 +111,7 @@ class ChapterRepositoryImpl(
 
     override suspend fun removeChaptersWithIds(chapterIds: List<Long>) {
         try {
-            handler.await { chaptersQueries.removeChaptersWithIds(chapterIds) }
+            handler.await { chapterQueries.removeChaptersWithIds(chapterIds) }
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e)
         }
@@ -99,7 +119,7 @@ class ChapterRepositoryImpl(
 
     override suspend fun getChapterByMangaId(mangaId: Long, applyFilter: Boolean): List<Chapter> {
         return handler.awaitList {
-            chaptersQueries.getChaptersByMangaId(
+            chapterQueries.getChaptersByMangaId(
                 mangaId,
                 applyFilter.toLong(),
                 // KMK -->
@@ -113,19 +133,19 @@ class ChapterRepositoryImpl(
 
     override suspend fun getScanlatorsByMangaId(mangaId: Long): List<String> {
         return handler.awaitList {
-            chaptersQueries.getScanlatorsByMangaId(mangaId) { it.orEmpty() }
+            chapterQueries.getScanlatorsByMangaId(mangaId) { it.orEmpty() }
         }
     }
 
     override fun getScanlatorsByMangaIdAsFlow(mangaId: Long): Flow<List<String>> {
         return handler.subscribeToList {
-            chaptersQueries.getScanlatorsByMangaId(mangaId) { it.orEmpty() }
+            chapterQueries.getScanlatorsByMangaId(mangaId) { it.orEmpty() }
         }
     }
 
     override suspend fun getBookmarkedChaptersByMangaId(mangaId: Long): List<Chapter> {
         return handler.awaitList {
-            chaptersQueries.getBookmarkedChaptersByMangaId(
+            chapterQueries.getBookmarkedChaptersByMangaId(
                 mangaId,
                 ChapterMapper::mapChapter,
             )
@@ -133,12 +153,12 @@ class ChapterRepositoryImpl(
     }
 
     override suspend fun getChapterById(id: Long): Chapter? {
-        return handler.awaitOneOrNull { chaptersQueries.getChapterById(id, ChapterMapper::mapChapter) }
+        return handler.awaitOneOrNull { chapterQueries.getChapterById(id, ChapterMapper::mapChapter) }
     }
 
     override suspend fun getChapterByMangaIdAsFlow(mangaId: Long, applyFilter: Boolean): Flow<List<Chapter>> {
         return handler.subscribeToList {
-            chaptersQueries.getChaptersByMangaId(
+            chapterQueries.getChaptersByMangaId(
                 mangaId,
                 applyFilter.toLong(),
                 // KMK -->
@@ -152,22 +172,22 @@ class ChapterRepositoryImpl(
 
     override suspend fun getChapterByUrlAndMangaId(url: String, mangaId: Long): Chapter? {
         return handler.awaitOneOrNull {
-            chaptersQueries.getChapterByUrlAndMangaId(
-                url,
-                mangaId,
-                ChapterMapper::mapChapter,
+            chapterQueries.getChapterByUrlAndMangaId(
+                mangaId = mangaId,
+                remoteUrl = url,
+                mapper = ChapterMapper::mapChapter,
             )
         }
     }
 
     // SY -->
     override suspend fun getChapterByUrl(url: String): List<Chapter> {
-        return handler.awaitList { chaptersQueries.getChapterByUrl(url, ChapterMapper::mapChapter) }
+        return handler.awaitList { chapterQueries.getChapterByUrl(url, ChapterMapper::mapChapter) }
     }
 
     override suspend fun getMergedChapterByMangaId(mangaId: Long, applyFilter: Boolean): List<Chapter> {
         return handler.awaitList {
-            chaptersQueries.getMergedChaptersByMangaId(
+            chapterQueries.getMergedChaptersByMangaId(
                 mangaId,
                 applyFilter.toLong(),
                 // KMK -->
@@ -184,7 +204,7 @@ class ChapterRepositoryImpl(
         applyFilter: Boolean,
     ): Flow<List<Chapter>> {
         return handler.subscribeToList {
-            chaptersQueries.getMergedChaptersByMangaId(
+            chapterQueries.getMergedChaptersByMangaId(
                 mangaId,
                 applyFilter.toLong(),
                 // KMK -->
@@ -198,13 +218,13 @@ class ChapterRepositoryImpl(
 
     override suspend fun getScanlatorsByMergeId(mangaId: Long): List<String> {
         return handler.awaitList {
-            chaptersQueries.getScanlatorsByMergeId(mangaId) { it.orEmpty() }
+            chapterQueries.getScanlatorsByMergeId(mangaId) { it.orEmpty() }
         }
     }
 
     override fun getScanlatorsByMergeIdAsFlow(mangaId: Long): Flow<List<String>> {
         return handler.subscribeToList {
-            chaptersQueries.getScanlatorsByMergeId(mangaId) { it.orEmpty() }
+            chapterQueries.getScanlatorsByMergeId(mangaId) { it.orEmpty() }
         }
     }
     // SY <--

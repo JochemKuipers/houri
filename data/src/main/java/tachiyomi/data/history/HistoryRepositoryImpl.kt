@@ -181,9 +181,9 @@ class HistoryRepositoryImpl(
         try {
             handler.await {
                 historyQueries.upsert(
-                    historyUpdate.chapterId,
-                    historyUpdate.readAt,
-                    historyUpdate.sessionReadDuration,
+                    chapterId = historyUpdate.chapterId,
+                    readAt = historyUpdate.readAt,
+                    readDuration = historyUpdate.sessionReadDuration,
                 )
             }
         } catch (e: Exception) {
@@ -197,9 +197,9 @@ class HistoryRepositoryImpl(
             handler.await(true) {
                 historyUpdates.forEach { historyUpdate ->
                     historyQueries.upsert(
-                        historyUpdate.chapterId,
-                        historyUpdate.readAt,
-                        historyUpdate.sessionReadDuration,
+                        chapterId = historyUpdate.chapterId,
+                        readAt = historyUpdate.readAt,
+                        readDuration = historyUpdate.sessionReadDuration,
                     )
                 }
             }

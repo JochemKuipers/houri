@@ -21,10 +21,10 @@ SELECT
     coalesce(C.bookmarkReadUploads, 0) AS bookmarkedReadUploads,
     -- KMK <--
     coalesce(MC.categories, '0') AS categories
-FROM mangas M
+FROM manga M
 LEFT JOIN (
     SELECT
-        chapters.manga_id,
+        chapter.manga_id,
         -- KMK --> Count chapter NUMBERS, not rows. Two scanlators uploading the same chapter are
         -- one chapter to the reader, so a plain row count reported a series with three groups as
         -- three times as long and inflated the unread badge (LibraryManga.unreadCount is derived
@@ -34,20 +34,20 @@ LEFT JOIN (
         -- (total - bookmark - (read - bookmarkRead)) stays non-negative: a number is counted as
         -- read or bookmarked if any of its uploads is, which keeps each set a subset of total.
         CAST(
-            count(DISTINCT CASE WHEN chapters.chapter_number > 0
-                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
-            + sum(CASE WHEN chapters.chapter_number <= 0 THEN 1 ELSE 0 END) AS INTEGER
+            count(DISTINCT CASE WHEN chapter.remote_chapter_number > 0
+                THEN CAST(round(chapter.remote_chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapter.remote_chapter_number <= 0 THEN 1 ELSE 0 END) AS INTEGER
         ) AS total,
         CAST(
-            count(DISTINCT CASE WHEN chapters.chapter_number > 0 AND chapters.read = 1
-                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
-            + sum(CASE WHEN chapters.chapter_number <= 0 AND chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER
+            count(DISTINCT CASE WHEN chapter.remote_chapter_number > 0 AND chapter.user_read = 1
+                THEN CAST(round(chapter.remote_chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapter.remote_chapter_number <= 0 AND chapter.user_read = 1 THEN 1 ELSE 0 END) AS INTEGER
         ) AS readCount,
         -- KMK --> Row basis, for the merge being off. Counted over the same filtered rows, so it
         -- agrees with the number basis on a series only one scanlator carries: there both fall out
         -- as one count per chapter, which is why nothing changes for the common case.
         CAST(count(*) AS INTEGER) AS totalUploads,
-        CAST(sum(CASE WHEN chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER) AS readUploads,
+        CAST(sum(CASE WHEN chapter.user_read = 1 THEN 1 ELSE 0 END) AS INTEGER) AS readUploads,
         -- Known limit: a number counts as read when any of its uploads is, which is what the merge
         -- picks - it ranks a read upload above a better-ranked scanlator - with one exception. A
         -- scanlator range rule outranks read state, so a rule pinning scanlator X over a number
@@ -56,37 +56,37 @@ LEFT JOIN (
         -- chapter row; the rules are an explicit per-series override and the gap needs both one and
         -- the other, so it is left visible rather than papered over.
         -- KMK <--
-        coalesce(max(chapters.date_upload), 0) AS latestUpload,
-        coalesce(max(history.last_read), 0) AS lastRead,
-        coalesce(max(chapters.date_fetch), 0) AS fetchedAt,
+        coalesce(max(chapter.remote_date_upload), 0) AS latestUpload,
+        coalesce(max(history.read_at), 0) AS lastRead,
+        coalesce(max(chapter.state_date_fetch), 0) AS fetchedAt,
         CAST(
-            count(DISTINCT CASE WHEN chapters.chapter_number > 0 AND chapters.bookmark = 1
-                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
-            + sum(CASE WHEN chapters.chapter_number <= 0 AND chapters.bookmark = 1 THEN 1 ELSE 0 END) AS INTEGER
+            count(DISTINCT CASE WHEN chapter.remote_chapter_number > 0 AND chapter.user_bookmark = 1
+                THEN CAST(round(chapter.remote_chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapter.remote_chapter_number <= 0 AND chapter.user_bookmark = 1 THEN 1 ELSE 0 END) AS INTEGER
         ) AS bookmarkCount,
-        CAST(sum(CASE WHEN chapters.bookmark = 1 THEN 1 ELSE 0 END) AS INTEGER) AS bookmarkUploads,
+        CAST(sum(CASE WHEN chapter.user_bookmark = 1 THEN 1 ELSE 0 END) AS INTEGER) AS bookmarkUploads,
         CAST(
-            count(DISTINCT CASE WHEN chapters.chapter_number > 0
-                    AND chapters.bookmark = 1 AND chapters.read = 1
-                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
-            + sum(CASE WHEN chapters.chapter_number <= 0
-                AND chapters.bookmark = 1 AND chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER
+            count(DISTINCT CASE WHEN chapter.remote_chapter_number > 0
+                    AND chapter.user_bookmark = 1 AND chapter.user_read = 1
+                THEN CAST(round(chapter.remote_chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapter.remote_chapter_number <= 0
+                AND chapter.user_bookmark = 1 AND chapter.user_read = 1 THEN 1 ELSE 0 END) AS INTEGER
         ) AS bookmarkReadCount,
         CAST(
-            sum(CASE WHEN chapters.bookmark = 1 AND chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER
+            sum(CASE WHEN chapter.user_bookmark = 1 AND chapter.user_read = 1 THEN 1 ELSE 0 END) AS INTEGER
         ) AS bookmarkReadUploads,
         -- KMK <--
-        excluded_scanlators.scanlator AS ex_scanlator
-    FROM chapters
-    LEFT JOIN excluded_scanlators
-    ON chapters.manga_id = excluded_scanlators.manga_id
-    AND chapters.scanlator = excluded_scanlators.scanlator
+        excluded_scanlator.scanlator AS ex_scanlator
+    FROM chapter
+    LEFT JOIN excluded_scanlator
+    ON chapter.manga_id = excluded_scanlator.manga_id
+    AND chapter.remote_scanlator = excluded_scanlator.scanlator
     LEFT JOIN history
-    ON chapters._id = history.chapter_id
+    ON chapter.id = history.chapter_id
     -- KMK --> blacklisted chapters are hidden on the details screen, so they must not be
     -- counted here either. Key format matches scanlatorBlacklistKey(): rounded number@scanlator.
-    LEFT JOIN mangas BM
-    ON BM._id = chapters.manga_id
+    LEFT JOIN manga BM
+    ON BM.id = chapter.manga_id
     -- KMK <--
     WHERE ex_scanlator IS NULL
     -- KMK -->
@@ -96,8 +96,8 @@ LEFT JOIN (
             -- Broad key: every upload of that number from that scanlator.
             instr(
                 ', ' || BM.blacklisted_chapters || ', ',
-                ', ' || CAST(round(chapters.chapter_number * 100) / 100.0 AS TEXT)
-                    || '@' || trim(coalesce(chapters.scanlator, '')) || ', '
+                ', ' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
+                    || '@' || trim(coalesce(chapter.remote_scanlator, '')) || ', '
             ) = 0
             -- Narrowed key: the one upload, for when a scanlator published the same number twice
             -- and blacklisting the pair would take both. Matching the broad key only left these
@@ -105,23 +105,23 @@ LEFT JOIN (
             -- its number from the badge while its unread twin was the one on screen.
             AND instr(
                 ', ' || BM.blacklisted_chapters || ', ',
-                ', ' || CAST(round(chapters.chapter_number * 100) / 100.0 AS TEXT)
-                    || '@' || trim(coalesce(chapters.scanlator, '')) || '#'
-                    || substr(trim(chapters.url), 1, 256) || ', '
+                ', ' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
+                    || '@' || trim(coalesce(chapter.remote_scanlator, '')) || '#'
+                    || substr(trim(chapter.remote_url), 1, 256) || ', '
             ) = 0
         )
     )
     -- KMK <--
-    GROUP BY chapters.manga_id
+    GROUP BY chapter.manga_id
 ) AS C
-ON M._id = C.manga_id
+ON M.id = C.manga_id
 LEFT JOIN (
     SELECT manga_id, group_concat(category_id) AS categories
-    FROM mangas_categories
+    FROM manga_category
     GROUP BY manga_id
 ) AS MC
-ON MC.manga_id = M._id
-WHERE M.source <> 6969
+ON MC.manga_id = M.id
+WHERE M.source_id <> 6969
 UNION
 SELECT
     M.*,
@@ -140,13 +140,13 @@ SELECT
     coalesce(C.bookmarkReadUploads, 0) AS bookmarkedReadUploads,
     -- KMK <--
     coalesce(MC.categories, '0') AS categories
-FROM mangas M
+FROM manga M
 LEFT JOIN (
     SELECT merged.manga_id,merged.merge_id
     FROM merged
     GROUP BY merged.merge_id
 ) AS ME
-ON ME.merge_id = M._id
+ON ME.merge_id = M.id
 LEFT JOIN(
     SELECT
         ME.merge_id,
@@ -154,51 +154,51 @@ LEFT JOIN(
         -- matters more here: chapters arrive from every manga in the merge, so the same number is
         -- routinely present several times over.
         CAST(
-            count(DISTINCT CASE WHEN chapters.chapter_number > 0
-                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
-            + sum(CASE WHEN chapters.chapter_number <= 0 THEN 1 ELSE 0 END) AS INTEGER
+            count(DISTINCT CASE WHEN chapter.remote_chapter_number > 0
+                THEN CAST(round(chapter.remote_chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapter.remote_chapter_number <= 0 THEN 1 ELSE 0 END) AS INTEGER
         ) AS total,
         CAST(
-            count(DISTINCT CASE WHEN chapters.chapter_number > 0 AND chapters.read = 1
-                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
-            + sum(CASE WHEN chapters.chapter_number <= 0 AND chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER
+            count(DISTINCT CASE WHEN chapter.remote_chapter_number > 0 AND chapter.user_read = 1
+                THEN CAST(round(chapter.remote_chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapter.remote_chapter_number <= 0 AND chapter.user_read = 1 THEN 1 ELSE 0 END) AS INTEGER
         ) AS readCount,
         -- KMK --> Row basis, for the merge being off.
         CAST(count(*) AS INTEGER) AS totalUploads,
-        CAST(sum(CASE WHEN chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER) AS readUploads,
+        CAST(sum(CASE WHEN chapter.user_read = 1 THEN 1 ELSE 0 END) AS INTEGER) AS readUploads,
         -- KMK <--
-        coalesce(max(chapters.date_upload), 0) AS latestUpload,
-        coalesce(max(history.last_read), 0) AS lastRead,
-        coalesce(max(chapters.date_fetch), 0) AS fetchedAt,
+        coalesce(max(chapter.remote_date_upload), 0) AS latestUpload,
+        coalesce(max(history.read_at), 0) AS lastRead,
+        coalesce(max(chapter.state_date_fetch), 0) AS fetchedAt,
         CAST(
-            count(DISTINCT CASE WHEN chapters.chapter_number > 0 AND chapters.bookmark = 1
-                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
-            + sum(CASE WHEN chapters.chapter_number <= 0 AND chapters.bookmark = 1 THEN 1 ELSE 0 END) AS INTEGER
+            count(DISTINCT CASE WHEN chapter.remote_chapter_number > 0 AND chapter.user_bookmark = 1
+                THEN CAST(round(chapter.remote_chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapter.remote_chapter_number <= 0 AND chapter.user_bookmark = 1 THEN 1 ELSE 0 END) AS INTEGER
         ) AS bookmarkCount,
-        CAST(sum(CASE WHEN chapters.bookmark = 1 THEN 1 ELSE 0 END) AS INTEGER) AS bookmarkUploads,
+        CAST(sum(CASE WHEN chapter.user_bookmark = 1 THEN 1 ELSE 0 END) AS INTEGER) AS bookmarkUploads,
         CAST(
-            count(DISTINCT CASE WHEN chapters.chapter_number > 0
-                    AND chapters.bookmark = 1 AND chapters.read = 1
-                THEN CAST(round(chapters.chapter_number * 100) AS INTEGER) END)
-            + sum(CASE WHEN chapters.chapter_number <= 0
-                AND chapters.bookmark = 1 AND chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER
+            count(DISTINCT CASE WHEN chapter.remote_chapter_number > 0
+                    AND chapter.user_bookmark = 1 AND chapter.user_read = 1
+                THEN CAST(round(chapter.remote_chapter_number * 100) AS INTEGER) END)
+            + sum(CASE WHEN chapter.remote_chapter_number <= 0
+                AND chapter.user_bookmark = 1 AND chapter.user_read = 1 THEN 1 ELSE 0 END) AS INTEGER
         ) AS bookmarkReadCount,
         CAST(
-            sum(CASE WHEN chapters.bookmark = 1 AND chapters.read = 1 THEN 1 ELSE 0 END) AS INTEGER
+            sum(CASE WHEN chapter.user_bookmark = 1 AND chapter.user_read = 1 THEN 1 ELSE 0 END) AS INTEGER
         ) AS bookmarkReadUploads,
         -- KMK <-- Read state carries the same one known limit as the branch above.
-        excluded_scanlators.scanlator AS ex_scanlator
-    FROM chapters
-    LEFT JOIN excluded_scanlators
-    ON chapters.manga_id = excluded_scanlators.manga_id
-    AND chapters.scanlator = excluded_scanlators.scanlator
+        excluded_scanlator.scanlator AS ex_scanlator
+    FROM chapter
+    LEFT JOIN excluded_scanlator
+    ON chapter.manga_id = excluded_scanlator.manga_id
+    AND chapter.remote_scanlator = excluded_scanlator.scanlator
     LEFT JOIN history
-    ON chapters._id = history.chapter_id
+    ON chapter.id = history.chapter_id
     LEFT JOIN merged ME
-    ON ME.manga_id = chapters.manga_id
+    ON ME.manga_id = chapter.manga_id
     -- KMK --> merged entries keep the blacklist on the parent, which is ME.merge_id
-    LEFT JOIN mangas BM
-    ON BM._id = ME.merge_id
+    LEFT JOIN manga BM
+    ON BM.id = ME.merge_id
     -- KMK <--
     WHERE ex_scanlator IS NULL
     -- KMK -->
@@ -207,65 +207,39 @@ LEFT JOIN(
         OR (
             instr(
                 ', ' || BM.blacklisted_chapters || ', ',
-                ', ' || CAST(round(chapters.chapter_number * 100) / 100.0 AS TEXT)
-                    || '@' || trim(coalesce(chapters.scanlator, '')) || ', '
+                ', ' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
+                    || '@' || trim(coalesce(chapter.remote_scanlator, '')) || ', '
             ) = 0
             AND instr(
                 ', ' || BM.blacklisted_chapters || ', ',
-                ', ' || CAST(round(chapters.chapter_number * 100) / 100.0 AS TEXT)
-                    || '@' || trim(coalesce(chapters.scanlator, '')) || '#'
-                    || substr(trim(chapters.url), 1, 256) || ', '
+                ', ' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
+                    || '@' || trim(coalesce(chapter.remote_scanlator, '')) || '#'
+                    || substr(trim(chapter.remote_url), 1, 256) || ', '
             ) = 0
         )
     )
     -- KMK <--
     GROUP BY ME.merge_id
 ) AS C
-ON M._id = C.merge_id  -- ON ME.merge_id = C.merge_id
+ON M.id = C.merge_id  -- ON ME.merge_id = C.merge_id
 LEFT JOIN (
     SELECT manga_id, group_concat(category_id) AS categories
-    FROM mangas_categories
+    FROM manga_category
     GROUP BY manga_id
 ) AS MC
-ON MC.manga_id = M._id
-WHERE M.source = 6969;
+ON MC.manga_id = M.id
+WHERE M.source_id = 6969;
 
 library:
 SELECT
-    _id,
-    source,
-    url,
-    artist,
-    author,
-    description,
-    genre,
-    title,
-    status,
-    thumbnail_url,
-    favorite,
-    last_update,
-    next_update,
-    initialized,
-    viewer,
-    chapter_flags,
-    cover_last_modified,
-    date_added,
-    filtered_scanlators,
-    update_strategy,
-    calculate_interval,
-    last_modified_at,
-    favorite_modified_at,
-    version,
-    is_syncing,
-    notes,
-    memo,
-    scanlator_priority,
-    blacklisted_chapters,
-    reread_count,
-    rereading,
-    reread_started_at,
-    scanlator_range_rules,
-    is_light_novel,
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel,
     -- KMK --> One basis or the other, never a mixture: the counts feed unreadCount's set
     -- arithmetic, which only holds while all four share it. :smartScanlatorMerge is the same
     -- preference the details list, the reader and the library's continue button read, passed in
@@ -279,49 +253,23 @@ SELECT
     CASE WHEN :smartScanlatorMerge = 1 THEN bookmarkedReadCount ELSE bookmarkedReadUploads END AS bookmarkedReadCount,
     categories
 FROM libraryView
-WHERE libraryView.favorite = 1;
+WHERE libraryView.user_favorite_at IS NOT NULL;
 
 -- KMK --> fast-path count for boot badge / empty-check without materializing 1000+ LibraryManga rows
 libraryCount:
-SELECT count(*) FROM libraryView WHERE libraryView.favorite = 1;
+SELECT count(*) FROM libraryView WHERE libraryView.user_favorite_at IS NOT NULL;
 
--- KMK --> paginated variant for large libraries (cursor = last _id)
+-- KMK --> paginated variant for large libraries (cursor = last id)
 libraryPaginated:
 SELECT
-    _id,
-    source,
-    url,
-    artist,
-    author,
-    description,
-    genre,
-    title,
-    status,
-    thumbnail_url,
-    favorite,
-    last_update,
-    next_update,
-    initialized,
-    viewer,
-    chapter_flags,
-    cover_last_modified,
-    date_added,
-    filtered_scanlators,
-    update_strategy,
-    calculate_interval,
-    last_modified_at,
-    favorite_modified_at,
-    version,
-    is_syncing,
-    notes,
-    memo,
-    scanlator_priority,
-    blacklisted_chapters,
-    reread_count,
-    rereading,
-    reread_started_at,
-    scanlator_range_rules,
-    is_light_novel,
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel,
     CASE WHEN :smartScanlatorMerge = 1 THEN totalCount ELSE totalUploads END AS totalCount,
     CASE WHEN :smartScanlatorMerge = 1 THEN readCount ELSE readUploads END AS readCount,
     latestUpload,
@@ -331,44 +279,18 @@ SELECT
     CASE WHEN :smartScanlatorMerge = 1 THEN bookmarkedReadCount ELSE bookmarkedReadUploads END AS bookmarkedReadCount,
     categories
 FROM libraryView
-WHERE libraryView.favorite = 1 AND libraryView._id > :afterId ORDER BY libraryView._id LIMIT :limit;
+WHERE libraryView.user_favorite_at IS NOT NULL AND libraryView.id > :afterId ORDER BY libraryView.id LIMIT :limit;
 
 readMangaNonLibrary:
 SELECT
-    _id,
-    source,
-    url,
-    artist,
-    author,
-    description,
-    genre,
-    title,
-    status,
-    thumbnail_url,
-    favorite,
-    last_update,
-    next_update,
-    initialized,
-    viewer,
-    chapter_flags,
-    cover_last_modified,
-    date_added,
-    filtered_scanlators,
-    update_strategy,
-    calculate_interval,
-    last_modified_at,
-    favorite_modified_at,
-    version,
-    is_syncing,
-    notes,
-    memo,
-    scanlator_priority,
-    blacklisted_chapters,
-    reread_count,
-    rereading,
-    reread_started_at,
-    scanlator_range_rules,
-    is_light_novel,
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel,
     CASE WHEN :smartScanlatorMerge = 1 THEN totalCount ELSE totalUploads END AS totalCount,
     CASE WHEN :smartScanlatorMerge = 1 THEN readCount ELSE readUploads END AS readCount,
     latestUpload,
@@ -378,4 +300,4 @@ SELECT
     CASE WHEN :smartScanlatorMerge = 1 THEN bookmarkedReadCount ELSE bookmarkedReadUploads END AS bookmarkedReadCount,
     categories
 FROM libraryView
-WHERE libraryView.favorite = 0 AND libraryView.readCount != 0;
+WHERE libraryView.user_favorite_at IS NULL AND libraryView.readCount != 0;

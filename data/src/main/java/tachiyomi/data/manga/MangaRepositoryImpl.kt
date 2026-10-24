@@ -37,39 +37,39 @@ class MangaRepositoryImpl(
 ) : MangaRepository {
 
     override suspend fun getMangaById(id: Long): Manga {
-        return handler.awaitOne { mangasQueries.getMangaById(id, MangaMapper::mapManga) }
+        return handler.awaitOne { mangaQueries.getMangaById(id, MangaMapper::mapManga) }
     }
 
     override suspend fun getMangaByIdAsFlow(id: Long): Flow<Manga> {
-        return handler.subscribeToOne { mangasQueries.getMangaById(id, MangaMapper::mapManga) }
+        return handler.subscribeToOne { mangaQueries.getMangaById(id, MangaMapper::mapManga) }
     }
 
     override suspend fun getMangaByUrlAndSourceId(url: String, sourceId: Long): Manga? {
         return handler.awaitOneOrNull {
-            mangasQueries.getMangaByUrlAndSource(
-                url,
-                sourceId,
-                MangaMapper::mapManga,
+            mangaQueries.getMangaByUrlAndSource(
+                sourceId = sourceId,
+                remoteUrl = url,
+                mapper = MangaMapper::mapManga,
             )
         }
     }
 
     override fun getMangaByUrlAndSourceIdAsFlow(url: String, sourceId: Long): Flow<Manga?> {
         return handler.subscribeToOneOrNull {
-            mangasQueries.getMangaByUrlAndSource(
-                url,
-                sourceId,
-                MangaMapper::mapManga,
+            mangaQueries.getMangaByUrlAndSource(
+                sourceId = sourceId,
+                remoteUrl = url,
+                mapper = MangaMapper::mapManga,
             )
         }
     }
 
     override suspend fun getFavorites(): List<Manga> {
-        return handler.awaitList { mangasQueries.getFavorites(MangaMapper::mapManga) }
+        return handler.awaitList { mangaQueries.getFavorites(MangaMapper::mapManga) }
     }
 
     override suspend fun getReadMangaNotInLibrary(): List<Manga> {
-        return handler.awaitList { mangasQueries.getReadMangaNotInLibrary(MangaMapper::mapManga) }
+        return handler.awaitList { mangaQueries.getReadMangaNotInLibrary(MangaMapper::mapManga) }
     }
 
     override suspend fun getLibraryManga(): List<LibraryManga> {
@@ -131,58 +131,58 @@ class MangaRepositoryImpl(
     }
 
     override fun getFavoritesBySourceId(sourceId: Long): Flow<List<Manga>> {
-        return handler.subscribeToList { mangasQueries.getFavoriteBySourceId(sourceId, MangaMapper::mapManga) }
+        return handler.subscribeToList { mangaQueries.getFavoriteBySourceId(sourceId, MangaMapper::mapManga) }
     }
 
     // KMK --> Light favorites projections for callers that don't need the libraryView aggregate.
     // See MangaRepository for what each answers and why these exist.
     override suspend fun getFavoriteTitles(): List<String> {
         return handler.awaitList {
-            mangasQueries.getFavoriteTitles()
+            mangaQueries.getFavoriteTitles()
         }
     }
 
     override suspend fun getMangaIdByTitle(title: String): Long? {
         return handler.awaitOneOrNull {
-            mangasQueries.getFavoriteMangaIdByTitle(title = title)
+            mangaQueries.getFavoriteMangaIdByTitle(title = title)
         }
     }
 
     override suspend fun getFavoriteCovers(): List<Pair<Long, String?>> {
         return handler.awaitList {
-            mangasQueries.getFavoriteCovers { mangaId, thumbnailUrl -> mangaId to thumbnailUrl }
+            mangaQueries.getFavoriteCovers { mangaId, thumbnailUrl -> mangaId to thumbnailUrl }
         }
     }
 
     override suspend fun getFavoriteCategoryCounts(): Map<Long, Long> {
         return handler.awaitList {
-            mangasQueries.getFavoriteCategoryCounts { categoryId, mangaCount -> categoryId to mangaCount }
+            mangaQueries.getFavoriteCategoryCounts { categoryId, mangaCount -> categoryId to mangaCount }
         }.toMap()
     }
 
     override fun getFavoriteCategoryCountsAsFlow(): Flow<Map<Long, Long>> {
         return handler.subscribeToList {
-            mangasQueries.getFavoriteCategoryCounts { categoryId, mangaCount -> categoryId to mangaCount }
+            mangaQueries.getFavoriteCategoryCounts { categoryId, mangaCount -> categoryId to mangaCount }
         }.map { it.toMap() }
     }
     // KMK <--
 
     override suspend fun getDuplicateLibraryManga(id: Long, title: String): List<MangaWithChapterCount> {
         return handler.awaitList {
-            mangasQueries.getDuplicateLibraryManga(id, title, MangaMapper::mapMangaWithChapterCount)
+            mangaQueries.getDuplicateLibraryManga(id, title, MangaMapper::mapMangaWithChapterCount)
         }
     }
 
     override suspend fun getUpcomingManga(statuses: Set<Long>): Flow<List<Manga>> {
         val epochMillis = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toEpochSecond() * 1000
         return handler.subscribeToList {
-            mangasQueries.getUpcomingManga(epochMillis, statuses, MangaMapper::mapManga)
+            mangaQueries.getUpcomingManga(epochMillis, statuses, MangaMapper::mapManga)
         }
     }
 
     override suspend fun resetViewerFlags(): Boolean {
         return try {
-            handler.await { mangasQueries.resetViewerFlags() }
+            handler.await { mangaQueries.resetViewerFlags() }
             true
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e)
@@ -194,7 +194,7 @@ class MangaRepositoryImpl(
     override suspend fun updateLibraryChapterFlags(chapterFlags: Long): Boolean {
         return try {
             handler.await(inTransaction = true) {
-                mangasQueries.updateLibraryChapterFlags(chapterFlags)
+                mangaQueries.updateLibraryChapterFlags(chapterFlags)
             }
             true
         } catch (e: Exception) {
@@ -206,9 +206,9 @@ class MangaRepositoryImpl(
 
     override suspend fun setMangaCategories(mangaId: Long, categoryIds: List<Long>) {
         handler.await(inTransaction = true) {
-            mangas_categoriesQueries.deleteMangaCategoryByMangaId(mangaId)
+            manga_categoryQueries.deleteMangaCategoryByMangaId(mangaId)
             categoryIds.map { categoryId ->
-                mangas_categoriesQueries.insert(mangaId, categoryId)
+                manga_categoryQueries.insert(mangaId = mangaId, categoryId = categoryId)
             }
         }
     }
@@ -241,7 +241,7 @@ class MangaRepositoryImpl(
     ): List<Manga> {
         return handler.await(inTransaction = true) {
             manga.map {
-                mangasQueries.insertNetworkManga(
+                mangaQueries.insertNetworkManga(
                     source = it.source,
                     url = it.url,
                     // SY -->
@@ -253,7 +253,9 @@ class MangaRepositoryImpl(
                     genre = it.ogGenre,
                     status = it.ogStatus,
                     // SY <--
-                    favorite = it.favorite,
+                    // favorite and dateAdded became one column upstream: the timestamp only
+                    // exists while the entry is in the library
+                    favoriteAt = if (it.favorite) it.dateAdded else null,
                     lastUpdate = it.lastUpdate,
                     nextUpdate = it.nextUpdate,
                     calculateInterval = it.fetchInterval.toLong(),
@@ -261,7 +263,6 @@ class MangaRepositoryImpl(
                     viewerFlags = it.viewerFlags,
                     chapterFlags = it.chapterFlags,
                     coverLastModified = it.coverLastModified,
-                    dateAdded = it.dateAdded,
                     updateStrategy = it.updateStrategy,
                     version = it.version,
                     memo = it.memo,
@@ -273,6 +274,15 @@ class MangaRepositoryImpl(
                     // KMK -->
                     updateInfo = updateInfo,
                     // KMK <--
+                    // KMK -->
+                    scanlatorPriority = it.scanlatorPriority,
+                    blacklistedChapters = it.blacklistedChapters,
+                    rereadCount = it.rereadCount.toLong(),
+                    rereading = it.rereading,
+                    rereadStartedAt = it.rereadStartedAt,
+                    scanlatorRangeRules = it.scanlatorRangeRules,
+                    isLightNovel = it.isLightNovel,
+                    // KMK <--
                     mapper = MangaMapper::mapManga,
                 )
                     .executeAsOne()
@@ -283,27 +293,31 @@ class MangaRepositoryImpl(
     private suspend fun partialUpdate(vararg mangaUpdates: MangaUpdate) {
         handler.await(inTransaction = true) {
             mangaUpdates.forEach { value ->
-                mangasQueries.update(
+                mangaQueries.update(
                     source = value.source,
                     url = value.url,
-                    artist = value.artist,
+                    title = value.title,
                     author = value.author,
+                    artist = value.artist,
                     description = value.description,
                     genre = value.genre?.let(StringListColumnAdapter::encode),
-                    title = value.title,
                     status = value.status,
                     thumbnailUrl = value.thumbnailUrl,
-                    favorite = value.favorite,
+                    // NULL is a real value for user_favorite_at (it means "not in the
+                    // library"), so the query takes the favorite flag and the date separately
+                    // and only writes the timestamp when the flag is being set. :favorite is
+                    // only read when :favoriteSet is true, so a null flag folds into false.
+                    favoriteSet = value.favorite != null,
+                    favorite = value.favorite == true,
+                    favoriteAt = value.dateAdded,
                     lastUpdate = value.lastUpdate,
                     nextUpdate = value.nextUpdate,
-                    calculateInterval = value.fetchInterval?.toLong(),
                     initialized = value.initialized,
                     viewer = value.viewerFlags,
                     chapterFlags = value.chapterFlags,
                     coverLastModified = value.coverLastModified,
-                    dateAdded = value.dateAdded,
-                    mangaId = value.id,
                     updateStrategy = value.updateStrategy?.let(UpdateStrategyColumnAdapter::encode),
+                    calculateInterval = value.fetchInterval?.toLong(),
                     version = value.version,
                     isSyncing = 0,
                     notes = value.notes,
@@ -317,6 +331,7 @@ class MangaRepositoryImpl(
                     scanlatorRangeRules = value.scanlatorRangeRules?.let(StringListColumnAdapter::encode),
                     isLightNovel = value.isLightNovel,
                     // KMK <--
+                    mangaId = value.id,
                 )
             }
         }
@@ -324,20 +339,20 @@ class MangaRepositoryImpl(
 
     // SY -->
     override suspend fun getMangaBySourceId(sourceId: Long): List<Manga> {
-        return handler.awaitList { mangasQueries.getBySource(sourceId, MangaMapper::mapManga) }
+        return handler.awaitList { mangaQueries.getBySource(sourceId, MangaMapper::mapManga) }
     }
 
     override suspend fun getAll(): List<Manga> {
-        return handler.awaitList { mangasQueries.getAll(MangaMapper::mapManga) }
+        return handler.awaitList { mangaQueries.getAll(MangaMapper::mapManga) }
     }
 
     override suspend fun deleteManga(mangaId: Long) {
-        handler.await { mangasQueries.deleteById(mangaId) }
+        handler.await { mangaQueries.deleteById(mangaId) }
     }
 
     override suspend fun deleteNonLibraryManga(sourceIds: List<Long>, keepReadManga: Boolean) {
         handler.await {
-            mangasQueries.deleteNonLibraryManga(sourceIds, keepReadManga.toLong())
+            mangaQueries.deleteNonLibraryManga(sourceIds, keepReadManga.toLong())
         }
     }
 

@@ -982,12 +982,19 @@ class LibraryScreenModel(
     }
 
     /**
-     * Returns the common categories for the given list of manga.
+     * Returns the ids of the categories a manga belongs to.
      *
-     * @param mangas the list of manga.
+     * The loaded library already knows them for every entry it shows, so they are read from
+     * it instead of one query per entry (mihon#4022); an entry the current filter or search
+     * hides is not in the loaded set and falls back to the database.
      */
-    private suspend fun getCategorySets(mangas: List<Manga>): List<Set<Category>> {
-        return mangas.map { getCategories.await(it.id).toSet() }
+    private suspend fun getCategoryIds(manga: Manga): Set<Long> {
+        return state.value.libraryData.favoritesById[manga.id]
+            ?.libraryManga
+            ?.categories
+            // The library reports no category as 0
+            ?.filterTo(mutableSetOf()) { it != 0L }
+            ?: getCategories.await(manga.id).mapTo(mutableSetOf()) { it.id }
     }
 
     suspend fun getNextUnreadChapter(manga: Manga): Chapter? {
@@ -1297,8 +1304,7 @@ class LibraryScreenModel(
     fun setMangaCategories(mangaList: List<Manga>, addCategories: List<Long>, removeCategories: List<Long>) {
         screenModelScope.launchNonCancellable {
             mangaList.forEach { manga ->
-                val categoryIds = getCategories.await(manga.id)
-                    .map { it.id }
+                val categoryIds = getCategoryIds(manga)
                     .subtract(removeCategories.toSet())
                     .plus(addCategories)
                     .toList()
@@ -1852,12 +1858,12 @@ class LibraryScreenModel(
             val categories = state.value.libraryData.categories.fastFilter { it.id != 0L }
             // KMK <--
 
-            val mangaCategorySets = getCategorySets(mangaList)
-            val common = mangaCategorySets.reduceOrNull { set1, set2 -> set1.intersect(set2) }.orEmpty()
-            val mix = mangaCategorySets.flatten().distinct().subtract(common)
+            val mangaCategoryIds = mangaList.map { getCategoryIds(it) }
+            val common = mangaCategoryIds.reduceOrNull { set1, set2 -> set1 intersect set2 }.orEmpty()
+            val mix = mangaCategoryIds.flatten().toSet() - common
             val preselected = categories
                 .fastMap {
-                    when (it) {
+                    when (it.id) {
                         in common -> CheckboxState.State.Checked(it)
                         in mix -> CheckboxState.TriState.Exclude(it)
                         else -> CheckboxState.State.None(it)

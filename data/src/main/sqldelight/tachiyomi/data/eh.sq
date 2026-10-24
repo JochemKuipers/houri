@@ -1,10 +1,13 @@
+-- EXH --> Queries that serve the metadata and migration flows. The table they read was
+-- renamed with the Mihon schema rework (mangas -> manga, chapters -> chapter, manga_sync ->
+-- manga_track), so these follow the new names.
 deleteBySyncId:
-DELETE FROM manga_sync WHERE sync_id = :syncId;
+DELETE FROM manga_track WHERE tracker_id = :syncId;
 
 migrateSource:
-UPDATE mangas
-SET source = :newId
-WHERE source = :oldId;
+UPDATE manga
+SET source_id = :newId
+WHERE source_id = :oldId;
 
 -- KMK -->
 migrateMergedSource:
@@ -24,22 +27,31 @@ WHERE source = :oldId;
 -- KMK <--
 
 getChaptersByMangaIds:
-SELECT * FROM chapters WHERE manga_id IN :mangaIds;
+SELECT
+    id, manga_id, remote_url, remote_name, remote_scanlator, remote_chapter_number,
+    remote_date_upload, remote_order, remote_memo, user_read, user_bookmark,
+    user_bookmark_color, user_last_page_read, state_date_fetch,
+    last_modified_at, version, is_syncing
+FROM chapter
+WHERE manga_id IN :mangaIds;
 
 migrateAllNhentaiToOtherLang:
-UPDATE mangas
-SET source = :nh
-WHERE favorite = 1 AND source IN :sources;
+UPDATE manga
+SET source_id = :nh
+WHERE user_favorite_at IS NOT NULL AND source_id IN :sources;
 
 resetReaderViewerForAllManga:
-UPDATE mangas
-SET viewer = 0;
+UPDATE manga
+SET user_reader_flags = 0;
 
 fixReaderViewerBackupBug:
-UPDATE mangas
-SET viewer = 0
-WHERE viewer = -1;
+UPDATE manga
+SET user_reader_flags = 0
+WHERE user_reader_flags = -1;
 
+-- Everything not in the library joins it; entries already in it keep their favorite date
 addAllMangaInDatabaseToLibrary:
-UPDATE mangas
-SET favorite = 1;
+UPDATE manga
+SET user_favorite_at = 0
+WHERE user_favorite_at IS NULL;
+-- EXH <--

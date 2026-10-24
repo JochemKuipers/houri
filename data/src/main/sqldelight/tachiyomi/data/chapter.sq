@@ -1,0 +1,238 @@
+import kotlin.Boolean;
+import kotlinx.serialization.json.JsonObject;
+
+CREATE TABLE chapter(
+    id INTEGER NOT NULL PRIMARY KEY,
+    manga_id INTEGER NOT NULL,
+    remote_url TEXT NOT NULL,
+    remote_name TEXT NOT NULL,
+    remote_scanlator TEXT,
+    remote_chapter_number REAL NOT NULL,
+    remote_date_upload INTEGER NOT NULL,
+    remote_order INTEGER NOT NULL,
+    remote_memo BLOB AS JsonObject NOT NULL DEFAULT (CAST('{}' AS BLOB)),
+    user_read INTEGER AS Boolean NOT NULL,
+    user_bookmark INTEGER AS Boolean NOT NULL,
+    -- KMK --> Kept directly after user_bookmark so the SELECT column order still lines up
+    -- with ChapterMapper.mapChapter's parameter order.
+    user_bookmark_color INTEGER NOT NULL DEFAULT 0,
+    -- KMK <--
+    user_last_page_read INTEGER NOT NULL,
+    state_date_fetch INTEGER NOT NULL,
+    -- SY --> The sync-era columns stay: this fork still ships the sync services, which diff
+    -- chapters by version/is_syncing and last_modified_at. Mihon dropped them along with its
+    -- sync feature.
+    last_modified_at INTEGER NOT NULL DEFAULT 0,
+    version INTEGER NOT NULL DEFAULT 0,
+    is_syncing INTEGER NOT NULL DEFAULT 0,
+    -- SY <--
+    UNIQUE(manga_id, remote_url),
+    FOREIGN KEY(manga_id) REFERENCES manga (id)
+    ON DELETE CASCADE
+);
+
+CREATE INDEX chapter_state_date_fetch_index ON chapter(state_date_fetch);
+CREATE INDEX chapter_unread_state_date_fetch_index ON chapter(state_date_fetch) WHERE user_read = 0;
+-- KMK --> The EXH chapter lookup by url alone (getChapterByUrl) has no unique prefix to lean on
+CREATE INDEX chapter_remote_url_index ON chapter(remote_url);
+-- KMK <--
+
+CREATE TRIGGER update_last_modified_at_chapters
+AFTER UPDATE ON chapter
+FOR EACH ROW
+BEGIN
+  UPDATE chapter
+  SET last_modified_at = strftime('%s', 'now')
+  WHERE id = new.id;
+END;
+
+CREATE TRIGGER update_chapter_and_manga_version AFTER UPDATE ON chapter
+WHEN new.is_syncing = 0 AND (
+    new.user_read != old.user_read OR
+    new.user_bookmark != old.user_bookmark OR
+    new.user_last_page_read != old.user_last_page_read
+)
+BEGIN
+    -- Update the chapter version
+    UPDATE chapter SET version = version + 1
+    WHERE id = new.id;
+
+    -- Update the manga version
+    UPDATE manga SET version = version + 1
+    WHERE id = new.manga_id AND (SELECT is_syncing FROM manga WHERE id = new.manga_id) = 0;
+END;
+
+-- KMK --> Columns in the table's order, mapper parameters named after them, and the same
+-- list in every query so mapChapter's positional signature reads one way everywhere.
+getChapterById:
+SELECT
+    id, manga_id, remote_url, remote_name, remote_scanlator, remote_chapter_number,
+    remote_date_upload, remote_order, remote_memo, user_read, user_bookmark,
+    user_bookmark_color, user_last_page_read, state_date_fetch,
+    last_modified_at, version, is_syncing
+FROM chapter
+WHERE id = :id;
+
+getChaptersByMangaId:
+SELECT
+    C.id, C.manga_id, C.remote_url, C.remote_name, C.remote_scanlator, C.remote_chapter_number,
+    C.remote_date_upload, C.remote_order, C.remote_memo, C.user_read, C.user_bookmark,
+    C.user_bookmark_color, C.user_last_page_read, C.state_date_fetch,
+    C.last_modified_at, C.version, C.is_syncing
+FROM chapter C
+-- KMK -->
+JOIN manga M ON C.manga_id = M.id
+-- KMK <--
+LEFT JOIN excluded_scanlator ES
+ON C.manga_id = ES.manga_id
+AND C.remote_scanlator = ES.scanlator
+WHERE C.manga_id = :mangaId
+AND (
+    :applyScanlatorFilter = 0
+    -- KMK -->
+    OR (
+        ES.scanlator IS NULL
+        AND ((M.user_chapter_flags & :bookmarkUnmask) = 0 OR C.user_bookmark = 0)
+        AND ((M.user_chapter_flags & :bookmarkMask) = 0 OR C.user_bookmark = 1)
+    )
+    -- KMK <--
+);
+
+-- Only the caller's list of names is wanted, so duplicates of one scanlator collapse
+getScanlatorsByMangaId:
+SELECT DISTINCT remote_scanlator
+FROM chapter
+WHERE manga_id = :mangaId;
+
+getBookmarkedChaptersByMangaId:
+SELECT
+    id, manga_id, remote_url, remote_name, remote_scanlator, remote_chapter_number,
+    remote_date_upload, remote_order, remote_memo, user_read, user_bookmark,
+    user_bookmark_color, user_last_page_read, state_date_fetch,
+    last_modified_at, version, is_syncing
+FROM chapter
+WHERE manga_id = :mangaId
+AND user_bookmark;
+
+-- (manga_id, remote_url) is unique now, so there is never more than one row to return
+getChapterByUrlAndMangaId:
+SELECT
+    id, manga_id, remote_url, remote_name, remote_scanlator, remote_chapter_number,
+    remote_date_upload, remote_order, remote_memo, user_read, user_bookmark,
+    user_bookmark_color, user_last_page_read, state_date_fetch,
+    last_modified_at, version, is_syncing
+FROM chapter
+WHERE manga_id = :mangaId
+AND remote_url = :remoteUrl;
+
+-- SY -->
+getChapterByUrl:
+SELECT
+    id, manga_id, remote_url, remote_name, remote_scanlator, remote_chapter_number,
+    remote_date_upload, remote_order, remote_memo, user_read, user_bookmark,
+    user_bookmark_color, user_last_page_read, state_date_fetch,
+    last_modified_at, version, is_syncing
+FROM chapter
+WHERE remote_url = :chapterUrl;
+
+getMergedChaptersByMangaId:
+SELECT
+    C.id, C.manga_id, C.remote_url, C.remote_name, C.remote_scanlator, C.remote_chapter_number,
+    C.remote_date_upload, C.remote_order, C.remote_memo, C.user_read, C.user_bookmark,
+    C.user_bookmark_color, C.user_last_page_read, C.state_date_fetch,
+    C.last_modified_at, C.version, C.is_syncing
+FROM chapter C
+LEFT JOIN excluded_scanlator ES
+-- KMK --> The exclusion is stored against the merge parent, not the children it gathers
+ON ES.manga_id = :mangaId
+AND C.remote_scanlator = ES.scanlator
+JOIN manga MA ON MA.id = :mangaId
+-- KMK <--
+WHERE C.manga_id IN (SELECT manga_id FROM merged WHERE merge_id = :mangaId)
+AND (
+    :applyScanlatorFilter = 0
+    -- KMK -->
+    OR (
+        ES.scanlator IS NULL
+        AND ((MA.user_chapter_flags & :bookmarkUnmask) = 0 OR C.user_bookmark = 0)
+        AND ((MA.user_chapter_flags & :bookmarkMask) = 0 OR C.user_bookmark = 1)
+    )
+    -- KMK <--
+)
+-- KMK -->
+ORDER BY C.manga_id, C.remote_order;
+-- KMK <--
+
+getScanlatorsByMergeId:
+SELECT DISTINCT remote_scanlator
+FROM chapter
+WHERE manga_id IN (SELECT manga_id FROM merged WHERE merge_id = :mergeId);
+
+-- KMK --> Reset the marker the sync flow sets around a restore, so a later sync is not
+-- blocked by a stale in-progress flag.
+resetIsSyncing:
+UPDATE chapter
+SET is_syncing = 0
+WHERE is_syncing = 1;
+-- KMK <--
+-- SY <--
+
+removeChaptersWithIds:
+DELETE FROM chapter
+WHERE id IN :chapterIds;
+
+-- KMK --> Same shape as getChaptersByMangaId but over several entries at once (EXH migration)
+getChaptersByMangaIds:
+SELECT
+    id, manga_id, remote_url, remote_name, remote_scanlator, remote_chapter_number,
+    remote_date_upload, remote_order, remote_memo, user_read, user_bookmark,
+    user_bookmark_color, user_last_page_read, state_date_fetch,
+    last_modified_at, version, is_syncing
+FROM chapter
+WHERE manga_id IN :mangaIds;
+-- KMK <--
+
+insert:
+INSERT INTO chapter(
+    manga_id, remote_url, remote_name, remote_scanlator, remote_chapter_number,
+    remote_date_upload, remote_order, remote_memo, user_read, user_bookmark,
+    user_bookmark_color, user_last_page_read, state_date_fetch,
+    last_modified_at, version, is_syncing
+)
+VALUES (
+    :mangaId, :url, :name, :scanlator, :chapterNumber,
+    :dateUpload, :sourceOrder, :memo, :read, :bookmark,
+    :bookmarkColor, :lastPageRead, :dateFetch,
+    0, :version, 0
+)
+-- Two syncs of the same entry can race; the chapter the other one already stored is skipped
+-- rather than failing the whole batch. (source_id, remote_url) uniqueness on manga does the
+-- same for the entry itself.
+ON CONFLICT(manga_id, remote_url) DO NOTHING;
+
+selectLastInsertedRowId:
+SELECT last_insert_rowid();
+
+update:
+UPDATE chapter
+SET manga_id = coalesce(:mangaId, manga_id),
+    remote_url = coalesce(:url, remote_url),
+    remote_name = coalesce(:name, remote_name),
+    remote_scanlator = coalesce(:scanlator, remote_scanlator),
+    user_read = coalesce(:read, user_read),
+    user_bookmark = coalesce(:bookmark, user_bookmark),
+    -- KMK -->
+    -- Deliberately absent from update_chapter_and_manga_version's WHEN clause:
+    -- the colour is a local annotation like memo, so recolouring a bookmark
+    -- shouldn't bump the sync version and re-push the chapter to other devices.
+    user_bookmark_color = coalesce(:bookmarkColor, user_bookmark_color),
+    -- KMK <--
+    user_last_page_read = coalesce(:lastPageRead, user_last_page_read),
+    remote_chapter_number = coalesce(:chapterNumber, remote_chapter_number),
+    remote_order = coalesce(:sourceOrder, remote_order),
+    state_date_fetch = coalesce(:dateFetch, state_date_fetch),
+    remote_date_upload = coalesce(:dateUpload, remote_date_upload),
+    version = coalesce(:version, version),
+    is_syncing = coalesce(:isSyncing, is_syncing),
+    remote_memo = coalesce(:memo, remote_memo)
+WHERE id = :chapterId;

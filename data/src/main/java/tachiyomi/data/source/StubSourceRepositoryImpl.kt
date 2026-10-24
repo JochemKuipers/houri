@@ -17,20 +17,21 @@ class StubSourceRepositoryImpl(
 ) : StubSourceRepository {
 
     override fun subscribeAll(): Flow<List<StubSource>> {
-        return handler.subscribeToList { sourcesQueries.findAll(::mapStubSource) }
+        return handler.subscribeToList { sourceQueries.findAll(::mapStubSource) }
     }
 
     override suspend fun getStubSource(id: Long): StubSource? {
-        return handler.awaitOneOrNull { sourcesQueries.findOne(id, ::mapStubSource) }
+        return handler.awaitOneOrNull { sourceQueries.findOne(id, ::mapStubSource) }
     }
 
     override suspend fun upsertStubSource(id: Long, lang: String, name: String) {
-        handler.await { sourcesQueries.upsert(id, lang, name) }
+        // The two string arguments pass by name: swapping them would still compile
+        handler.await { sourceQueries.upsert(id = id, name = name, language = lang) }
     }
 
     private fun mapStubSource(
         id: Long,
-        lang: String,
         name: String,
+        lang: String,
     ): StubSource = StubSource(id = id, lang = lang, name = name)
 }

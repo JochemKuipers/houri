@@ -10,7 +10,7 @@ CREATE TABLE manga_recommendations (
     rec_associated_source_id INTEGER,
     results BLOB AS JsonObject NOT NULL,
     cached_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    FOREIGN KEY(source_manga_id) REFERENCES mangas (_id)
+    FOREIGN KEY(source_manga_id) REFERENCES manga (id)
     ON DELETE CASCADE
 );
 

@@ -21,7 +21,7 @@ import logcat.LogPriority
 import logcat.logcat
 import mihon.app.di.globalAppGraph
 import tachiyomi.core.common.util.system.logcat
-import tachiyomi.data.Chapters
+import tachiyomi.data.Chapter
 import tachiyomi.data.DatabaseHandler
 import tachiyomi.data.manga.MangaMapper.mapManga
 import tachiyomi.domain.category.interactor.GetCategories
@@ -74,8 +74,8 @@ class SyncManager(
     suspend fun syncData() {
         // Reset isSyncing in case it was left over or failed syncing during restore.
         handler.await(inTransaction = true) {
-            mangasQueries.resetIsSyncing()
-            chaptersQueries.resetIsSyncing()
+            mangaQueries.resetIsSyncing()
+            chapterQueries.resetIsSyncing()
         }
 
         val syncOptions = syncPreferences.getSyncSettings()
@@ -251,16 +251,16 @@ class SyncManager(
      * @return a list of all manga stored in the database
      */
     private suspend fun getAllMangaFromDB(): List<Manga> {
-        return handler.awaitList { mangasQueries.getAllManga(::mapManga) }
+        return handler.awaitList { mangaQueries.getAllManga(::mapManga) }
     }
 
     private suspend fun getAllMangaThatNeedsSync(): List<Manga> {
-        return handler.awaitList { mangasQueries.getMangasWithFavoriteTimestamp(::mapManga) }
+        return handler.awaitList { mangaQueries.getMangasWithFavoriteTimestamp(::mapManga) }
     }
 
     private suspend fun isMangaDifferent(localManga: Manga, remoteManga: BackupManga): Boolean {
         val localChapters = handler.await {
-            chaptersQueries.getChaptersByMangaId(
+            chapterQueries.getChaptersByMangaId(
                 localManga.id,
                 0,
                 // KMK -->
@@ -286,8 +286,8 @@ class SyncManager(
         return false
     }
 
-    private fun areChaptersDifferent(localChapters: List<Chapters>, remoteChapters: List<BackupChapter>): Boolean {
-        val localChapterMap = localChapters.associateBy { it.url }
+    private fun areChaptersDifferent(localChapters: List<Chapter>, remoteChapters: List<BackupChapter>): Boolean {
+        val localChapterMap = localChapters.associateBy { it.remote_url }
         val remoteChapterMap = remoteChapters.associateBy { it.url }
 
         if (localChapterMap.size != remoteChapterMap.size) {

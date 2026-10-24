@@ -1,0 +1,522 @@
+import eu.kanade.tachiyomi.source.model.UpdateStrategy;
+import kotlin.Boolean;
+import kotlin.String;
+import kotlin.collections.List;
+import kotlinx.serialization.json.JsonObject;
+
+CREATE TABLE manga(
+    id INTEGER NOT NULL PRIMARY KEY,
+    source_id INTEGER NOT NULL,
+    remote_url TEXT NOT NULL,
+    remote_title TEXT NOT NULL,
+    remote_author TEXT,
+    remote_artist TEXT,
+    remote_description TEXT,
+    remote_genre TEXT AS List<String>,
+    remote_status INTEGER NOT NULL,
+    remote_cover TEXT,
+    remote_update_strategy INTEGER AS UpdateStrategy NOT NULL,
+    remote_memo BLOB AS JsonObject NOT NULL DEFAULT (CAST('{}' AS BLOB)),
+    user_favorite_at INTEGER,
+    user_notes TEXT NOT NULL DEFAULT "",
+    user_reader_flags INTEGER NOT NULL,
+    user_chapter_flags INTEGER NOT NULL,
+    state_chapter_last_update INTEGER,
+    state_chapter_next_update INTEGER,
+    state_chapter_fetch_interval INTEGER NOT NULL DEFAULT 0,
+    state_cover_last_modified INTEGER NOT NULL,
+    state_initialized INTEGER AS Boolean NOT NULL,
+    -- SY --> The sync-era columns stay: this fork still ships the sync services, which diff
+    -- entries by version/is_syncing and read last_modified_at/favorite_modified_at to decide
+    -- what to push. Mihon dropped them when it dropped its sync feature.
+    last_modified_at INTEGER NOT NULL DEFAULT 0,
+    favorite_modified_at INTEGER,
+    version INTEGER NOT NULL DEFAULT 0,
+    is_syncing INTEGER NOT NULL DEFAULT 0,
+    -- SY <--
+    -- KMK -->
+    scanlator_priority TEXT AS List<String> NOT NULL DEFAULT '',
+    blacklisted_chapters TEXT AS List<String> NOT NULL DEFAULT '',
+    reread_count INTEGER NOT NULL DEFAULT 0,
+    rereading INTEGER AS Boolean NOT NULL DEFAULT 0,
+    reread_started_at INTEGER NOT NULL DEFAULT 0,
+    scanlator_range_rules TEXT AS List<String> NOT NULL DEFAULT '',
+    is_light_novel INTEGER AS Boolean NOT NULL DEFAULT 0,
+    -- KMK <--
+    UNIQUE(source_id, remote_url)
+);
+
+CREATE INDEX manga_user_favorite_at_index ON manga(user_favorite_at) WHERE user_favorite_at IS NOT NULL;
+
+CREATE TRIGGER update_last_favorited_at_mangas
+AFTER UPDATE OF user_favorite_at ON manga
+BEGIN
+  UPDATE manga
+  SET favorite_modified_at = strftime('%s', 'now')
+  WHERE id = new.id;
+END;
+
+CREATE TRIGGER update_last_modified_at_mangas
+AFTER UPDATE ON manga
+FOR EACH ROW
+BEGIN
+  UPDATE manga
+  SET last_modified_at = strftime('%s', 'now')
+  WHERE id = new.id;
+END;
+
+CREATE TRIGGER update_manga_version AFTER UPDATE ON manga
+BEGIN
+    UPDATE manga SET version = version + 1
+    WHERE id = new.id AND new.is_syncing = 0 AND (
+        new.remote_url != old.remote_url OR
+        new.remote_description != old.remote_description OR
+        (new.user_favorite_at IS NOT NULL) != (old.user_favorite_at IS NOT NULL)
+    );
+END;
+
+-- KMK --> Columns in the table's order, mapper parameters named after them, and the same
+-- list in every query so mapManga's positional signature reads one way everywhere.
+getMangaById:
+SELECT
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel
+FROM manga
+WHERE id = :id;
+
+-- (source_id, remote_url) is unique now, so there is never more than one row to return
+getMangaByUrlAndSource:
+SELECT
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel
+FROM manga
+WHERE source_id = :sourceId
+AND remote_url = :remoteUrl;
+
+getFavorites:
+SELECT
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel
+FROM manga
+WHERE user_favorite_at IS NOT NULL;
+
+getReadMangaNotInLibrary:
+SELECT
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel
+FROM manga
+WHERE user_favorite_at IS NULL
+AND EXISTS (
+    SELECT 1
+    FROM chapter
+    WHERE chapter.manga_id = manga.id
+    AND (user_read = 1 OR user_last_page_read != 0)
+);
+
+getAllManga:
+SELECT
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel
+FROM manga;
+
+getAllMangaSourceAndUrl:
+SELECT source_id, remote_url
+FROM manga;
+
+-- SY --> Entries the sync services consider changed: a favorite_modified_at is stamped by
+-- update_last_favorited_at_mangas whenever favorite state moves.
+getMangasWithFavoriteTimestamp:
+SELECT
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel
+FROM manga
+WHERE favorite_modified_at IS NOT NULL;
+-- SY <--
+
+getSourceIdWithFavoriteCount:
+SELECT source_id, count(*)
+FROM manga
+WHERE user_favorite_at IS NOT NULL
+GROUP BY source_id;
+
+getFavoriteBySourceId:
+SELECT
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel
+FROM manga
+WHERE user_favorite_at IS NOT NULL
+AND source_id = :sourceId;
+
+getDuplicateLibraryManga:
+WITH
+track_dupes AS (
+    SELECT DISTINCT T2.manga_id
+    FROM manga_track T1
+    JOIN manga_track T2
+    ON T1.tracker_id = T2.tracker_id
+    AND T1.remote_id = T2.remote_id
+    AND T1.remote_id != 0
+    AND T1.manga_id != T2.manga_id
+    WHERE T1.manga_id = :id
+)
+SELECT
+    M.id, M.source_id, M.remote_url, M.remote_title, M.remote_author, M.remote_artist,
+    M.remote_description, M.remote_genre, M.remote_status, M.remote_cover,
+    M.remote_update_strategy, M.remote_memo, M.user_favorite_at, M.user_notes,
+    M.user_reader_flags, M.user_chapter_flags, M.state_chapter_last_update,
+    M.state_chapter_next_update, M.state_chapter_fetch_interval,
+    M.state_cover_last_modified, M.state_initialized,
+    M.last_modified_at, M.favorite_modified_at, M.version, M.is_syncing,
+    M.scanlator_priority, M.blacklisted_chapters, M.reread_count, M.rereading,
+    M.reread_started_at, M.scanlator_range_rules, M.is_light_novel,
+    (
+        SELECT count(*)
+        FROM chapter C
+        LEFT JOIN excluded_scanlator ES
+        ON C.manga_id = ES.manga_id
+        AND C.remote_scanlator = ES.scanlator
+        WHERE C.manga_id = M.id
+        AND ES.scanlator IS NULL
+    ) AS chapter_count
+FROM manga M
+WHERE M.user_favorite_at IS NOT NULL
+AND M.id != :id
+AND (lower(M.remote_title) LIKE '%' || lower(:remoteTitle) || '%' OR M.id IN (SELECT manga_id FROM track_dupes));
+
+getUpcomingManga:
+SELECT
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel
+FROM manga
+WHERE state_chapter_next_update >= :startOfDay
+AND user_favorite_at IS NOT NULL
+AND remote_status IN :statuses
+ORDER BY state_chapter_next_update ASC;
+
+resetViewerFlags:
+UPDATE manga
+SET user_reader_flags = 0
+WHERE user_reader_flags != 0;
+
+-- SY --> Reset the marker the sync flow sets around a restore, so a later sync is not
+-- blocked by a stale in-progress flag.
+resetIsSyncing:
+UPDATE manga
+SET is_syncing = 0
+WHERE is_syncing = 1;
+-- SY <--
+
+-- KMK --> One statement for the whole library: routing this through per-manga updates costs
+-- a transaction per entry.
+updateLibraryChapterFlags:
+UPDATE manga
+SET user_chapter_flags = :chapterFlags
+WHERE user_favorite_at IS NOT NULL;
+-- KMK <--
+
+getSourceIdsWithNonLibraryManga:
+SELECT source_id, count(*) AS manga_count
+FROM manga
+WHERE user_favorite_at IS NULL
+GROUP BY source_id;
+
+deleteNonLibraryManga:
+DELETE FROM manga
+WHERE user_favorite_at IS NULL
+AND source_id IN :sourceIds
+AND (
+    :keepReadManga = 0
+    OR NOT EXISTS (
+        SELECT 1
+        FROM chapter
+        WHERE chapter.manga_id = manga.id
+        AND (user_read = 1 OR user_last_page_read != 0)
+    )
+)
+-- KMK --> Merged entries are kept even when they fail the conditions above: dropping one
+-- orphans its merge references.
+AND id NOT IN (
+    SELECT DISTINCT manga_id FROM merged WHERE manga_id != merge_id
+);
+-- KMK <--
+
+insert:
+INSERT INTO manga(
+    source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, version, scanlator_priority, blacklisted_chapters, reread_count,
+    rereading, reread_started_at, scanlator_range_rules, is_light_novel
+)
+VALUES (
+    :source, :url, :title, :author, :artist, :description,
+    :genre, :status, :thumbnailUrl, :updateStrategy, :memo,
+    :favoriteAt, :notes, :viewerFlags, :chapterFlags,
+    :lastUpdate, :nextUpdate, :calculateInterval,
+    :coverLastModified, :initialized,
+    0, :version,
+    :scanlatorPriority, :blacklistedChapters, :rereadCount,
+    :rereading, :rereadStartedAt, :scanlatorRangeRules, :isLightNovel
+);
+
+update:
+UPDATE manga SET
+    source_id = coalesce(:source, source_id),
+    remote_url = coalesce(:url, remote_url),
+    remote_title = coalesce(:title, remote_title),
+    remote_author = coalesce(:author, remote_author),
+    remote_artist = coalesce(:artist, remote_artist),
+    remote_description = coalesce(:description, remote_description),
+    remote_genre = coalesce(:genre, remote_genre),
+    remote_status = coalesce(:status, remote_status),
+    remote_cover = coalesce(:thumbnailUrl, remote_cover),
+    -- NULL is a real value here (not in the library), which coalesce cannot write
+    user_favorite_at = CASE
+        WHEN :favoriteSet THEN CASE WHEN :favorite THEN coalesce(:favoriteAt, user_favorite_at, 0) ELSE NULL END
+        ELSE user_favorite_at
+    END,
+    state_chapter_last_update = coalesce(:lastUpdate, state_chapter_last_update),
+    state_chapter_next_update = coalesce(:nextUpdate, state_chapter_next_update),
+    state_initialized = coalesce(:initialized, state_initialized),
+    user_reader_flags = coalesce(:viewer, user_reader_flags),
+    user_chapter_flags = coalesce(:chapterFlags, user_chapter_flags),
+    state_cover_last_modified = coalesce(:coverLastModified, state_cover_last_modified),
+    remote_update_strategy = coalesce(:updateStrategy, remote_update_strategy),
+    state_chapter_fetch_interval = coalesce(:calculateInterval, state_chapter_fetch_interval),
+    version = coalesce(:version, version),
+    is_syncing = coalesce(:isSyncing, is_syncing),
+    user_notes = coalesce(:notes, user_notes),
+    remote_memo = coalesce(:memo, remote_memo),
+    -- KMK -->
+    scanlator_priority = coalesce(:scanlatorPriority, scanlator_priority),
+    blacklisted_chapters = coalesce(:blacklistedChapters, blacklisted_chapters),
+    reread_count = coalesce(:rereadCount, reread_count),
+    rereading = coalesce(:rereading, rereading),
+    reread_started_at = coalesce(:rereadStartedAt, reread_started_at),
+    scanlator_range_rules = coalesce(:scanlatorRangeRules, scanlator_range_rules),
+    is_light_novel = coalesce(:isLightNovel, is_light_novel)
+    -- KMK <--
+WHERE id = :mangaId;
+
+selectLastInsertedRowId:
+SELECT last_insert_rowid();
+
+insertNetworkManga {
+    -- A new entry is inserted as the source reported it. An existing one takes the fresh details
+    -- only while it is outside the library, so a library entry keeps what the user already has.
+    -- KMK: :updateInfo gates the refresh half the same way the previous two-statement form did.
+    INSERT INTO manga(
+        source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+        remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+        user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+        state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+        state_cover_last_modified, state_initialized,
+        last_modified_at, version,
+        scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+        scanlator_range_rules, is_light_novel
+    )
+    VALUES (
+        :source, :url, :title, :author, :artist, :description,
+        :genre, :status, :thumbnailUrl, :updateStrategy, :memo,
+        :favoriteAt, '', :viewerFlags, :chapterFlags,
+        :lastUpdate, :nextUpdate, :calculateInterval,
+        :coverLastModified, :initialized,
+        0, :version,
+        :scanlatorPriority, :blacklistedChapters, :rereadCount, :rereading, :rereadStartedAt,
+        :scanlatorRangeRules, :isLightNovel
+    )
+    ON CONFLICT(source_id, remote_url) DO UPDATE SET
+        remote_title = CASE WHEN :updateTitle THEN excluded.remote_title ELSE remote_title END,
+        remote_cover = CASE WHEN :updateCover THEN excluded.remote_cover ELSE remote_cover END,
+        remote_author = CASE WHEN :updateDetails THEN excluded.remote_author ELSE remote_author END,
+        remote_artist = CASE WHEN :updateDetails THEN excluded.remote_artist ELSE remote_artist END,
+        remote_description = CASE WHEN :updateDetails THEN excluded.remote_description ELSE remote_description END,
+        remote_genre = CASE WHEN :updateDetails THEN excluded.remote_genre ELSE remote_genre END,
+        remote_status = CASE WHEN :updateDetails THEN excluded.remote_status ELSE remote_status END,
+        remote_update_strategy = CASE
+            WHEN :updateDetails THEN excluded.remote_update_strategy
+            ELSE remote_update_strategy
+        END,
+        remote_memo = excluded.remote_memo,
+        state_initialized = :updateDetails
+    WHERE user_favorite_at IS NULL
+    -- KMK -->
+    AND :updateInfo
+    -- KMK <--
+    ;
+
+    SELECT
+        id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+        remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+        user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+        state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+        state_cover_last_modified, state_initialized,
+        last_modified_at, favorite_modified_at, version, is_syncing,
+        scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+        scanlator_range_rules, is_light_novel
+    FROM manga
+    WHERE source_id = :source
+    AND remote_url = :url;
+}
+
+-- EXH --> Favorites with EXH metadata attached (recommendation inputs)
+getEhMangaWithMetadata:
+SELECT
+    M.id, M.source_id, M.remote_url, M.remote_title, M.remote_author, M.remote_artist,
+    M.remote_description, M.remote_genre, M.remote_status, M.remote_cover,
+    M.remote_update_strategy, M.remote_memo, M.user_favorite_at, M.user_notes,
+    M.user_reader_flags, M.user_chapter_flags, M.state_chapter_last_update,
+    M.state_chapter_next_update, M.state_chapter_fetch_interval,
+    M.state_cover_last_modified, M.state_initialized,
+    M.last_modified_at, M.favorite_modified_at, M.version, M.is_syncing,
+    M.scanlator_priority, M.blacklisted_chapters, M.reread_count, M.rereading,
+    M.reread_started_at, M.scanlator_range_rules, M.is_light_novel
+FROM manga M
+INNER JOIN search_metadata
+    ON M.id = search_metadata.manga_id
+WHERE M.user_favorite_at IS NOT NULL AND (M.source_id = :eh OR M.source_id = :exh);
+
+getIdsOfFavoriteMangaWithMetadata:
+SELECT M.id FROM manga M
+INNER JOIN search_metadata
+    ON M.id = search_metadata.manga_id
+WHERE M.user_favorite_at IS NOT NULL;
+-- EXH <--
+
+-- SY -->
+getBySource:
+SELECT
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel
+FROM manga
+WHERE source_id = :sourceId;
+
+getAll:
+SELECT
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel
+FROM manga;
+
+deleteById:
+DELETE FROM manga WHERE id = :id;
+-- SY <--
+
+-- KMK --> Small projections for the callers that only need one facet of the library. The full
+-- libraryView aggregate (chapter counting over every chapter row, four count(DISTINCT) temp
+-- b-trees, the blacklist instr() filters and the UNION for the merged source) runs per query,
+-- so a consumer that only wants titles, covers or per-category counts should never pay it.
+-- Custom-edited fields are folded in with the same coalesce/nullif rule the Manga model's
+-- @Transient initialiser applies: a blank edit means "not set", so fall back to the source row.
+getFavoriteTitles:
+SELECT coalesce(nullif(cm.title, ''), M.remote_title) AS title
+FROM manga M
+LEFT JOIN custom_manga_info cm ON cm.manga_id = M.id
+WHERE M.user_favorite_at IS NOT NULL;
+
+getFavoriteMangaIdByTitle:
+SELECT M.id AS mangaId
+FROM manga M
+LEFT JOIN custom_manga_info cm ON cm.manga_id = M.id
+WHERE M.user_favorite_at IS NOT NULL
+AND lower(coalesce(nullif(cm.title, ''), M.remote_title)) = lower(:title)
+LIMIT 1;
+
+getFavoriteCovers:
+SELECT
+    M.id AS mangaId,
+    coalesce(nullif(cm.thumbnail_url, ''), M.remote_cover) AS thumbnailUrl
+FROM manga M
+LEFT JOIN custom_manga_info cm ON cm.manga_id = M.id
+WHERE M.user_favorite_at IS NOT NULL;
+
+-- How many library entries each category holds, counted where the assignment lives instead of
+-- re-deriving it from group_concat after materializing the whole library.
+getFavoriteCategoryCounts:
+SELECT
+    mc.category_id AS categoryId,
+    count(*) AS mangaCount
+FROM manga_category mc
+JOIN manga M ON M.id = mc.manga_id
+WHERE M.user_favorite_at IS NOT NULL
+GROUP BY mc.category_id;
+-- KMK <--
+
+selectLastInsertRow:
+SELECT
+    id, source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    last_modified_at, favorite_modified_at, version, is_syncing,
+    scanlator_priority, blacklisted_chapters, reread_count, rereading, reread_started_at,
+    scanlator_range_rules, is_light_novel
+FROM manga
+WHERE id = last_insert_rowid();
+
+getIdByUrlAndSource:
+SELECT id
+FROM manga
+WHERE remote_url = :url AND source_id = :source;

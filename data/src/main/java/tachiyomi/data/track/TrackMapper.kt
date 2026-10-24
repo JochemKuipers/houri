@@ -6,23 +6,25 @@ object TrackMapper {
     fun mapTrack(
         id: Long,
         mangaId: Long,
-        syncId: Long,
+        trackerId: Long,
         remoteId: Long,
+        remoteUrl: String,
         libraryId: Long?,
         title: String,
         lastChapterRead: Double,
         totalChapters: Long,
         status: Long,
         score: Double,
-        remoteUrl: String,
         startDate: Long,
         finishDate: Long,
         private: Boolean,
+        // KMK -->
         rereadCount: Long,
+        // KMK <--
     ): Track = Track(
         id = id,
         mangaId = mangaId,
-        trackerId = syncId,
+        trackerId = trackerId,
         remoteId = remoteId,
         libraryId = libraryId,
         title = title,
