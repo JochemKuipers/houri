@@ -9,7 +9,6 @@ import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.Page
 import exh.log.xLogE
-import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.asFlow
 import kotlinx.coroutines.flow.drop
@@ -22,7 +21,7 @@ import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.storage.extension
-import tachiyomi.core.common.util.lang.launchIO
+import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.category.interactor.GetCategories
@@ -245,12 +244,19 @@ class DownloadManager(
     /**
      * Deletes the directories of a list of downloaded chapters.
      *
+     * Suspends until the files are actually gone. This used to be a fire-and-forget `launchIO`,
+     * which made "delete, then re-read the folder" a race: the local source's refresh could list
+     * a chapter that the delete then removed under it, and opening that file made the storage
+     * provider throw "Failed to determine if \<file\> is child of \<folder\>" (a
+     * FileNotFoundException wrapped in an IllegalArgumentException) — the user saw a cryptic
+     * error and a stale chapter list, and only a second delete, with nothing left to race,
+     * appeared to succeed. Callers that don't care about completion can wrap this in `launchIO`.
+     *
      * @param chapters the list of chapters to delete.
      * @param manga the manga of the chapters.
      * @param source the source of the chapters.
      */
-    @OptIn(DelicateCoroutinesApi::class)
-    fun deleteChapters(
+    suspend fun deleteChapters(
         chapters: List<Chapter>,
         manga: Manga,
         source: Source,
@@ -258,42 +264,42 @@ class DownloadManager(
         /** Ignore categories exclusion */
         ignoreCategoryExclusion: Boolean = false,
         // KMK <--
-    ) {
-        launchIO {
-            val filteredChapters = getChaptersToDelete(
-                chapters,
-                manga,
-                // KMK -->
-                ignoreCategoryExclusion,
-                // KMK <--
-            )
-            if (filteredChapters.isEmpty()) {
-                return@launchIO
-            }
+    ) = withIOContext {
+        val filteredChapters = getChaptersToDelete(
+            chapters,
+            manga,
+            // KMK -->
+            ignoreCategoryExclusion,
+            // KMK <--
+        )
+        if (filteredChapters.isEmpty()) {
+            return@withIOContext
+        }
 
-            removeFromDownloadQueue(filteredChapters)
+        removeFromDownloadQueue(filteredChapters)
 
-            val (mangaDir, chapterDirs) = provider.findChapterDirs(filteredChapters, manga, source)
-            chapterDirs.forEach { it.delete() }
-            cache.removeChapters(filteredChapters, manga)
+        val (mangaDir, chapterDirs) = provider.findChapterDirs(filteredChapters, manga, source)
+        chapterDirs.forEach { it.delete() }
+        cache.removeChapters(filteredChapters, manga)
 
-            // Delete manga directory if empty
-            if (mangaDir?.listFiles()?.isEmpty() == true) {
-                deleteManga(manga, source, removeQueued = false)
-            }
+        // Delete manga directory if empty
+        if (mangaDir?.listFiles()?.isEmpty() == true) {
+            deleteManga(manga, source, removeQueued = false)
         }
     }
 
     /**
      * Deletes the directory of a downloaded manga.
      *
+     * Suspends until the directory is actually gone — see [deleteChapters] for why a
+     * fire-and-forget delete was not safe to leave behind.
+     *
      * @param manga the manga to delete.
      * @param source the source of the manga.
      * @param removeQueued whether to also remove queued downloads.
      */
-    @OptIn(DelicateCoroutinesApi::class)
-    fun deleteManga(manga: Manga, source: Source, removeQueued: Boolean = true) {
-        launchIO {
+    suspend fun deleteManga(manga: Manga, source: Source, removeQueued: Boolean = true) =
+        withIOContext {
             if (removeQueued) {
                 downloader.removeFromQueue(manga)
             }
@@ -301,7 +307,7 @@ class DownloadManager(
             cache.removeManga(manga)
 
             // KMK -->
-            if (source.isLocal()) return@launchIO
+            if (source.isLocal()) return@withIOContext
             // KMK <--
 
             // Delete source directory if empty
@@ -311,7 +317,6 @@ class DownloadManager(
                 cache.removeSource(source)
             }
         }
-    }
 
     private fun removeFromDownloadQueue(chapters: List<Chapter>) {
         val wasRunning = downloader.isRunning
@@ -407,7 +412,7 @@ class DownloadManager(
     /**
      * Triggers the execution of the deletion of pending chapters.
      */
-    fun deletePendingChapters() {
+    suspend fun deletePendingChapters() {
         val pendingChapters = pendingDeleter.getPendingChapters()
         for ((manga, chapters) in pendingChapters) {
             val source = sourceManager.get(manga.source) ?: continue

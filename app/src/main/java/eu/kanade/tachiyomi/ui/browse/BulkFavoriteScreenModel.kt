@@ -364,8 +364,12 @@ class BulkFavoriteScreenModel(
 
     // KMK -->
     internal fun deleteDownloads(manga: Manga) {
-        val source = sourceManager.getOrStub(manga.source)
-        downloadManager.deleteManga(manga, source)
+        // Fire-and-forget from the dialog's point of view: deleteManga is a suspend function
+        // (it finishes only when the files are gone), so it runs in the screen model's scope.
+        screenModelScope.launchNonCancellable {
+            val source = sourceManager.getOrStub(manga.source)
+            downloadManager.deleteManga(manga, source)
+        }
     }
     // KMK <--
 

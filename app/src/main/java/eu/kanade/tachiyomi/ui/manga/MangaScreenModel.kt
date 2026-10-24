@@ -1562,7 +1562,9 @@ class MangaScreenModel(
                                 ignoreCategoryExclusion = true,
                             )
                             if (source.isLocal()) {
-                                // Refresh chapters state for Local source
+                                // Refresh chapters state for Local source. Runs only after
+                                // deleteChapters has actually removed the files — it suspends —
+                                // so the re-listing cannot race the deletion it is reacting to.
                                 fetchAllFromSource(
                                     manualFetch = false,
                                     fetchDetails = false,
@@ -1582,7 +1584,9 @@ class MangaScreenModel(
                         )
                         // KMK -->
                         if (state.source.isLocal()) {
-                            // Refresh chapters state for Local source
+                            // Refresh chapters state for Local source. Runs only after
+                            // deleteChapters has actually removed the files — it suspends —
+                            // so the re-listing cannot race the deletion it is reacting to.
                             fetchAllFromSource(
                                 manualFetch = false,
                                 fetchDetails = false,
@@ -1626,7 +1630,9 @@ class MangaScreenModel(
                                     removeQueued = true,
                                 )
                                 if (source.isLocal()) {
-                                    // Refresh chapters state for Local source
+                                    // Refresh chapters state for Local source. deleteManga
+                                    // suspends until the folder is gone, so this re-listing
+                                    // cannot open a file the delete is about to remove.
                                     fetchAllFromSource(
                                         manualFetch = false,
                                         fetchDetails = false,
@@ -1641,7 +1647,9 @@ class MangaScreenModel(
                             removeQueued = true,
                         )
                         if (state.source.isLocal()) {
-                            // Refresh chapters state for Local source
+                            // Refresh chapters state for Local source. deleteManga suspends
+                            // until the folder is gone, so this re-listing cannot open a file
+                            // the delete is about to remove.
                             fetchAllFromSource(
                                 manualFetch = false,
                                 fetchDetails = false,

@@ -58,3 +58,7 @@ files moved. See .github/scripts/release_notes.py.
   source — a manually cleaned title, corrected author/artist, description, tags or status used to
   stay behind on the old entry (edits are stored against the entry's ID), so the migrated one came
   back with raw source metadata.
+- **Local source**: deleting an EPUB or a local manga's downloaded chapters no longer shows a cryptic
+  "Failed to determine if … is child of …" error — and it now disappears from the chapter list on
+  the first delete instead of needing a second attempt. The post-delete refresh used to race the
+  file deletion and open the file mid-delete.

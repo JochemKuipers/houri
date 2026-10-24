@@ -59,6 +59,7 @@ import tachiyomi.source.local.io.Format
 import tachiyomi.source.local.io.LocalSourceFileSystem
 import tachiyomi.source.local.metadata.fillMetadata
 import uy.kohesive.injekt.injectLazy
+import java.io.FileNotFoundException
 import java.io.InputStream
 import java.nio.charset.StandardCharsets
 import kotlin.time.Duration.Companion.days
@@ -481,7 +482,7 @@ class LocalSource(
             // Only keep supported formats
             .filterNot { it.name.orEmpty().startsWith('.') }
             .filter { it.isDirectory || Archive.isSupportedSingleFile(it) }
-            .map { chapterFile ->
+            .mapNotNull { chapterFile ->
                 // The file name is sort input, not display: `fillMetadata` replaces the chapter
                 // name with the book's own title, and from then on the file name exists only as
                 // the comparator's fallback below.
@@ -499,17 +500,30 @@ class LocalSource(
                     chapter_number = ChapterRecognition
                         .parseChapterNumber(manga.title, this.name, this.chapter_number.toDouble())
                         .toFloat()
+                }
 
+                // The metadata open is the one disk touch in this walk that can race another
+                // writer. A file deleted between the listing above and the open here is
+                // reported by the storage provider either as a FileNotFoundException or
+                // wrapped by its child-of check ("Failed to determine if <file> is child of
+                // <folder>", an IllegalArgumentException around the same IOException). A file
+                // that no longer opens is not a chapter any more: skipping it keeps the rest
+                // of the series listing instead of failing the whole refresh on it.
+                try {
                     val format = Format.valueOf(chapterFile)
                     if (format is Format.Epub) {
                         format.file.epubReader(context).use { epub ->
-                            epub.fillMetadata(manga, this)
+                            epub.fillMetadata(manga, chapter)
                         }
                     } else {
                         getComicInfoForChapter(chapterFile) { stream, /* SY --> */ _ /* SY <-- */ ->
-                            setChapterDetailsFromComicInfoFile(stream, this)
+                            setChapterDetailsFromComicInfoFile(stream, chapter)
                         }
                     }
+                } catch (_: FileNotFoundException) {
+                    return@mapNotNull null
+                } catch (_: IllegalArgumentException) {
+                    return@mapNotNull null
                 }
                 fileName to chapter
             }

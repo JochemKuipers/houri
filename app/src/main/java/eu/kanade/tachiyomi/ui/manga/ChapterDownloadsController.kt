@@ -124,17 +124,24 @@ internal class ChapterDownloadsController(
 
     /**
      * Deletes all the downloads for the manga.
+     *
+     * Fire-and-forget from the UI's point of view: [downloadManager.deleteManga] is a suspend
+     * function (it finishes only when the files are gone), so it runs in this controller's own
+     * scope rather than blocking the dialog confirm that triggered the delete.
      */
     fun deleteDownloads() {
         val state = provideSuccessState() ?: return
-        // SY -->
-        if (state.source is MergedSource) {
-            val mergedManga = state.mergedData?.manga?.map { it.value to sourceManager.getOrStub(it.value.source) }
-            mergedManga?.forEach { (manga, source) ->
-                downloadManager.deleteManga(manga, source)
+        scope.launchNonCancellable {
+            // SY -->
+            if (state.source is MergedSource) {
+                val mergedManga = state.mergedData?.manga
+                    ?.map { it.value to sourceManager.getOrStub(it.value.source) }
+                mergedManga?.forEach { (manga, source) ->
+                    downloadManager.deleteManga(manga, source)
+                }
+            } else {
+                /* SY <-- */ downloadManager.deleteManga(state.manga, state.source)
             }
-        } else {
-            /* SY <-- */ downloadManager.deleteManga(state.manga, state.source)
         }
     }
 
