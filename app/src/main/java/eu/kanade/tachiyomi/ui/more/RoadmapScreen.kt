@@ -30,7 +30,7 @@ import java.time.format.DateTimeFormatter
 @Composable
 fun RoadmapScreen() {
     val backStack = LocalBackStack.current
-    val screenModel = metroViewModel<RoadmapScreenModel>()
+    val screenModel = metroViewModel<RoadmapViewModel>()
     val state by screenModel.state.collectAsState()
     eu.kanade.presentation.more.RoadmapScreen(
         state = state,
@@ -42,7 +42,7 @@ fun RoadmapScreen() {
 @dev.zacsweers.metro.Inject
 @dev.zacsweers.metrox.viewmodel.ViewModelKey
 @dev.zacsweers.metro.ContributesIntoMap(dev.zacsweers.metro.AppScope::class)
-class RoadmapScreenModel : ViewModel() {
+class RoadmapViewModel : ViewModel() {
 
     @Immutable
     data class RoadmapItem(

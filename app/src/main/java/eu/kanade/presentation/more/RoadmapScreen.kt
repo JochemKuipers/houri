@@ -25,7 +25,7 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.components.AppBar
-import eu.kanade.tachiyomi.ui.more.RoadmapScreenModel
+import eu.kanade.tachiyomi.ui.more.RoadmapViewModel
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.components.material.padding
@@ -39,7 +39,7 @@ private const val TODO_URL = "https://github.com/PineappleTwilight/komikku-pinea
  */
 @Composable
 fun RoadmapScreen(
-    state: RoadmapScreenModel.State,
+    state: RoadmapViewModel.State,
     onBack: () -> Unit,
     onRetry: () -> Unit,
 ) {
