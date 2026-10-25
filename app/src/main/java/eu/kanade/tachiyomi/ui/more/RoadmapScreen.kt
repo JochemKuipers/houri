@@ -4,12 +4,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
-import eu.kanade.presentation.util.Screen
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dev.zacsweers.metrox.viewmodel.metroViewModel
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -19,6 +16,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
+import mihon.core.navigation.util.LocalBackStack
 import okhttp3.Request
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.system.logcat
@@ -29,20 +27,22 @@ import java.time.format.DateTimeFormatter
  * "What's coming" screen: fetches the repo's TODO.md from GitHub and lists the items that
  * are still unchecked (planned but not yet done).
  */
-class RoadmapScreen : Screen() {
-    @Composable
-    override fun Content() {
-        val screenModel = rememberScreenModel { RoadmapScreenModel() }
-        val state by screenModel.state.collectAsState()
-        eu.kanade.presentation.more.RoadmapScreen(
-            state = state,
-            onBack = LocalNavigator.currentOrThrow::pop,
-            onRetry = screenModel::refresh,
-        )
-    }
+@Composable
+fun RoadmapScreen() {
+    val backStack = LocalBackStack.current
+    val screenModel = metroViewModel<RoadmapScreenModel>()
+    val state by screenModel.state.collectAsState()
+    eu.kanade.presentation.more.RoadmapScreen(
+        state = state,
+        onBack = backStack::removeLastOrNull,
+        onRetry = screenModel::refresh,
+    )
 }
 
-class RoadmapScreenModel : ScreenModel {
+@dev.zacsweers.metro.Inject
+@dev.zacsweers.metrox.viewmodel.ViewModelKey
+@dev.zacsweers.metro.ContributesIntoMap(dev.zacsweers.metro.AppScope::class)
+class RoadmapScreenModel : ViewModel() {
 
     @Immutable
     data class RoadmapItem(
@@ -67,7 +67,7 @@ class RoadmapScreenModel : ScreenModel {
 
     fun refresh() {
         _state.update { it.copy(isLoading = true, error = null) }
-        screenModelScope.launch {
+        viewModelScope.launch {
             try {
                 val items = withIOContext { fetchTodo() }
                 val fetchedAt = LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM d, HH:mm"))

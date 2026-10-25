@@ -31,7 +31,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.components.AdaptiveSheet
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelSearchResult
-import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelSearchScreenModel
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelSearchViewModel
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTocEntry
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTocScreenModel
 import tachiyomi.i18n.kmk.KMR
@@ -143,7 +143,7 @@ private fun TocRow(row: NovelTocEntry, onClick: () -> Unit) {
 @Composable
 fun NovelSearchDialog(
     onDismissRequest: () -> Unit,
-    screenModel: NovelSearchScreenModel,
+    screenModel: NovelSearchViewModel,
     onClickResult: (NovelSearchResult) -> Unit,
 ) {
     val query by screenModel.query.collectAsState()
@@ -166,17 +166,17 @@ fun NovelSearchDialog(
             )
 
             when (val current = results) {
-                NovelSearchScreenModel.Results.Idle -> CenteredMessage(
+                NovelSearchViewModel.Results.Idle -> CenteredMessage(
                     stringResource(KMR.strings.novel_search_idle),
                 )
 
-                NovelSearchScreenModel.Results.Searching -> CenteredSpinner()
+                NovelSearchViewModel.Results.Searching -> CenteredSpinner()
 
-                is NovelSearchScreenModel.Results.Error -> CenteredMessage(
+                is NovelSearchViewModel.Results.Error -> CenteredMessage(
                     current.error.message ?: stringResource(KMR.strings.novel_error_chapter_not_found),
                 )
 
-                is NovelSearchScreenModel.Results.Loaded -> if (current.rows.isEmpty()) {
+                is NovelSearchViewModel.Results.Loaded -> if (current.rows.isEmpty()) {
                     CenteredMessage(stringResource(KMR.strings.novel_search_no_results))
                 } else {
                     Column {

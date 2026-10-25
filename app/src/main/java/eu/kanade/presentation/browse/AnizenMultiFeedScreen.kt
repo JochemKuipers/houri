@@ -33,7 +33,7 @@ import tachiyomi.presentation.core.screens.EmptyScreen
 /**
  * Anizen-style multi-feed tabs: a TabRow over global FeedSavedSearch rows with a
  * HorizontalPager page per feed. Each page reuses the FeedScreen row content
- * ([FeedItem]) so per-tab fetch/display stays FeedScreenModel-style.
+ * ([FeedItem]) so per-tab fetch/display stays FeedViewModel-style.
  */
 @Composable
 fun AnizenMultiFeedScreen(

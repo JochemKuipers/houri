@@ -17,7 +17,7 @@ import eu.kanade.presentation.manga.components.MangaChapterListItem
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.ui.reader.chapter.ReaderChapterItem
-import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
 import eu.kanade.tachiyomi.util.lang.toRelativeString
 import exh.metadata.MetadataUtil
 import exh.source.isEhBasedManga
@@ -37,7 +37,7 @@ import java.time.ZonedDateTime
 @Composable
 fun ChapterListDialog(
     onDismissRequest: () -> Unit,
-    screenModel: ReaderSettingsScreenModel,
+    screenModel: ReaderSettingsViewModel,
     chapters: ImmutableList<ReaderChapterItem>,
     onClickChapter: (Chapter) -> Unit,
     onBookmark: (Chapter) -> Unit,

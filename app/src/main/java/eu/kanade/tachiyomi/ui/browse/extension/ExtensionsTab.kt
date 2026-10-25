@@ -15,26 +15,26 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.browse.ExtensionScreen
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.TabContent
-import eu.kanade.presentation.more.settings.screen.browse.ExtensionStoresScreen
 import eu.kanade.tachiyomi.extension.model.Extension
-import eu.kanade.tachiyomi.ui.browse.extension.details.ExtensionDetailsScreen
-import eu.kanade.tachiyomi.ui.webview.WebViewScreen
 import eu.kanade.tachiyomi.util.system.isPackageInstalled
 import kotlinx.collections.immutable.persistentListOf
+import mihon.core.navigation.ExtensionDetailsRoute
+import mihon.core.navigation.ExtensionFilterRoute
+import mihon.core.navigation.ExtensionStoresRoute
+import mihon.core.navigation.WebViewRoute
+import mihon.core.navigation.util.LocalBackStack
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
 
 @Composable
 fun extensionsTab(
-    extensionsScreenModel: ExtensionsScreenModel,
+    extensionsScreenModel: ExtensionsViewModel,
 ): TabContent {
-    val navigator = LocalNavigator.currentOrThrow
+    val backStack = LocalBackStack.current
     val context = LocalContext.current
 
     val state by extensionsScreenModel.state.collectAsState()
@@ -59,11 +59,11 @@ fun extensionsTab(
             // KMK <--
             AppBar.OverflowAction(
                 title = stringResource(MR.strings.action_filter),
-                onClick = { navigator.push(ExtensionFilterScreen()) },
+                onClick = { backStack.add(ExtensionFilterRoute) },
             ),
             AppBar.OverflowAction(
                 title = stringResource(MR.strings.extensionStores),
-                onClick = { navigator.push(ExtensionStoresScreen()) },
+                onClick = { backStack.add(ExtensionStoresRoute()) },
             ),
         ),
         content = { contentPadding, _ ->
@@ -90,8 +90,8 @@ fun extensionsTab(
                 onClickUpdateAll = extensionsScreenModel::updateAllExtensions,
                 onOpenWebView = { extension ->
                     extension.sources.getOrNull(0)?.let {
-                        navigator.push(
-                            WebViewScreen(
+                        backStack.add(
+                            WebViewRoute(
                                 url = it.baseUrl,
                                 initialTitle = it.name,
                                 sourceId = it.id,
@@ -100,7 +100,7 @@ fun extensionsTab(
                     }
                 },
                 onInstallExtension = extensionsScreenModel::installExtension,
-                onOpenExtension = { navigator.push(ExtensionDetailsScreen(it.pkgName)) },
+                onOpenExtension = { backStack.add(ExtensionDetailsRoute(it.pkgName)) },
                 onTrustExtension = { extensionsScreenModel.trustExtension(it) },
                 onUninstallExtension = { extensionsScreenModel.uninstallExtension(it) },
                 onUpdateExtension = extensionsScreenModel::updateExtension,

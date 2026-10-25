@@ -4,7 +4,7 @@ import eu.kanade.tachiyomi.data.download.model.Download
 
 /**
  * Extracts download-queue duplicate logic that was copy-pasted across
- * `MangaScreenModel`, `ReaderViewModel`, `UpdatesScreenModel`, and
+ * `MangaViewModel`, `ReaderViewModel`, `UpdatesViewModel`, and
  * `LibraryUpdateJob` (4 sites, per AUDIT.md #16).
  *
  * Centralizes “is already queued?” and “should delete chapters?” policies so

@@ -10,171 +10,193 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
+import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
+import dev.zacsweers.metrox.viewmodel.metroViewModel
 import eu.kanade.core.util.ifSourcesLoaded
 import eu.kanade.presentation.browse.BrowseSourceContent
 import eu.kanade.presentation.browse.components.BrowseSourceSimpleToolbar
 import eu.kanade.presentation.browse.components.BulkFavoriteDialogs
 import eu.kanade.presentation.components.BulkSelectionToolbar
-import eu.kanade.presentation.util.Screen
-import eu.kanade.tachiyomi.ui.browse.BulkFavoriteScreenModel
-import eu.kanade.tachiyomi.ui.browse.source.SourcesScreen
-import eu.kanade.tachiyomi.ui.manga.MangaScreen
+import eu.kanade.tachiyomi.ui.browse.BulkFavoriteViewModel
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import exh.recs.batch.RankedSearchResults
+import mihon.core.navigation.MangaRoute
+import mihon.core.navigation.SmartSearchSourcesRoute
+import mihon.core.navigation.util.LocalBackStack
 import mihon.presentation.core.util.collectAsLazyPagingItems
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.screens.LoadingScreen
 import java.io.Serializable
 
-class BrowseRecommendsScreen(
-    private val args: Args,
-    private val isExternalSource: Boolean,
-) : Screen() {
+/**
+ * What the browse-recommends screen should show. Formerly nested in the `BrowseRecommendsScreen`
+ * Voyager screen class; top-level so it can remain an assisted ViewModel parameter.
+ */
+sealed interface BrowseRecommendsScreenArgs : Serializable {
+    data class SingleSourceManga(
+        val mangaId: Long,
+        val sourceId: Long,
+        val recommendationSourceName: String,
+    ) : BrowseRecommendsScreenArgs
+    data class MergedSourceMangas(val results: RankedSearchResults) : BrowseRecommendsScreenArgs
+}
 
-    sealed interface Args : Serializable {
-        data class SingleSourceManga(
-            val mangaId: Long,
-            val sourceId: Long,
-            val recommendationSourceName: String,
-        ) : Args
-        data class MergedSourceMangas(val results: RankedSearchResults) : Args
+/** Paged recommendations for a single manga, produced by a named [exh.recs.sources.RecommendationPagingSource]. */
+@Composable
+fun BrowseRecommendsScreen(
+    mangaId: Long,
+    sourceId: Long,
+    recommendationSourceName: String,
+    isExternalSource: Boolean,
+) {
+    BrowseRecommendsScreen(
+        BrowseRecommendsScreenArgs.SingleSourceManga(mangaId, sourceId, recommendationSourceName),
+        isExternalSource,
+    )
+}
+
+/** Paged pre-computed batch recommendations. */
+@Composable
+fun BrowseMergedRecommendsScreen(results: RankedSearchResultsDto, isExternalSource: Boolean) {
+    BrowseRecommendsScreen(
+        BrowseRecommendsScreenArgs.MergedSourceMangas(results.toRankedSearchResults()),
+        isExternalSource,
+    )
+}
+
+@Composable
+private fun BrowseRecommendsScreen(args: BrowseRecommendsScreenArgs, isExternalSource: Boolean) {
+    if (!ifSourcesLoaded()) {
+        LoadingScreen()
+        return
     }
 
-    @Composable
-    override fun Content() {
-        if (!ifSourcesLoaded()) {
-            LoadingScreen()
-            return
-        }
+    val context = LocalContext.current
+    val backStack = LocalBackStack.current
 
-        val context = LocalContext.current
-        val navigator = LocalNavigator.currentOrThrow
+    val screenModel = assistedMetroViewModel<BrowseRecommendsViewModel, BrowseRecommendsViewModel.Factory> {
+        create(args)
+    }
 
-        val screenModel = rememberScreenModel { BrowseRecommendsScreenModel(args) }
+    // KMK -->
+    val bulkFavoriteScreenModel = metroViewModel<BulkFavoriteViewModel>()
+    val bulkFavoriteState by bulkFavoriteScreenModel.state.collectAsState()
 
-        // KMK -->
-        val bulkFavoriteScreenModel = rememberScreenModel { BulkFavoriteScreenModel() }
-        val bulkFavoriteState by bulkFavoriteScreenModel.state.collectAsState()
+    val haptic = LocalHapticFeedback.current
 
-        val haptic = LocalHapticFeedback.current
+    BackHandler(enabled = bulkFavoriteState.selectionMode) {
+        bulkFavoriteScreenModel.backHandler()
+    }
+    // KMK <--
 
-        BackHandler(enabled = bulkFavoriteState.selectionMode) {
-            bulkFavoriteScreenModel.backHandler()
-        }
-        // KMK <--
+    val snackbarHostState = remember { SnackbarHostState() }
 
-        val snackbarHostState = remember { SnackbarHostState() }
-
-        val onClickItem = { manga: Manga ->
-            navigator.push(
-                when (isExternalSource) {
-                    true -> SourcesScreen(SourcesScreen.SmartSearchConfig(manga.ogTitle))
-                    false -> MangaScreen(manga.id, true)
-                },
-            )
-        }
-
-        // KMK -->
-        val onLongClickItem = { manga: Manga ->
+    val onClickItem = { manga: Manga ->
+        backStack.add(
             when (isExternalSource) {
-                true -> WebViewActivity.newIntent(context, manga.url, title = manga.title).let(context::startActivity)
-                false -> navigator.push(MangaScreen(manga.id, true))
-            }
+                true -> SmartSearchSourcesRoute(manga.ogTitle)
+                false -> MangaRoute(manga.id, true)
+            },
+        )
+    }
+
+    // KMK -->
+    val onLongClickItem = { manga: Manga ->
+        when (isExternalSource) {
+            true -> WebViewActivity.newIntent(context, manga.url, title = manga.title).let(context::startActivity)
+            false -> backStack.add(MangaRoute(manga.id, true))
         }
+    }
 
-        val mangaList = screenModel.mangaPagerFlowFlow.collectAsLazyPagingItems()
-        // KMK <--
+    val mangaList = screenModel.mangaPagerFlowFlow.collectAsLazyPagingItems()
+    // KMK <--
 
-        Scaffold(
-            topBar = { scrollBehavior ->
+    Scaffold(
+        topBar = { scrollBehavior ->
+            // KMK -->
+            if (bulkFavoriteState.selectionMode) {
+                BulkSelectionToolbar(
+                    selectedCount = bulkFavoriteState.selection.size,
+                    isRunning = bulkFavoriteState.isRunning,
+                    onClickClearSelection = bulkFavoriteScreenModel::toggleSelectionMode,
+                    onChangeCategoryClick = bulkFavoriteScreenModel::addFavorite,
+                    onSelectAll = {
+                        mangaList.itemSnapshotList.items
+                            .map { it.value.first }
+                            .forEach { bulkFavoriteScreenModel.select(it) }
+                    },
+                    onReverseSelection = {
+                        mangaList.itemSnapshotList.items
+                            .map { it.value.first }
+                            .let { bulkFavoriteScreenModel.reverseSelection(it) }
+                    },
+                )
+            } else {
+                // KMK <--
+                val title = remember {
+                    val recSource = screenModel.recommendationPagingSource
+                    "${recSource.name} (${recSource.category.getString(context)})"
+                }
+
+                BrowseSourceSimpleToolbar(
+                    navigateUp = backStack::removeLastOrNull,
+                    title = title,
+                    displayMode = screenModel.displayMode,
+                    onDisplayModeChange = { screenModel.displayMode = it },
+                    scrollBehavior = scrollBehavior,
+                    // KMK -->
+                    toggleSelectionMode = {
+                        bulkFavoriteScreenModel.toggleSelectionMode(true)
+                    }.takeIf { !isExternalSource },
+                    isRunning = bulkFavoriteState.isRunning,
+                    // KMK <--
+                )
+            }
+        },
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+    ) { paddingValues ->
+        BrowseSourceContent(
+            source = screenModel.source,
+            mangaList = mangaList,
+            columns = screenModel.getColumnsPreference(LocalConfiguration.current.orientation),
+            // SY -->
+            ehentaiBrowseDisplayMode = false,
+            // SY <--
+            displayMode = screenModel.displayMode,
+            snackbarHostState = snackbarHostState,
+            contentPadding = paddingValues,
+            onWebViewClick = null,
+            onHelpClick = null,
+            onLocalSourceHelpClick = null,
+            onMangaClick = { manga ->
                 // KMK -->
                 if (bulkFavoriteState.selectionMode) {
-                    BulkSelectionToolbar(
-                        selectedCount = bulkFavoriteState.selection.size,
-                        isRunning = bulkFavoriteState.isRunning,
-                        onClickClearSelection = bulkFavoriteScreenModel::toggleSelectionMode,
-                        onChangeCategoryClick = bulkFavoriteScreenModel::addFavorite,
-                        onSelectAll = {
-                            mangaList.itemSnapshotList.items
-                                .map { it.value.first }
-                                .forEach { bulkFavoriteScreenModel.select(it) }
-                        },
-                        onReverseSelection = {
-                            mangaList.itemSnapshotList.items
-                                .map { it.value.first }
-                                .let { bulkFavoriteScreenModel.reverseSelection(it) }
-                        },
-                    )
+                    bulkFavoriteScreenModel.toggleSelection(manga)
                 } else {
                     // KMK <--
-                    val title = remember {
-                        val recSource = screenModel.recommendationPagingSource
-                        "${recSource.name} (${recSource.category.getString(context)})"
-                    }
-
-                    BrowseSourceSimpleToolbar(
-                        navigateUp = navigator::pop,
-                        title = title,
-                        displayMode = screenModel.displayMode,
-                        onDisplayModeChange = { screenModel.displayMode = it },
-                        scrollBehavior = scrollBehavior,
-                        // KMK -->
-                        toggleSelectionMode = {
-                            bulkFavoriteScreenModel.toggleSelectionMode(true)
-                        }.takeIf { !isExternalSource },
-                        isRunning = bulkFavoriteState.isRunning,
-                        // KMK <--
-                    )
+                    onClickItem(manga)
                 }
             },
-            snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
-        ) { paddingValues ->
-            BrowseSourceContent(
-                source = screenModel.source,
-                mangaList = mangaList,
-                columns = screenModel.getColumnsPreference(LocalConfiguration.current.orientation),
-                // SY -->
-                ehentaiBrowseDisplayMode = false,
-                // SY <--
-                displayMode = screenModel.displayMode,
-                snackbarHostState = snackbarHostState,
-                contentPadding = paddingValues,
-                onWebViewClick = null,
-                onHelpClick = null,
-                onLocalSourceHelpClick = null,
-                onMangaClick = { manga ->
-                    // KMK -->
-                    if (bulkFavoriteState.selectionMode) {
-                        bulkFavoriteScreenModel.toggleSelection(manga)
-                    } else {
-                        // KMK <--
-                        onClickItem(manga)
-                    }
-                },
-                onMangaLongClick = { manga ->
-                    // KMK -->
-                    if (!bulkFavoriteState.selectionMode) {
-                        bulkFavoriteScreenModel.addRemoveManga(manga, haptic)
-                    } else {
-                        onLongClickItem(manga)
-                    }
-                    // KMK <--
-                },
+            onMangaLongClick = { manga ->
                 // KMK -->
-                selection = bulkFavoriteState.selection,
+                if (!bulkFavoriteState.selectionMode) {
+                    bulkFavoriteScreenModel.addRemoveManga(manga, haptic)
+                } else {
+                    onLongClickItem(manga)
+                }
                 // KMK <--
-            )
-        }
-
-        // KMK -->
-        BulkFavoriteDialogs(
-            bulkFavoriteScreenModel = bulkFavoriteScreenModel,
-            dialog = bulkFavoriteState.dialog,
+            },
+            // KMK -->
+            selection = bulkFavoriteState.selection,
+            // KMK <--
         )
-        // KMK <--
     }
+
+    // KMK -->
+    BulkFavoriteDialogs(
+        bulkFavoriteScreenModel = bulkFavoriteScreenModel,
+        dialog = bulkFavoriteState.dialog,
+    )
+    // KMK <--
 }

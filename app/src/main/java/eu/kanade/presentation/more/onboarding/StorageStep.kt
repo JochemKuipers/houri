@@ -18,7 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
-import eu.kanade.presentation.more.settings.screen.SettingsDataScreen
+import eu.kanade.presentation.more.settings.screen.SettingsDataRoute
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.flow.collectLatest
 import mihon.app.di.globalAppGraph
@@ -44,7 +44,7 @@ internal class StorageStep : OnboardingStep {
         val context = LocalContext.current
         val handler = LocalUriHandler.current
 
-        val pickStorageLocation = SettingsDataScreen.storageLocationPicker(storagePref)
+        val pickStorageLocation = SettingsDataRoute.storageLocationPicker(storagePref)
 
         // KMK -->
         val storageDir by storagePref.collectAsState()
@@ -61,7 +61,7 @@ internal class StorageStep : OnboardingStep {
                 stringResource(
                     MR.strings.onboarding_storage_info,
                     stringResource(MR.strings.app_name),
-                    SettingsDataScreen.storageLocationText(storagePref),
+                    SettingsDataRoute.storageLocationText(storagePref),
                 ),
             )
 
@@ -86,7 +86,7 @@ internal class StorageStep : OnboardingStep {
             Text(stringResource(MR.strings.onboarding_storage_help_info, stringResource(MR.strings.app_name)))
             Button(
                 modifier = Modifier.fillMaxWidth(),
-                onClick = { handler.openUri(SettingsDataScreen.HELP_URL) },
+                onClick = { handler.openUri(SettingsDataRoute.HELP_URL) },
             ) {
                 Text(stringResource(MR.strings.onboarding_storage_help_action))
             }

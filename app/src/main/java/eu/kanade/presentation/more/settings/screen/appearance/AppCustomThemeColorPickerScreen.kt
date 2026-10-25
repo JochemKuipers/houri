@@ -13,64 +13,64 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
+import androidx.navigation3.runtime.NavKey
 import com.github.skydoves.colorpicker.compose.rememberColorPickerController
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.more.settings.widget.ThemeColorPickerWidget
-import eu.kanade.presentation.util.Screen
+import kotlinx.serialization.Serializable
 import mihon.app.di.globalAppGraph
+import mihon.core.navigation.util.LocalBackStack
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 
-class AppCustomThemeColorPickerScreen : Screen() {
+@Serializable
+data object AppCustomThemeColorPickerRoute : NavKey
 
-    @Composable
-    override fun Content() {
-        val uiPreferences: UiPreferences = globalAppGraph.uiPreferences
+@Composable
+fun AppCustomThemeColorPickerScreen() {
+    val uiPreferences: UiPreferences = globalAppGraph.uiPreferences
 
-        val context = LocalContext.current
-        val navigator = LocalNavigator.currentOrThrow
-        val controller = rememberColorPickerController()
+    val context = LocalContext.current
+    val backStack = LocalBackStack.current
+    val controller = rememberColorPickerController()
 
-        val customColorPref = uiPreferences.colorTheme()
-        val customColor by customColorPref.collectAsState()
+    val customColorPref = uiPreferences.colorTheme()
+    val customColor by customColorPref.collectAsState()
 
-        val appThemePref = uiPreferences.appTheme()
+    val appThemePref = uiPreferences.appTheme()
 
-        val currentColor by remember {
-            mutableIntStateOf(customColor)
-        }
+    val currentColor by remember {
+        mutableIntStateOf(customColor)
+    }
 
-        LaunchedEffect(customColorPref) {
-            customColorPref.set(currentColor)
-        }
+    LaunchedEffect(customColorPref) {
+        customColorPref.set(currentColor)
+    }
 
-        Scaffold(
-            topBar = { scrollBehavior ->
-                AppBar(
-                    title = stringResource(KMR.strings.pref_custom_color),
-                    navigateUp = navigator::pop,
-                    scrollBehavior = scrollBehavior,
-                )
-            },
-        ) { contentPadding ->
-            Column(
-                modifier = Modifier.padding(contentPadding),
-            ) {
-                ThemeColorPickerWidget(
-                    controller = controller,
-                    initialColor = Color(currentColor),
-                    onItemClick = { color, appTheme ->
-                        customColorPref.set(color.toArgb())
-                        appThemePref.set(appTheme)
-                        (context as? Activity)?.let { ActivityCompat.recreate(it) }
-                    },
-                )
-            }
+    Scaffold(
+        topBar = { scrollBehavior ->
+            AppBar(
+                title = stringResource(KMR.strings.pref_custom_color),
+                navigateUp = backStack::removeLastOrNull,
+                scrollBehavior = scrollBehavior,
+            )
+        },
+    ) { contentPadding ->
+        Column(
+            modifier = Modifier.padding(contentPadding),
+        ) {
+            ThemeColorPickerWidget(
+                controller = controller,
+                initialColor = Color(currentColor),
+                onItemClick = { color, appTheme ->
+                    customColorPref.set(color.toArgb())
+                    appThemePref.set(appTheme)
+                    (context as? Activity)?.let { ActivityCompat.recreate(it) }
+                },
+            )
         }
     }
 }

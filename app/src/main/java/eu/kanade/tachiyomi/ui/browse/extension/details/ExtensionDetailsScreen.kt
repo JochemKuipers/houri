@@ -5,68 +5,64 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
+import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import eu.kanade.presentation.browse.ExtensionDetailsScreen
-import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.source.online.HttpSource
-import eu.kanade.tachiyomi.ui.webview.WebViewScreen
 import kotlinx.coroutines.flow.collectLatest
+import mihon.core.navigation.SourcePreferencesRoute
+import mihon.core.navigation.WebViewRoute
+import mihon.core.navigation.util.LocalBackStack
 import tachiyomi.presentation.core.screens.LoadingScreen
 
-data class ExtensionDetailsScreen(
-    private val pkgName: String,
-) : Screen() {
+@Composable
+fun ExtensionDetailsScreen(pkgName: String) {
+    val context = LocalContext.current
+    val backStack = LocalBackStack.current
+    val viewModel = assistedMetroViewModel<ExtensionDetailsViewModel, ExtensionDetailsViewModel.Factory> {
+        create(pkgName = pkgName, context = context)
+    }
+    val state by viewModel.state.collectAsState()
 
-    @Composable
-    override fun Content() {
-        val context = LocalContext.current
-        val screenModel = rememberScreenModel { ExtensionDetailsScreenModel(pkgName = pkgName, context = context) }
-        val state by screenModel.state.collectAsState()
+    if (state.isLoading) {
+        LoadingScreen()
+        return
+    }
 
-        if (state.isLoading) {
-            LoadingScreen()
-            return
-        }
+    // KMK -->
+    val source = state.extension?.sources?.getOrNull(0)
+    // KMK <--
 
-        val navigator = LocalNavigator.currentOrThrow
+    ExtensionDetailsScreen(
+        navigateUp = backStack::removeLastOrNull,
+        state = state,
+        onClickSourcePreferences = { backStack.add(SourcePreferencesRoute(it)) },
         // KMK -->
-        val source = state.extension?.sources?.getOrNull(0)
+        onOpenWebView = if (source != null && source is HttpSource) {
+            {
+                backStack.add(
+                    WebViewRoute(
+                        url = source.baseUrl,
+                        initialTitle = source.name,
+                        sourceId = source.id,
+                    ),
+                )
+            }
+        } else {
+            null
+        },
         // KMK <--
+        onClickEnableAll = { viewModel.toggleSources(true) },
+        onClickDisableAll = { viewModel.toggleSources(false) },
+        onClickClearCookies = viewModel::clearCookies,
+        onClickUninstall = viewModel::uninstallExtension,
+        onClickSource = viewModel::toggleSource,
+        onClickIncognito = viewModel::toggleIncognito,
+    )
 
-        ExtensionDetailsScreen(
-            navigateUp = navigator::pop,
-            state = state,
-            onClickSourcePreferences = { navigator.push(SourcePreferencesScreen(it)) },
-            // KMK -->
-            onOpenWebView = if (source != null && source is HttpSource) {
-                {
-                    navigator.push(
-                        WebViewScreen(
-                            url = source.baseUrl,
-                            initialTitle = source.name,
-                            sourceId = source.id,
-                        ),
-                    )
-                }
-            } else {
-                null
-            },
-            // KMK <--
-            onClickEnableAll = { screenModel.toggleSources(true) },
-            onClickDisableAll = { screenModel.toggleSources(false) },
-            onClickClearCookies = screenModel::clearCookies,
-            onClickUninstall = screenModel::uninstallExtension,
-            onClickSource = screenModel::toggleSource,
-            onClickIncognito = screenModel::toggleIncognito,
-        )
-
-        LaunchedEffect(Unit) {
-            screenModel.events.collectLatest { event ->
-                if (event is ExtensionDetailsEvent.Uninstalled) {
-                    navigator.pop()
-                }
+    LaunchedEffect(Unit) {
+        viewModel.events.collectLatest { event ->
+            if (event is ExtensionDetailsEvent.Uninstalled) {
+                backStack.removeLastOrNull()
             }
         }
     }

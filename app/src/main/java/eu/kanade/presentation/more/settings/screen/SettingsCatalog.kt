@@ -25,7 +25,7 @@ object SettingsCatalog {
      * Filtered out of [searchableScreens] rather than branched around, so search cannot reach a
      * screen the settings hub hides on that flavor.
      *
-     * [SettingsUpscalerScreen] is deliberately *not* in this set: the no-MTL build forces the
+     * [SettingsUpscalerRoute] is deliberately *not* in this set: the no-MTL build forces the
      * upscaler into Simple mode (`UpscalePreferences.isSimpleMode` is flavor-true there), which
      * needs no MTL runtime and no downloaded weights, and the screen gates its native-only rows
      * off themselves (`mode` selector hidden, model rows `mtlOnly`). Hiding a screen nothing
@@ -33,43 +33,43 @@ object SettingsCatalog {
      * MangaScreen offers on every flavor.
      */
     private val aiScreens: Set<SearchableSettings> = setOf(
-        SettingsYakuyomiScreen,
-        SettingsYakuyomiProviderScreen,
-        SettingsYakuyomiModelsScreen,
-        SettingsYakuyomiBehaviorScreen,
-        SettingsYakuyomiPromptScreen,
+        SettingsYakuyomiRoute,
+        SettingsYakuyomiProviderRoute,
+        SettingsYakuyomiModelsRoute,
+        SettingsYakuyomiBehaviorRoute,
+        SettingsYakuyomiPromptRoute,
     )
 
-    val searchableScreens: List<SearchableSettings> = listOfNotNull(
-        SettingsAppearanceScreen,
-        SettingsLibraryScreen,
-        SettingsReaderScreen,
+    val searchableScreens: List<SearchableRoute> = listOfNotNull(
+        SettingsAppearanceRoute,
+        SettingsLibraryRoute,
+        SettingsReaderRoute,
         // KMK -->
         // The book reader's typography. Also reachable as the reader's own *Reading appearance* tab;
         // this is the copy a reader can find without a book open.
-        SettingsBookReadingScreen,
+        SettingsBookReadingRoute,
         // KMK <--
-        SettingsDownloadScreen,
-        SettingsTrackingScreen,
+        SettingsDownloadRoute,
+        SettingsTrackingRoute,
         // AM (CONNECTIONS) -->
-        SettingsConnectionScreen,
+        SettingsConnectionRoute,
         // <-- AM (CONNECTIONS)
-        SettingsBrowseScreen,
-        SettingsDataScreen,
-        SettingsSecurityScreen,
+        SettingsBrowseRoute,
+        SettingsDataRoute,
+        SettingsSecurityRoute,
         // SY -->
-        SettingsEhScreen,
-        SettingsMangadexScreen,
+        SettingsEhRoute,
+        SettingsMangadexRoute,
         // SY <--
         // KMK -->
-        SettingsYakuyomiScreen,
-        SettingsYakuyomiProviderScreen,
-        SettingsYakuyomiModelsScreen,
-        SettingsYakuyomiBehaviorScreen,
-        SettingsYakuyomiPromptScreen,
-        SettingsUpscalerScreen,
+        SettingsYakuyomiRoute,
+        SettingsYakuyomiProviderRoute,
+        SettingsYakuyomiModelsRoute,
+        SettingsYakuyomiBehaviorRoute,
+        SettingsYakuyomiPromptRoute,
+        SettingsUpscalerRoute,
         // KMK <--
-        SettingsAdvancedScreen,
+        SettingsAdvancedRoute,
     ).filterNot { BuildConfig.IS_NOMTL && it in aiScreens }
 }
 // KMK <--

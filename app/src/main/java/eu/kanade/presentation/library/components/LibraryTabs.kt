@@ -52,7 +52,7 @@ internal fun LibraryTabs(
             divider = {},
         ) {
             categories.forEachIndexed { index, category ->
-                val isAchievements = category.id == eu.kanade.tachiyomi.ui.library.LibraryScreenModel.ACHIEVEMENTS_CATEGORY_ID
+                val isAchievements = category.id == eu.kanade.tachiyomi.ui.library.LibraryViewModel.ACHIEVEMENTS_CATEGORY_ID
                 val achievementsBadgeText = if (isAchievements) {
                     try {
                         val prefs = mihon.app.di.globalAppGraph.achievementPreferences

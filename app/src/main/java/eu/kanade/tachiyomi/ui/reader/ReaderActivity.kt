@@ -108,11 +108,11 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.ViewerChapters
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.isTextChapter
-import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelSearchScreenModel
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelSearchViewModel
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTocScreenModel
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelWebViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerConfig
@@ -366,7 +366,7 @@ class ReaderActivity : BaseActivity() {
             val state by viewModel.state.collectAsState()
             val showPageNumber by readerPreferences.showPageNumber().collectAsState()
             val settingsScreenModel = remember {
-                ReaderSettingsScreenModel(
+                ReaderSettingsViewModel(
                     readerState = viewModel.state,
                     onChangeReadingMode = viewModel::setMangaReadingMode,
                     onChangeOrientation = viewModel::setMangaOrientationType,
@@ -593,9 +593,9 @@ class ReaderActivity : BaseActivity() {
                     LaunchedEffect(unavailable) { if (unavailable) onDismissRequest() }
                     if (!unavailable) {
                         val screenModel = remember(loader, sourceChapter) {
-                            NovelSearchScreenModel(source = searchSource!!, chapter = sourceChapter!!)
+                            NovelSearchViewModel(source = searchSource!!, chapter = sourceChapter!!)
                         }
-                        // The model owns a coroutine scope (see `NovelSearchScreenModel.job`) and
+                        // The model owns a coroutine scope (see `NovelSearchViewModel.job`) and
                         // nothing else would ever cancel it: Voyager's `ScreenModelStore` is only
                         // disposed by the navigator, and this model was never handed to one. Without
                         // this the debounce collector, the `SChapter` and the source outlive the sheet.

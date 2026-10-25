@@ -14,6 +14,14 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
@@ -29,6 +37,7 @@ import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -48,10 +57,18 @@ import androidx.core.util.Consumer
 import androidx.interpolator.view.animation.FastOutSlowInInterpolator
 import androidx.interpolator.view.animation.LinearOutSlowInInterpolator
 import androidx.lifecycle.lifecycleScope
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.Navigator
-import cafe.adriel.voyager.navigator.NavigatorDisposeBehavior
-import cafe.adriel.voyager.navigator.currentOrThrow
+import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
+import androidx.navigation3.runtime.NavBackStack
+import androidx.navigation3.runtime.NavKey
+import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.runtime.rememberNavBackStack
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.navigation3.runtime.result.LocalResultEventBus
+import androidx.navigation3.runtime.result.ResultEventBus
+import androidx.navigation3.runtime.result.rememberResultEventBus
+import androidx.navigation3.runtime.result.rememberResultEventBusNavEntryDecorator
+import androidx.navigation3.scene.Scene
+import androidx.navigation3.ui.NavDisplay
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.connections.service.ConnectionsPreferences
 import eu.kanade.domain.source.interactor.GetIncognitoState
@@ -70,10 +87,7 @@ import eu.kanade.presentation.components.SyncingBannerBackgroundColor
 import eu.kanade.presentation.components.UpdatingBannerBackgroundColor
 import eu.kanade.presentation.more.settings.screen.ConfigureExhDialog
 import eu.kanade.presentation.more.settings.screen.about.WhatsNewDialog
-import eu.kanade.presentation.more.settings.screen.browse.ExtensionStoresScreen
-import eu.kanade.presentation.more.settings.screen.data.RestoreBackupScreen
-import eu.kanade.presentation.util.AssistContentScreen
-import eu.kanade.presentation.util.DefaultNavigatorScreenTransition
+import eu.kanade.presentation.util.UiMotion
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.BackupRestoreStatus
 import eu.kanade.tachiyomi.data.LibraryUpdateStatus
@@ -93,14 +107,9 @@ import eu.kanade.tachiyomi.extension.copyExtensionErrorToClipboard
 import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassStatus
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
-import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
-import eu.kanade.tachiyomi.ui.browse.source.feed.SourceFeedScreen
-import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
-import eu.kanade.tachiyomi.ui.deeplink.DeepLinkScreen
-import eu.kanade.tachiyomi.ui.home.HomeScreen
-import eu.kanade.tachiyomi.ui.manga.MangaScreen
-import eu.kanade.tachiyomi.ui.more.NewUpdateScreen
-import eu.kanade.tachiyomi.ui.more.OnboardingScreen
+import eu.kanade.tachiyomi.ui.home.TabEvent
+import eu.kanade.tachiyomi.ui.home.TopLevelRoute
+import eu.kanade.tachiyomi.ui.setting.addSettingsRoute
 import eu.kanade.tachiyomi.util.system.dpToPx
 import eu.kanade.tachiyomi.util.system.isDebugBuildType
 import eu.kanade.tachiyomi.util.system.isNavigationBarNeedsScrim
@@ -128,10 +137,31 @@ import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import mihon.core.migration.Migrator
 import mihon.core.migration.Migrator.scope
+import mihon.core.navigation.AssistContentRoute
+import mihon.core.navigation.BrowseSourceRoute
+import mihon.core.navigation.DeepLinkRoute
+import mihon.core.navigation.ExtensionStoresRoute
+import mihon.core.navigation.GlobalSearchRoute
+import mihon.core.navigation.HomeRoute
+import mihon.core.navigation.MangaRoute
+import mihon.core.navigation.NewUpdateRoute
+import mihon.core.navigation.OnboardingRoute
+import mihon.core.navigation.RestoreBackupRoute
+import mihon.core.navigation.SettingsRoute
+import mihon.core.navigation.SourceFeedRoute
+import mihon.core.navigation.appEntries
+import mihon.core.navigation.util.AssistContentManager
+import mihon.core.navigation.util.LocalAssistContentManager
+import mihon.core.navigation.util.LocalBackStack
+import mihon.core.navigation.util.LocalTopLevelBackStack
+import mihon.core.navigation.util.popUntilRoot
+import mihon.core.navigation.util.rememberOverlaySheetSceneStrategy
+import mihon.core.navigation.util.rememberTopLevelBackStack
+import mihon.core.navigation.util.rememberTwoPaneSettingsSceneStrategy
+import mihon.presentation.core.util.isTabletUi
 import tachiyomi.core.common.Constants
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.Preference
-import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.backup.service.BackupPreferences
@@ -170,7 +200,9 @@ class MainActivity : BaseActivity() {
     // To be checked by splash screen. If true then splash screen will be removed.
     var ready = false
 
-    private var navigator: Navigator? = null
+    private var backStack: NavBackStack<NavKey>? = null
+
+    private val assistContentManager = AssistContentManager()
 
     // AM (CONNECTIONS) -->
     private val connectionsPreferences: ConnectionsPreferences by lazy { globalAppGraph.connectionsPreferences }
@@ -262,6 +294,7 @@ class MainActivity : BaseActivity() {
             val showCloudflareBypassBanner by networkPreferences.showCloudflareBypassBanner.collectAsState()
             // KMK <--
 
+            val isTabletUi = isTabletUi()
             val isSystemInDarkTheme = isSystemInDarkTheme()
             val statusBarBackgroundColor = when {
                 // KMK -->
@@ -291,16 +324,27 @@ class MainActivity : BaseActivity() {
                 )
             }
 
-            Navigator(
-                screen = HomeScreen,
-                disposeBehavior = NavigatorDisposeBehavior(disposeNestedNavigators = false, disposeSteps = true),
-            ) { navigator ->
-                LaunchedEffect(navigator) {
-                    this@MainActivity.navigator = navigator
+            val backStack = rememberNavBackStack(HomeRoute)
+            val topLevelBackStack = rememberTopLevelBackStack(TopLevelRoute.Library)
+            val twoPaneStrategy = rememberTwoPaneSettingsSceneStrategy<NavKey>()
+            val overlaySheetSceneStrategy = rememberOverlaySheetSceneStrategy<NavKey>()
+            val resultEventBus = rememberResultEventBus()
+            val resultEventBusNavEntryDecorator = rememberResultEventBusNavEntryDecorator<NavKey>(
+                resultEventBus = resultEventBus,
+            )
+
+            CompositionLocalProvider(
+                LocalResultEventBus provides resultEventBus,
+                LocalBackStack provides backStack,
+                LocalTopLevelBackStack provides topLevelBackStack,
+                LocalAssistContentManager provides assistContentManager,
+            ) {
+                LaunchedEffect(backStack) {
+                    this@MainActivity.backStack = backStack
 
                     if (isLaunch) {
                         // Set start screen
-                        handleIntentAction(intent, navigator)
+                        handleIntentAction(intent, backStack, resultEventBus, isTabletUi)
 
                         // Reset Incognito Mode on relaunch
                         preferences.incognitoMode().set(false)
@@ -320,11 +364,13 @@ class MainActivity : BaseActivity() {
                         // SY <--
                     }
                 }
-                LaunchedEffect(navigator.lastItem) {
+
+                val currentRoute = backStack.lastOrNull()
+                LaunchedEffect(currentRoute) {
                     (
-                        (navigator.lastItem as? BrowseSourceScreen)?.sourceId
+                        (currentRoute as? BrowseSourceRoute)?.sourceId
                             // KMK -->
-                            ?: (navigator.lastItem as? SourceFeedScreen)?.sourceId
+                            ?: (currentRoute as? SourceFeedRoute)?.sourceId
                         // KMK <--
                         )
                         .let(getIncognitoState::subscribe)
@@ -358,8 +404,21 @@ class MainActivity : BaseActivity() {
                     // Consume insets already used by app state banners
                     Box {
                         // Shows current screen
-                        DefaultNavigatorScreenTransition(
-                            navigator = navigator,
+                        NavDisplay(
+                            backStack = backStack,
+                            onBack = { backStack.removeLastOrNull() },
+                            sceneStrategies = listOf(twoPaneStrategy, overlaySheetSceneStrategy),
+                            transitionSpec = screenTransition(forward = true),
+                            popTransitionSpec = screenTransition(forward = false),
+                            predictivePopTransitionSpec = { screenTransition(forward = false)() },
+                            entryDecorators = listOf(
+                                rememberSaveableStateHolderNavEntryDecorator(),
+                                rememberViewModelStoreNavEntryDecorator(),
+                                resultEventBusNavEntryDecorator,
+                            ),
+                            entryProvider = entryProvider {
+                                appEntries()
+                            },
                             modifier = Modifier
                                 .padding(contentPadding)
                                 .consumeWindowInsets(contentPadding),
@@ -379,17 +438,17 @@ class MainActivity : BaseActivity() {
                     }
                 }
 
-                // Pop source-related screens when incognito mode is turned off
+                // Pop source-related routes when incognito mode is turned off
                 LaunchedEffect(Unit) {
                     preferences.incognitoMode().changes()
                         .drop(1)
                         .filter { !it }
                         .onEach {
-                            val currentScreen = navigator.lastItem
-                            if (currentScreen is BrowseSourceScreen ||
-                                (currentScreen is MangaScreen && currentScreen.fromSource)
+                            val currentRoute = backStack.lastOrNull()
+                            if (currentRoute is BrowseSourceRoute ||
+                                (currentRoute is MangaRoute && currentRoute.fromSource)
                             ) {
-                                navigator.popUntilRoot()
+                                backStack.popUntilRoot()
                             }
                         }
                         .launchIn(this)
@@ -417,7 +476,12 @@ class MainActivity : BaseActivity() {
                     // <-- AM (DISCORD)
                 }
 
-                HandleOnNewIntent(context = context, navigator = navigator)
+                HandleOnNewIntent(
+                    context = context,
+                    backStack = backStack,
+                    resultEventBus = resultEventBus,
+                    isTabletUi = isTabletUi,
+                )
 
                 // KMK -->
                 RearmJobs()
@@ -499,15 +563,22 @@ class MainActivity : BaseActivity() {
 
     override fun onProvideAssistContent(outContent: AssistContent) {
         super.onProvideAssistContent(outContent)
-        when (val screen = navigator?.lastItem) {
-            is AssistContentScreen -> {
-                screen.onProvideAssistUrl()?.let { outContent.webUri = it.toUri() }
+        when (backStack?.lastOrNull()) {
+            is AssistContentRoute -> {
+                assistContentManager.currentAssistUrl?.let {
+                    outContent.webUri = it.toUri()
+                }
             }
         }
     }
 
     @Composable
-    private fun HandleOnNewIntent(context: Context, navigator: Navigator) {
+    private fun HandleOnNewIntent(
+        context: Context,
+        backStack: NavBackStack<NavKey>,
+        resultEventBus: ResultEventBus,
+        isTabletUi: Boolean,
+    ) {
         LaunchedEffect(Unit) {
             callbackFlow {
                 val componentActivity = context as ComponentActivity
@@ -515,7 +586,9 @@ class MainActivity : BaseActivity() {
                 componentActivity.addOnNewIntentListener(consumer)
                 awaitClose { componentActivity.removeOnNewIntentListener(consumer) }
             }
-                .collectLatest { handleIntentAction(it, navigator) }
+                .collectLatest {
+                    handleIntentAction(it, backStack, resultEventBus, isTabletUi)
+                }
         }
     }
 
@@ -562,7 +635,7 @@ class MainActivity : BaseActivity() {
     @Composable
     private fun CheckForUpdates() {
         val context = LocalContext.current
-        val navigator = LocalNavigator.currentOrThrow
+        val backStack = LocalBackStack.current
 
         // App updates
         LaunchedEffect(Unit) {
@@ -570,13 +643,13 @@ class MainActivity : BaseActivity() {
                 try {
                     val result = AppUpdateChecker().checkForUpdate(context)
                     if (result is GetApplicationRelease.Result.NewUpdate) {
-                        val updateScreen = NewUpdateScreen(
+                        val updateRoute = NewUpdateRoute(
                             versionName = result.release.version,
                             changelogInfo = result.release.info,
                             releaseLink = result.release.releaseLink,
                             downloadLink = result.release.downloadLink,
                         )
-                        navigator.push(updateScreen)
+                        backStack.add(updateRoute)
                     }
                 } catch (e: Exception) {
                     logcat(LogPriority.ERROR, e)
@@ -658,11 +731,11 @@ class MainActivity : BaseActivity() {
 
     @Composable
     private fun ShowOnboarding() {
-        val navigator = LocalNavigator.currentOrThrow
+        val backStack = LocalBackStack.current
 
         LaunchedEffect(Unit) {
-            if (!preferences.shownOnboardingFlow().get() && navigator.lastItem !is OnboardingScreen) {
-                navigator.push(OnboardingScreen())
+            if (!preferences.shownOnboardingFlow().get() && backStack.lastOrNull() !is OnboardingRoute) {
+                backStack.add(OnboardingRoute)
             }
         }
     }
@@ -735,7 +808,12 @@ class MainActivity : BaseActivity() {
         }
     }
 
-    private fun handleIntentAction(intent: Intent, navigator: Navigator): Boolean {
+    private fun handleIntentAction(
+        intent: Intent,
+        backStack: NavBackStack<NavKey>,
+        resultEventBus: ResultEventBus,
+        isTabletUi: Boolean,
+    ): Boolean {
         val notificationId = intent.getIntExtra("notificationId", -1)
         if (notificationId > -1) {
             NotificationReceiver.dismissNotification(
@@ -746,26 +824,31 @@ class MainActivity : BaseActivity() {
         }
 
         val tabToOpen = when (intent.action) {
-            Constants.SHORTCUT_LIBRARY -> HomeScreen.Tab.Library()
+            Constants.SHORTCUT_LIBRARY -> TabEvent.Library()
             Constants.SHORTCUT_MANGA -> {
                 val idToOpen = intent.extras?.getLong(Constants.MANGA_EXTRA) ?: return false
-                navigator.popUntilRoot()
-                HomeScreen.Tab.Library(idToOpen)
+                backStack.popUntilRoot()
+                TabEvent.Library(idToOpen)
             }
-            Constants.SHORTCUT_UPDATES -> HomeScreen.Tab.Updates
-            Constants.SHORTCUT_HISTORY -> HomeScreen.Tab.History
-            Constants.SHORTCUT_SOURCES -> HomeScreen.Tab.Browse(false)
-            Constants.SHORTCUT_EXTENSIONS -> HomeScreen.Tab.Browse(true)
+            Constants.SHORTCUT_UPDATES -> TabEvent.Updates
+            Constants.SHORTCUT_HISTORY -> TabEvent.History
+            Constants.SHORTCUT_SOURCES -> TabEvent.Browse(false)
+            Constants.SHORTCUT_EXTENSIONS -> TabEvent.Browse(true)
             Constants.SHORTCUT_DOWNLOADS -> {
-                navigator.popUntilRoot()
-                HomeScreen.Tab.More(toDownloads = true)
+                backStack.popUntilRoot()
+                TabEvent.More(toDownloads = true)
             }
             // KMK -->
             Constants.SHORTCUT_LIBRARY_UPDATE_ERRORS -> {
-                navigator.popUntilRoot()
-                HomeScreen.Tab.More(toDownloads = false, toLibraryUpdateErrors = true)
+                backStack.popUntilRoot()
+                TabEvent.More(toDownloads = false, toLibraryUpdateErrors = true)
             }
             // KMK <--
+            Intent.ACTION_APPLICATION_PREFERENCES -> {
+                backStack.popUntilRoot()
+                backStack.addSettingsRoute(SettingsRoute(), isTabletUi)
+                null
+            }
             Intent.ACTION_SEARCH, Intent.ACTION_SEND, "com.google.android.gms.actions.SEARCH_ACTION" -> {
                 // If the intent match the "standard" Android search intent
                 // or the Google-specific search intent (triggered by saying or typing "search *query* on *Tachiyomi*" in Google Search/Google Assistant)
@@ -773,8 +856,8 @@ class MainActivity : BaseActivity() {
                 // Get the search query provided in extras, and if not null, perform a global search with it.
                 val query = intent.getStringExtra(SearchManager.QUERY) ?: intent.getStringExtra(Intent.EXTRA_TEXT)
                 if (!query.isNullOrEmpty()) {
-                    navigator.popUntilRoot()
-                    navigator.push(DeepLinkScreen(query))
+                    backStack.popUntilRoot()
+                    backStack.add(DeepLinkRoute(query))
                 }
                 null
             }
@@ -782,22 +865,22 @@ class MainActivity : BaseActivity() {
                 val query = intent.getStringExtra(INTENT_SEARCH_QUERY)
                 if (!query.isNullOrEmpty()) {
                     val filter = intent.getStringExtra(INTENT_SEARCH_FILTER)
-                    navigator.popUntilRoot()
-                    navigator.push(GlobalSearchScreen(query, filter))
+                    backStack.popUntilRoot()
+                    backStack.add(GlobalSearchRoute(query, filter))
                 }
                 null
             }
             Intent.ACTION_VIEW -> {
                 // Handling opening of backup files
                 if (intent.data.toString().endsWith(".tachibk")) {
-                    navigator.popUntilRoot()
-                    navigator.push(RestoreBackupScreen(intent.data.toString()))
+                    backStack.popUntilRoot()
+                    backStack.add(RestoreBackupRoute(intent.data.toString()))
                 }
                 // Deep link to add extension store
                 else if (intent.isAddExtensionStoreIntent()) {
                     intent.data?.getQueryParameter("url")?.let { repoUrl ->
-                        navigator.popUntilRoot()
-                        navigator.push(ExtensionStoresScreen(repoUrl))
+                        backStack.popUntilRoot()
+                        backStack.add(ExtensionStoresRoute(repoUrl))
                     }
                 }
                 null
@@ -806,7 +889,7 @@ class MainActivity : BaseActivity() {
         }
 
         if (tabToOpen != null) {
-            lifecycleScope.launch { HomeScreen.openTab(tabToOpen) }
+            resultEventBus.sendResult(tabToOpen)
         }
 
         ready = true
@@ -824,6 +907,18 @@ class MainActivity : BaseActivity() {
         const val INTENT_SEARCH_FILTER = "filter"
     }
 }
+
+// KMK --> Same motion design the Voyager ScreenTransition used, scoped to the NavDisplay's
+// Scene transitions: slide + fade with EMPHASIZED easing, direction keyed by push vs pop.
+private fun screenTransition(forward: Boolean): AnimatedContentTransitionScope<Scene<NavKey>>.() -> ContentTransform = {
+    val enterOffset: (Int) -> Int = { if (forward) it / 6 else -it / 6 }
+    val exitOffset: (Int) -> Int = { if (forward) -it / 6 else it / 6 }
+    slideInHorizontally(tween(UiMotion.SCREEN_ENTER, easing = UiMotion.EMPHASIZED), enterOffset) +
+        fadeIn(tween(UiMotion.SCREEN_ENTER, easing = UiMotion.EMPHASIZED)) togetherWith
+        slideOutHorizontally(tween(UiMotion.SCREEN_EXIT, easing = UiMotion.EMPHASIZED), exitOffset) +
+        fadeOut(tween(UiMotion.SCREEN_EXIT, easing = UiMotion.EMPHASIZED))
+}
+// KMK <--
 
 // Splash screen — pineapple spin burst visible during exit, so duration
 // allows at least one full 650ms burst loop.

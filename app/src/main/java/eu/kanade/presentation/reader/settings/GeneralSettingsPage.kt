@@ -34,7 +34,7 @@ import androidx.compose.ui.unit.dp
 import eu.kanade.tachiyomi.ui.reader.ChapterCompleteSoundPackManager
 import eu.kanade.tachiyomi.ui.reader.SoundTier
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
 import eu.kanade.tachiyomi.util.system.hasDisplayCutout
 import eu.kanade.tachiyomi.util.system.toast
 import tachiyomi.core.common.preference.toggle
@@ -65,7 +65,7 @@ private val flashColors = listOf(
 )
 
 @Composable
-internal fun GeneralPage(screenModel: ReaderSettingsScreenModel) {
+internal fun GeneralPage(screenModel: ReaderSettingsViewModel) {
     val readerTheme by screenModel.preferences.readerTheme().collectAsState()
 
     // KMK --> A book cannot act on the image-reader-only rows further down, and offering them

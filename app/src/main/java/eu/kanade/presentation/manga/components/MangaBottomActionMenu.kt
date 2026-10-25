@@ -63,11 +63,11 @@ import eu.kanade.presentation.components.DownloadDropdownMenu
 import eu.kanade.presentation.components.DropdownMenu
 import eu.kanade.presentation.manga.DownloadAction
 import eu.kanade.tachiyomi.R
-import eu.kanade.tachiyomi.util.system.isTabletUi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import mihon.presentation.core.util.isTabletUi
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.i18n.sy.SYMR

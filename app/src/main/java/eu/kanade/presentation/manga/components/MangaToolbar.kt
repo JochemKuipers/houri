@@ -16,19 +16,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.navigator.LocalNavigator
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.AppBarTitle
 import eu.kanade.presentation.components.DownloadDropdownMenu
 import eu.kanade.presentation.manga.DownloadAction
-import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
-import eu.kanade.tachiyomi.ui.browse.source.feed.SourceFeedScreen
-import eu.kanade.tachiyomi.ui.manga.MangaScreen
 import eu.kanade.tachiyomi.util.system.isDebugBuildType
 import kotlinx.collections.immutable.persistentListOf
 import mihon.app.di.globalAppGraph
+import mihon.core.navigation.BrowseSourceRoute
+import mihon.core.navigation.MangaRoute
+import mihon.core.navigation.SourceFeedRoute
+import mihon.core.navigation.util.LocalBackStack
+import mihon.core.navigation.util.popUntil
 import tachiyomi.core.common.preference.toggle
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
@@ -85,9 +86,12 @@ fun MangaToolbar(
     modifier: Modifier = Modifier,
 ) {
     // KMK -->
-    val navigator = LocalNavigator.current
-    fun onHomeClicked() = navigator?.popUntil { screen ->
-        screen is SourceFeedScreen || screen is BrowseSourceScreen
+    val backStack = LocalBackStack.current
+    fun onHomeClicked(): Boolean {
+        backStack.popUntil { screen ->
+            screen is SourceFeedRoute || screen is BrowseSourceRoute
+        }
+        return true
     }
     val isHomeEnabled = globalAppGraph.uiPreferences.showHomeOnRelatedMangas().get()
     val libraryPreferences = remember { globalAppGraph.libraryPreferences }
@@ -111,10 +115,9 @@ fun MangaToolbar(
         // KMK -->
         goHome = { onHomeClicked() }.takeIf {
             isHomeEnabled &&
-                navigator != null &&
                 (
-                    navigator.size >= 5 ||
-                        (navigator.size >= 2 && navigator.items[navigator.size - 2] is MangaScreen)
+                    backStack.size >= 5 ||
+                        (backStack.size >= 2 && backStack[backStack.size - 2] is MangaRoute)
                     )
         },
         // KMK <--

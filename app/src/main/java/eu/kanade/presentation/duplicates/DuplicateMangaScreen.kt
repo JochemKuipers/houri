@@ -10,7 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import eu.kanade.presentation.library.components.MangaListItem
-import eu.kanade.tachiyomi.ui.duplicates.DuplicateMangaScreenModel
+import eu.kanade.tachiyomi.ui.duplicates.DuplicateMangaViewModel
 import exh.util.isLewd
 import tachiyomi.domain.manga.interactor.DuplicateEntry
 import tachiyomi.i18n.kmk.KMR
@@ -22,15 +22,15 @@ import tachiyomi.domain.manga.model.MangaCover as MangaCoverModel
 
 @Composable
 fun DuplicateMangaScreen(
-    state: DuplicateMangaScreenModel.State,
+    state: DuplicateMangaViewModel.State,
     onClickEntry: (DuplicateEntry) -> Unit,
 ) {
     when (state) {
-        DuplicateMangaScreenModel.State.Loading -> LoadingScreen()
+        DuplicateMangaViewModel.State.Loading -> LoadingScreen()
 
-        DuplicateMangaScreenModel.State.Empty -> EmptyState()
+        DuplicateMangaViewModel.State.Empty -> EmptyState()
 
-        is DuplicateMangaScreenModel.State.Content -> {
+        is DuplicateMangaViewModel.State.Content -> {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),

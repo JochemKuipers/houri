@@ -28,10 +28,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.screen.Screen
-import cafe.adriel.voyager.core.stack.StackEvent
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
+import androidx.navigation3.runtime.result.LocalResultEventBus
 import eu.kanade.presentation.browse.AnizenMultiFeedScreen
 import eu.kanade.presentation.browse.FeedAddDialog
 import eu.kanade.presentation.browse.FeedAddSearchDialog
@@ -43,13 +40,15 @@ import eu.kanade.presentation.browse.components.SourceFeedDeleteDialog
 import eu.kanade.presentation.browse.components.bulkSelectionButton
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.TabContent
-import eu.kanade.tachiyomi.ui.browse.BulkFavoriteScreenModel
-import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
-import eu.kanade.tachiyomi.ui.home.HomeScreen
-import eu.kanade.tachiyomi.ui.manga.MangaScreen
+import eu.kanade.tachiyomi.ui.browse.BulkFavoriteViewModel
+import eu.kanade.tachiyomi.ui.home.ShowBottomNavEvent
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import mihon.core.navigation.BrowseSourceRoute
+import mihon.core.navigation.HomeRoute
+import mihon.core.navigation.MangaRoute
+import mihon.core.navigation.util.LocalBackStack
 import tachiyomi.domain.source.interactor.GetRemoteManga
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
@@ -57,20 +56,21 @@ import tachiyomi.i18n.sy.SYMR
 import tachiyomi.presentation.core.i18n.stringResource
 
 @Composable
-fun Screen.feedTab(
+fun feedTab(
     // KMK -->
-    screenModel: FeedScreenModel,
-    bulkFavoriteScreenModel: BulkFavoriteScreenModel,
-    multiFeedScreenModel: AnizenMultiFeedScreenModel,
+    screenModel: FeedViewModel,
+    bulkFavoriteScreenModel: BulkFavoriteViewModel,
+    multiFeedViewModel: AnizenMultiFeedViewModel,
     // KMK <--
 ): TabContent {
-    val navigator = LocalNavigator.currentOrThrow
+    val backStack = LocalBackStack.current
+    val resultEventBus = LocalResultEventBus.current
     val state by screenModel.state.collectAsState()
 
     // KMK -->
     val bulkFavoriteState by bulkFavoriteScreenModel.state.collectAsState()
     val showingFeedOrderScreen = rememberSaveable { mutableStateOf(false) }
-    val multiState by multiFeedScreenModel.state.collectAsState()
+    val multiState by multiFeedViewModel.state.collectAsState()
     val multiAvailable = multiState.tabs.isNotEmpty()
     val showingMultiFeed = rememberSaveable(multiAvailable) { mutableStateOf(false) }
     if (!multiAvailable && showingMultiFeed.value) showingMultiFeed.value = false
@@ -83,25 +83,29 @@ fun Screen.feedTab(
         }
     }
     LaunchedEffect(multiPagerState.currentPage) {
-        multiFeedScreenModel.selectTab(multiPagerState.currentPage)
+        multiFeedViewModel.selectTab(multiPagerState.currentPage)
     }
 
     val haptic = LocalHapticFeedback.current
 
     LaunchedEffect(bulkFavoriteState.selectionMode) {
-        HomeScreen.showBottomNav(!bulkFavoriteState.selectionMode)
+        resultEventBus.sendResult(result = ShowBottomNavEvent(!bulkFavoriteState.selectionMode))
     }
     // KMK <--
 
-    DisposableEffect(navigator.lastEvent) {
-        if (navigator.lastEvent == StackEvent.Push) {
+    DisposableEffect(Unit) {
+        // Voyager keyed this off navigator.lastEvent; with Nav3 the same distinction comes from
+        // whether something was pushed on top of Home when this tab disposed.
+        if (backStack.lastOrNull() !is HomeRoute && !screenModel.pushed) {
             screenModel.pushed = true
         } else if (!screenModel.pushed) {
             screenModel.init()
         }
 
         onDispose {
-            if (navigator.lastEvent == StackEvent.Idle && screenModel.pushed) {
+            if (backStack.lastOrNull() !is HomeRoute) {
+                screenModel.pushed = true
+            } else {
                 screenModel.pushed = false
             }
         }
@@ -125,7 +129,7 @@ fun Screen.feedTab(
                 AppBar.Action(
                     title = stringResource(KMR.strings.action_refresh),
                     icon = Icons.Outlined.Refresh,
-                    onClick = multiFeedScreenModel::refresh,
+                    onClick = multiFeedViewModel::refresh,
                 ),
                 bulkSelectionButton(
                     isRunning = bulkFavoriteState.isRunning,
@@ -199,9 +203,9 @@ fun Screen.feedTab(
                                 pagerState = multiPagerState,
                                 contentPadding = contentPadding,
                                 onClickSavedSearch = { savedSearch, source ->
-                                    multiFeedScreenModel.sourcePreferences.lastUsedSource().set(savedSearch.source)
-                                    navigator.push(
-                                        BrowseSourceScreen(
+                                    multiFeedViewModel.sourcePreferences.lastUsedSource().set(savedSearch.source)
+                                    backStack.add(
+                                        BrowseSourceRoute(
                                             source.id,
                                             listingQuery = null,
                                             savedSearch = savedSearch.id,
@@ -209,9 +213,9 @@ fun Screen.feedTab(
                                     )
                                 },
                                 onClickSource = { source ->
-                                    multiFeedScreenModel.sourcePreferences.lastUsedSource().set(source.id)
-                                    navigator.push(
-                                        BrowseSourceScreen(
+                                    multiFeedViewModel.sourcePreferences.lastUsedSource().set(source.id)
+                                    backStack.add(
+                                        BrowseSourceRoute(
                                             source.id,
                                             listingQuery = if (!source.supportsLatest) {
                                                 GetRemoteManga.QUERY_POPULAR
@@ -222,23 +226,23 @@ fun Screen.feedTab(
                                     )
                                 },
                                 onLongClickFeed = screenModel::openActionsDialog,
-                                onRetryFeed = multiFeedScreenModel::retryTab,
+                                onRetryFeed = multiFeedViewModel::retryTab,
                                 onClickManga = { manga ->
                                     if (bulkFavoriteState.selectionMode) {
                                         bulkFavoriteScreenModel.toggleSelection(manga)
                                     } else {
-                                        navigator.push(MangaScreen(manga.id, true))
+                                        backStack.add(MangaRoute(manga.id, true))
                                     }
                                 },
                                 onLongClickManga = { manga ->
                                     if (!bulkFavoriteState.selectionMode) {
                                         bulkFavoriteScreenModel.addRemoveManga(manga, haptic)
                                     } else {
-                                        navigator.push(MangaScreen(manga.id, true))
+                                        backStack.add(MangaRoute(manga.id, true))
                                     }
                                 },
                                 selection = bulkFavoriteState.selection,
-                                getMangaState = { manga -> multiFeedScreenModel.getManga(initialManga = manga) },
+                                getMangaState = { manga -> multiFeedViewModel.getManga(initialManga = manga) },
                             )
                         } else {
                             FeedScreen(
@@ -246,8 +250,8 @@ fun Screen.feedTab(
                                 contentPadding = contentPadding,
                                 onClickSavedSearch = { savedSearch, source ->
                                     screenModel.sourcePreferences.lastUsedSource().set(savedSearch.source)
-                                    navigator.push(
-                                        BrowseSourceScreen(
+                                    backStack.add(
+                                        BrowseSourceRoute(
                                             source.id,
                                             listingQuery = null,
                                             savedSearch = savedSearch.id,
@@ -256,8 +260,8 @@ fun Screen.feedTab(
                                 },
                                 onClickSource = { source ->
                                     screenModel.sourcePreferences.lastUsedSource().set(source.id)
-                                    navigator.push(
-                                        BrowseSourceScreen(
+                                    backStack.add(
+                                        BrowseSourceRoute(
                                             source.id,
                                             // KMK -->
                                             listingQuery = if (!source.supportsLatest) {
@@ -279,7 +283,7 @@ fun Screen.feedTab(
                                         bulkFavoriteScreenModel.toggleSelection(manga)
                                     } else {
                                         // KMK <--
-                                        navigator.push(MangaScreen(manga.id, true))
+                                        backStack.add(MangaRoute(manga.id, true))
                                     }
                                 },
                                 // KMK -->
@@ -287,7 +291,7 @@ fun Screen.feedTab(
                                     if (!bulkFavoriteState.selectionMode) {
                                         bulkFavoriteScreenModel.addRemoveManga(manga, haptic)
                                     } else {
-                                        navigator.push(MangaScreen(manga.id, true))
+                                        backStack.add(MangaRoute(manga.id, true))
                                     }
                                 },
                                 selection = bulkFavoriteState.selection,
@@ -303,7 +307,7 @@ fun Screen.feedTab(
             state.dialog?.let { dialog ->
                 val onDismissRequest = screenModel::dismissDialog
                 when (dialog) {
-                    is FeedScreenModel.Dialog.AddFeed -> {
+                    is FeedViewModel.Dialog.AddFeed -> {
                         FeedAddDialog(
                             sources = dialog.options,
                             onDismiss = onDismissRequest,
@@ -315,7 +319,7 @@ fun Screen.feedTab(
                             },
                         )
                     }
-                    is FeedScreenModel.Dialog.AddFeedSearch -> {
+                    is FeedViewModel.Dialog.AddFeedSearch -> {
                         FeedAddSearchDialog(
                             source = dialog.source,
                             savedSearches = dialog.options,
@@ -326,7 +330,7 @@ fun Screen.feedTab(
                             },
                         )
                     }
-                    is FeedScreenModel.Dialog.DeleteFeed -> {
+                    is FeedViewModel.Dialog.DeleteFeed -> {
                         SourceFeedDeleteDialog(
                             onDismissRequest = onDismissRequest,
                             deleteFeed = {
@@ -336,7 +340,7 @@ fun Screen.feedTab(
                         )
                     }
                     // KMK -->
-                    is FeedScreenModel.Dialog.FeedActions -> {
+                    is FeedViewModel.Dialog.FeedActions -> {
                         FeedActionsDialog(
                             feed = dialog.feedItem.feed,
                             title = dialog.feedItem.title,
@@ -361,10 +365,10 @@ fun Screen.feedTab(
             LaunchedEffect(Unit) {
                 screenModel.events.collectLatest { event ->
                     when (event) {
-                        FeedScreenModel.Event.FailedFetchingSources -> {
+                        FeedViewModel.Event.FailedFetchingSources -> {
                             launch { snackbarHostState.showSnackbar(internalErrString) }
                         }
-                        FeedScreenModel.Event.TooManyFeeds -> {
+                        FeedViewModel.Event.TooManyFeeds -> {
                             launch { snackbarHostState.showSnackbar(tooManyFeedsString) }
                         }
                     }

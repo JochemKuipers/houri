@@ -10,6 +10,15 @@ files moved. See .github/scripts/release_notes.py.
 
 ### New
 
+- **Navigation 3**: the app's entire UI now runs on Jetpack Navigation 3 (androidx.navigation3),
+  replacing the retired Voyager navigator — every screen is a serializable route on one back
+  stack, tabs keep their own per-tab stacks on tablets and phones alike, and the two-pane
+  settings layout is now a real Navigation 3 scene (list on the left, category on the right on
+  tablets). This matches upstream Mihon's migration and should improve predictive-back
+  animations and state restoration (upstream mihonapp/mihon#3984). All screens now use AndroidX
+  ViewModels with Metro DI instead of Voyager ScreenModels, and the Llamatik demo app submodule
+  also no longer depends on Voyager.
+
 - **Subcategory types**: when creating a subcategory (Edit Categories or from library
   selection) you can label it Author, Artist, Illustrator or Designer, so two same-named
   subcategories under one parent are tellable apart; the label shows as a colored tag in

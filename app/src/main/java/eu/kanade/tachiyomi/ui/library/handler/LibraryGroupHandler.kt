@@ -4,7 +4,7 @@ import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.library.model.LibraryGroup
 
 /**
- * Extracts category-grouping logic from [eu.kanade.tachiyomi.ui.library.LibraryScreenModel.applyGrouping].
+ * Extracts category-grouping logic from [eu.kanade.tachiyomi.ui.library.LibraryViewModel.applyGrouping].
  *
  * The ViewModel previously mixed grouping (BY_DEFAULT vs BY_SOURCE vs BY_TAG etc.)
  * with ViewModel state updates and DB pref reads, making the 200-line `applyGrouping`

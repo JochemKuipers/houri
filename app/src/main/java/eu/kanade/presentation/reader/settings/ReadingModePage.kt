@@ -17,7 +17,7 @@ import eu.kanade.domain.manga.model.readerOrientation
 import eu.kanade.domain.manga.model.readingMode
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerConfig
 import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.WebGpuViewer
@@ -37,7 +37,7 @@ import tachiyomi.presentation.core.util.collectAsState
 import java.text.NumberFormat
 
 @Composable
-internal fun ReadingModePage(screenModel: ReaderSettingsScreenModel) {
+internal fun ReadingModePage(screenModel: ReaderSettingsViewModel) {
     HeadingItem(MR.strings.pref_category_for_this_series)
     val manga by screenModel.mangaFlow.collectAsState()
 
@@ -150,7 +150,7 @@ internal fun ReadingModePage(screenModel: ReaderSettingsScreenModel) {
 }
 
 @Composable
-private fun PagerViewerSettings(screenModel: ReaderSettingsScreenModel) {
+private fun PagerViewerSettings(screenModel: ReaderSettingsViewModel) {
     HeadingItem(MR.strings.pager_viewer)
 
     val navigationModePager by screenModel.preferences.navigationModePager().collectAsState()
@@ -297,7 +297,7 @@ private fun PagerViewerSettings(screenModel: ReaderSettingsScreenModel) {
 
 @Composable
 private fun WebtoonViewerSettings(
-    screenModel: ReaderSettingsScreenModel,
+    screenModel: ReaderSettingsViewModel,
     // KMK -->
     readingMode: ReadingMode,
     // KMK <--
@@ -412,7 +412,7 @@ private fun WebtoonViewerSettings(
 
 // SY -->
 @Composable
-private fun WebtoonWithGapsViewerSettings(screenModel: ReaderSettingsScreenModel) {
+private fun WebtoonWithGapsViewerSettings(screenModel: ReaderSettingsViewModel) {
     HeadingItem(MR.strings.vertical_plus_viewer)
 
     CheckboxItem(
@@ -424,7 +424,7 @@ private fun WebtoonWithGapsViewerSettings(screenModel: ReaderSettingsScreenModel
 
 // Mihon -->
 @Composable
-private fun WebGpuViewerSettings(screenModel: ReaderSettingsScreenModel) {
+private fun WebGpuViewerSettings(screenModel: ReaderSettingsViewModel) {
     HeadingItem(MR.strings.webgpu_viewer)
 
     val viewer by screenModel.viewerFlow.collectAsState()

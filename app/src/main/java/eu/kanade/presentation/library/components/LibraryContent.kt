@@ -119,7 +119,7 @@ fun LibraryContent(
             // KMK -->
             val currentCategory = categories.getOrNull(pagerState.currentPage.coerceAtMost(categories.lastIndex))
             val subcategories = remember(currentCategory) {
-                if (currentCategory?.id == eu.kanade.tachiyomi.ui.library.LibraryScreenModel.ACHIEVEMENTS_CATEGORY_ID) {
+                if (currentCategory?.id == eu.kanade.tachiyomi.ui.library.LibraryViewModel.ACHIEVEMENTS_CATEGORY_ID) {
                     emptyList()
                 } else {
                     currentCategory
@@ -171,7 +171,7 @@ fun LibraryContent(
             // scrollable grid instead of the manga pager. Previously LibraryPager was always
             // shown, so the achievements tab rendered an empty LibraryPagerEmptyScreen (cut off
             // and not scrollable). Now we branch to the real achievements UI.
-            if (currentCategory?.id == eu.kanade.tachiyomi.ui.library.LibraryScreenModel.ACHIEVEMENTS_CATEGORY_ID) {
+            if (currentCategory?.id == eu.kanade.tachiyomi.ui.library.LibraryViewModel.ACHIEVEMENTS_CATEGORY_ID) {
                 AchievementsContent(
                     contentPadding = PaddingValues(bottom = contentPadding.calculateBottomPadding()),
                     modifier = Modifier.fillMaxWidth().weight(1f),

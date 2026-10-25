@@ -30,7 +30,7 @@ fun WhatsNewDialog(
                 Text(text = stringResource(MR.strings.whats_new))
             }
         },
-        text = { Text(text = AboutScreen.getVersionName(withBuildDate = true)) },
+        text = { Text(text = getVersionName(withBuildDate = true)) },
         // KMK <--
     )
 }

@@ -28,11 +28,8 @@ import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.PreferenceScreen
 import androidx.preference.forEach
 import androidx.preference.getOnBindEditTextListener
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.core.util.ifSourcesLoaded
 import eu.kanade.presentation.components.AppBar
-import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.preference.SharedPreferencesDataStore
 import eu.kanade.tachiyomi.source.ConfigurableSource
@@ -40,81 +37,79 @@ import eu.kanade.tachiyomi.source.sourcePreferences
 import eu.kanade.tachiyomi.widget.TachiyomiTextInputEditText.Companion.setIncognito
 import exh.source.EnhancedHttpSource
 import mihon.app.di.globalAppGraph
+import mihon.core.navigation.util.LocalBackStack
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.screens.LoadingScreen
 
-class SourcePreferencesScreen(val sourceId: Long) : Screen() {
+@Composable
+fun SourcePreferencesScreen(sourceId: Long) {
+    if (!ifSourcesLoaded()) {
+        LoadingScreen()
+        return
+    }
 
-    @Composable
-    override fun Content() {
-        if (!ifSourcesLoaded()) {
-            LoadingScreen()
-            return
+    val context = LocalContext.current
+    val backStack = LocalBackStack.current
+
+    Scaffold(
+        topBar = {
+            AppBar(
+                title = globalAppGraph.sourceManager.getOrStub(sourceId).toString(),
+                navigateUp = backStack::removeLastOrNull,
+                scrollBehavior = it,
+            )
+        },
+    ) { contentPadding ->
+        FragmentContainer(
+            fragmentManager = (context as FragmentActivity).supportFragmentManager,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(contentPadding),
+        ) {
+            add(it, SourcePreferencesFragment.getInstance(sourceId), null)
         }
+    }
+}
 
-        val context = LocalContext.current
-        val navigator = LocalNavigator.currentOrThrow
-
-        Scaffold(
-            topBar = {
-                AppBar(
-                    title = globalAppGraph.sourceManager.getOrStub(sourceId).toString(),
-                    navigateUp = navigator::pop,
-                    scrollBehavior = it,
-                )
-            },
-        ) { contentPadding ->
-            FragmentContainer(
-                fragmentManager = (context as FragmentActivity).supportFragmentManager,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(contentPadding),
-            ) {
-                add(it, SourcePreferencesFragment.getInstance(sourceId), null)
+/**
+ * From https://stackoverflow.com/questions/60520145/fragment-container-in-jetpack-compose/70817794#70817794
+ */
+@Composable
+private fun FragmentContainer(
+    fragmentManager: FragmentManager,
+    modifier: Modifier = Modifier,
+    commit: FragmentTransaction.(containerId: Int) -> Unit,
+) {
+    val containerId by rememberSaveable {
+        mutableIntStateOf(View.generateViewId())
+    }
+    var initialized by rememberSaveable { mutableStateOf(false) }
+    AndroidView(
+        modifier = modifier,
+        factory = { context ->
+            FragmentContainerView(context)
+                .apply { id = containerId }
+        },
+        update = { view ->
+            if (!initialized) {
+                fragmentManager.commit { commit(view.id) }
+                initialized = true
+            } else {
+                fragmentManager.onContainerAvailable(view)
             }
-        }
-    }
+        },
+    )
+}
 
-    /**
-     * From https://stackoverflow.com/questions/60520145/fragment-container-in-jetpack-compose/70817794#70817794
-     */
-    @Composable
-    private fun FragmentContainer(
-        fragmentManager: FragmentManager,
-        modifier: Modifier = Modifier,
-        commit: FragmentTransaction.(containerId: Int) -> Unit,
-    ) {
-        val containerId by rememberSaveable {
-            mutableIntStateOf(View.generateViewId())
-        }
-        var initialized by rememberSaveable { mutableStateOf(false) }
-        AndroidView(
-            modifier = modifier,
-            factory = { context ->
-                FragmentContainerView(context)
-                    .apply { id = containerId }
-            },
-            update = { view ->
-                if (!initialized) {
-                    fragmentManager.commit { commit(view.id) }
-                    initialized = true
-                } else {
-                    fragmentManager.onContainerAvailable(view)
-                }
-            },
-        )
-    }
-
-    /** Access to package-private method in FragmentManager through reflection */
-    private fun FragmentManager.onContainerAvailable(view: FragmentContainerView) {
-        val method = FragmentManager::class.java.getDeclaredMethod(
-            "onContainerAvailable",
-            FragmentContainerView::class.java,
-        )
-        method.isAccessible = true
-        method.invoke(this, view)
-    }
+/** Access to package-private method in FragmentManager through reflection */
+private fun FragmentManager.onContainerAvailable(view: FragmentContainerView) {
+    val method = FragmentManager::class.java.getDeclaredMethod(
+        "onContainerAvailable",
+        FragmentContainerView::class.java,
+    )
+    method.isAccessible = true
+    method.invoke(this, view)
 }
 
 class SourcePreferencesFragment : PreferenceFragmentCompat() {

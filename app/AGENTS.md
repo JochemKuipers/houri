@@ -16,7 +16,7 @@ The monolithic application module containing UI, domain, data services, and DI w
 
 | Path | Purpose |
 |------|---------|
-| `eu.kanade.tachiyomi.ui.*` | Voyager Screens + ScreenModels |
+| `eu.kanade.tachiyomi.ui.*` | Nav3 routes + screen composables; ViewModels in `ui/` |
 | `eu.kanade.presentation.*` | Compose UI (screens, components, theme) |
 | `eu.kanade.tachiyomi.di/` | AppModule, PreferenceModule |
 | `eu.kanade.domain/` | DomainModule, KMKDomainModule, SYDomainModule |
@@ -38,10 +38,10 @@ Legacy Injekt modules (still loaded in `App.onCreate`, kept only for remaining k
 
 ## Screen pattern
 
-Voyager `Screen` + `ScreenModel` in `ui/`, Composable in `presentation/`:
-- `LibraryTab.kt` → `LibraryScreenModel.kt` → `presentation/library/`
-- `MangaScreen.kt` → `MangaScreenModel.kt` → `presentation/manga/`
-- `ReaderActivity` uses `ReaderViewModel` (AndroidX ViewModel, not Voyager)
+Nav3 route + screen composable in `ui/`, Metro `ViewModel` in `ui/`, content composable in `presentation/`:
+- `LibraryTab.kt` → `LibraryViewModel.kt` → `presentation/library/`
+- `MangaScreen.kt` → `MangaViewModel.kt` → `presentation/manga/`
+- `ReaderActivity` uses `ReaderViewModel` (AndroidX ViewModel)
 
 ## Settings framework
 

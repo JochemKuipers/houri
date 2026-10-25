@@ -3,7 +3,7 @@ package eu.kanade.tachiyomi.data.coil
 import android.graphics.BitmapFactory
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.coil.MangaCoverMetadata.setRatioAndColors
-import eu.kanade.tachiyomi.ui.manga.MangaScreenModel
+import eu.kanade.tachiyomi.ui.manga.MangaViewModel
 import mihon.app.di.globalAppGraph
 import okio.BufferedSource
 import tachiyomi.core.common.util.system.ImageUtil
@@ -100,7 +100,7 @@ object MangaCoverMetadata {
      *
      * This is only for loading color first time it appears on Library/Browse. Any new colors caused by loading new
      * cover when open a manga detail or change cover will be updated separately on
-     * [MangaScreenModel.onCoverPaletteAvailable].
+     * [MangaViewModel.onCoverPaletteAvailable].
      *
      * @author Jays2Kings, cuong-tran
      */

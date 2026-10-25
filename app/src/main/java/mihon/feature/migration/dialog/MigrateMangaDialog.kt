@@ -18,15 +18,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.util.fastForEach
-import cafe.adriel.voyager.core.model.StateScreenModel
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.core.screen.Screen
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dev.zacsweers.metro.AppScope
+import dev.zacsweers.metro.ContributesIntoMap
+import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.binding
+import dev.zacsweers.metrox.viewmodel.ViewModelKey
+import dev.zacsweers.metrox.viewmodel.metroViewModel
 import eu.kanade.domain.manga.model.hasCustomCover
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import kotlinx.coroutines.flow.update
-import mihon.app.di.globalAppGraph
+import mihon.core.viewmodel.StateViewModel
 import mihon.domain.migration.models.MigrationFlag
 import mihon.domain.migration.usecases.MigrateMangaUseCase
 import mihon.feature.common.utils.getLabel
@@ -40,7 +45,7 @@ import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.LoadingScreen
 
 @Composable
-internal fun Screen.MigrateMangaDialog(
+internal fun MigrateMangaDialog(
     current: Manga,
     target: Manga,
     onClickTitle: () -> Unit,
@@ -49,7 +54,7 @@ internal fun Screen.MigrateMangaDialog(
 ) {
     val scope = rememberCoroutineScope()
 
-    val screenModel = rememberScreenModel { MigrateDialogScreenModel() }
+    val screenModel = metroViewModel<MigrateDialogViewModel>()
     LaunchedEffect(current, target) {
         screenModel.init(current, target)
     }
@@ -125,12 +130,15 @@ internal fun Screen.MigrateMangaDialog(
     )
 }
 
-private class MigrateDialogScreenModel(
-    val sourcePreference: SourcePreferences = globalAppGraph.sourcePreferences,
-    private val coverCache: CoverCache = globalAppGraph.coverCache,
-    private val downloadManager: DownloadManager = globalAppGraph.downloadManager,
-    private val migrateManga: MigrateMangaUseCase = globalAppGraph.migrateMangaUseCase,
-) : StateScreenModel<MigrateDialogScreenModel.State>(State()) {
+@Inject
+@ViewModelKey
+@ContributesIntoMap(AppScope::class, binding = binding<ViewModel>())
+internal class MigrateDialogViewModel(
+    val sourcePreference: SourcePreferences,
+    private val coverCache: CoverCache,
+    private val downloadManager: DownloadManager,
+    private val migrateManga: MigrateMangaUseCase,
+) : StateViewModel<MigrateDialogViewModel.State>(State()) {
 
     fun init(current: Manga, target: Manga) {
         val applicableFlags = buildList {

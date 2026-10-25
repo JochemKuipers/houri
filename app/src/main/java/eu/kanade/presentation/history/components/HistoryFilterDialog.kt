@@ -19,7 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
-import eu.kanade.tachiyomi.ui.history.HistorySettingsScreenModel
+import eu.kanade.tachiyomi.ui.history.HistorySettingsViewModel
 import kotlinx.collections.immutable.persistentListOf
 import tachiyomi.domain.history.service.HistoryPreferences
 import tachiyomi.i18n.MR
@@ -33,7 +33,7 @@ import tachiyomi.presentation.core.util.collectAsState
 @Composable
 fun HistoryFilterDialog(
     onDismissRequest: () -> Unit,
-    screenModel: HistorySettingsScreenModel,
+    screenModel: HistorySettingsViewModel,
 ) {
     TabbedDialog(
         onDismissRequest = onDismissRequest,
@@ -53,7 +53,7 @@ fun HistoryFilterDialog(
 
 @Composable
 private fun ColumnScope.FilterSheet(
-    screenModel: HistorySettingsScreenModel,
+    screenModel: HistorySettingsViewModel,
 ) {
     val filterUnfinishedManga by screenModel.historyPreferences.filterUnfinishedManga().collectAsState()
     TriStateItem(

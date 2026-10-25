@@ -1,124 +1,112 @@
 package eu.kanade.tachiyomi.ui.more
 
-import androidx.compose.animation.graphics.res.animatedVectorResource
-import androidx.compose.animation.graphics.res.rememberAnimatedVectorPainter
-import androidx.compose.animation.graphics.vector.AnimatedImageVector
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
-import cafe.adriel.voyager.core.model.ScreenModel
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.Navigator
-import cafe.adriel.voyager.navigator.currentOrThrow
-import cafe.adriel.voyager.navigator.tab.LocalTabNavigator
-import cafe.adriel.voyager.navigator.tab.TabOptions
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.navigation3.runtime.result.LocalResultEventBus
+import androidx.navigation3.runtime.result.ResultEffect
+import dev.zacsweers.metro.AppScope
+import dev.zacsweers.metro.ContributesIntoMap
+import dev.zacsweers.metro.Inject
+import dev.zacsweers.metrox.viewmodel.ViewModelKey
+import dev.zacsweers.metrox.viewmodel.metroViewModel
 import eu.kanade.core.preference.asState
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.more.MoreScreen
-import eu.kanade.presentation.util.Tab
-import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.connections.discord.DiscordRPCService
 import eu.kanade.tachiyomi.data.connections.discord.DiscordScreen
 import eu.kanade.tachiyomi.data.download.DownloadManager
-import eu.kanade.tachiyomi.ui.category.CategoryScreen
-import eu.kanade.tachiyomi.ui.download.DownloadQueueScreen
-import eu.kanade.tachiyomi.ui.history.HistoryTab
-import eu.kanade.tachiyomi.ui.libraryUpdateError.LibraryUpdateErrorScreen
-import eu.kanade.tachiyomi.ui.setting.SettingsScreen
-import eu.kanade.tachiyomi.ui.stats.StatsScreen
-import eu.kanade.tachiyomi.ui.updates.UpdatesTab
-import exh.ui.batchadd.BatchAddScreen
+import eu.kanade.tachiyomi.ui.home.TabEvent
+import eu.kanade.tachiyomi.ui.home.TabReselectEventKey
+import eu.kanade.tachiyomi.ui.setting.addSettingsRoute
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
-import mihon.app.di.globalAppGraph
+import mihon.core.navigation.BatchAddRoute
+import mihon.core.navigation.CategoryRoute
+import mihon.core.navigation.DownloadQueueRoute
+import mihon.core.navigation.LibraryUpdateErrorRoute
+import mihon.core.navigation.SettingsRoute
+import mihon.core.navigation.StatsRoute
+import mihon.core.navigation.domain.SettingsDestination
+import mihon.core.navigation.util.LocalBackStack
+import mihon.presentation.core.util.isTabletUi
 import tachiyomi.core.common.util.lang.launchIO
-import tachiyomi.i18n.MR
-import tachiyomi.presentation.core.i18n.stringResource
 
-data object MoreTab : Tab {
-    private fun readResolve(): Any = MoreTab
+@Composable
+fun MoreTab() {
+    val context = LocalContext.current
+    val backStack = LocalBackStack.current
+    val resultEventBus = LocalResultEventBus.current
+    val isTabletUi = isTabletUi()
+    val viewModel = metroViewModel<MoreViewModel>()
+    val downloadQueueState by viewModel.downloadQueueState.collectAsState()
+    MoreScreen(
+        downloadQueueStateProvider = { downloadQueueState },
+        downloadedOnly = viewModel.downloadedOnly,
+        onDownloadedOnlyChange = { viewModel.downloadedOnly = it },
+        incognitoMode = viewModel.incognitoMode,
+        onIncognitoModeChange = { viewModel.incognitoMode = it },
+        // SY -->
+        showNavUpdates = viewModel.showNavUpdates,
+        showNavHistory = viewModel.showNavHistory,
+        // SY <--
+        onClickDownloadQueue = { backStack.add(DownloadQueueRoute) },
+        onClickCategories = { backStack.add(CategoryRoute) },
+        onClickStats = { backStack.add(StatsRoute) },
+        onClickDataAndStorage = {
+            backStack.addSettingsRoute(SettingsRoute(SettingsDestination.DataAndStorage), isTabletUi)
+        },
+        onClickSettings = { backStack.addSettingsRoute(SettingsRoute(), isTabletUi) },
+        onClickAbout = { backStack.addSettingsRoute(SettingsRoute(SettingsDestination.About), isTabletUi) },
+        // SY -->
+        onClickBatchAdd = { backStack.add(BatchAddRoute) },
+        onClickUpdates = { resultEventBus.sendResult(TabEvent.Updates) },
+        onClickHistory = { resultEventBus.sendResult(TabEvent.History) },
+        // SY <--
+        // KMK -->
+        onClickLibraryUpdateErrors = { backStack.add(LibraryUpdateErrorRoute) },
+        // KMK <--
+    )
 
-    override val options: TabOptions
-        @Composable
-        get() {
-            val isSelected = LocalTabNavigator.current.current.key == key
-            val image = AnimatedImageVector.animatedVectorResource(R.drawable.anim_more_enter)
-            return TabOptions(
-                index = 4u,
-                title = stringResource(MR.strings.label_more),
-                icon = rememberAnimatedVectorPainter(image, isSelected),
-            )
-        }
-
-    override suspend fun onReselect(navigator: Navigator) {
-        navigator.push(SettingsScreen())
+    ResultEffect<Unit>(resultKey = TabReselectEventKey) {
+        backStack.addSettingsRoute(SettingsRoute(), isTabletUi)
     }
 
-    @Composable
-    override fun Content() {
-        val context = LocalContext.current
-        val navigator = LocalNavigator.currentOrThrow
-        val screenModel = rememberScreenModel { MoreScreenModel() }
-        val downloadQueueState by screenModel.downloadQueueState.collectAsState()
-        MoreScreen(
-            downloadQueueStateProvider = { downloadQueueState },
-            downloadedOnly = screenModel.downloadedOnly,
-            onDownloadedOnlyChange = { screenModel.downloadedOnly = it },
-            incognitoMode = screenModel.incognitoMode,
-            onIncognitoModeChange = { screenModel.incognitoMode = it },
-            // SY -->
-            showNavUpdates = screenModel.showNavUpdates,
-            showNavHistory = screenModel.showNavHistory,
-            // SY <--
-            onClickDownloadQueue = { navigator.push(DownloadQueueScreen) },
-            onClickCategories = { navigator.push(CategoryScreen()) },
-            onClickStats = { navigator.push(StatsScreen()) },
-            onClickDataAndStorage = { navigator.push(SettingsScreen(SettingsScreen.Destination.DataAndStorage)) },
-            onClickSettings = { navigator.push(SettingsScreen()) },
-            onClickAbout = { navigator.push(SettingsScreen(SettingsScreen.Destination.About)) },
-            // SY -->
-            onClickBatchAdd = { navigator.push(BatchAddScreen()) },
-            onClickUpdates = { navigator.push(UpdatesTab) },
-            onClickHistory = { navigator.push(HistoryTab) },
-            // SY <--
-            // KMK -->
-            onClickLibraryUpdateErrors = { navigator.push(LibraryUpdateErrorScreen()) },
-            // KMK <--
-        )
-
-        // AM (DISCORD) -->
-        LaunchedEffect(Unit) {
-            with(DiscordRPCService) {
-                discordScope.launchIO { setScreen(context, DiscordScreen.MORE) }
-            }
+    // AM (DISCORD) -->
+    LaunchedEffect(Unit) {
+        with(DiscordRPCService) {
+            discordScope.launchIO { setScreen(context, DiscordScreen.MORE) }
         }
-        // <-- AM (DISCORD)
     }
+    // <-- AM (DISCORD)
 }
 
-private class MoreScreenModel(
-    private val downloadManager: DownloadManager = globalAppGraph.downloadManager,
-    preferences: BasePreferences = globalAppGraph.basePreferences,
+@Inject
+@ViewModelKey
+@ContributesIntoMap(AppScope::class)
+class MoreViewModel(
+    private val downloadManager: DownloadManager,
+    preferences: BasePreferences,
     // SY -->
-    uiPreferences: UiPreferences = globalAppGraph.uiPreferences,
+    uiPreferences: UiPreferences,
     // SY <--
-) : ScreenModel {
+) : ViewModel() {
 
-    var downloadedOnly by preferences.downloadedOnly().asState(screenModelScope)
-    var incognitoMode by preferences.incognitoMode().asState(screenModelScope)
+    var downloadedOnly by preferences.downloadedOnly().asState(viewModelScope)
+    var incognitoMode by preferences.incognitoMode().asState(viewModelScope)
 
     // SY -->
-    val showNavUpdates by uiPreferences.showNavUpdates().asState(screenModelScope)
-    val showNavHistory by uiPreferences.showNavHistory().asState(screenModelScope)
+    val showNavUpdates by uiPreferences.showNavUpdates().asState(viewModelScope)
+    val showNavHistory by uiPreferences.showNavHistory().asState(viewModelScope)
     // SY <--
 
     private var _downloadQueueState: MutableStateFlow<DownloadQueueState> = MutableStateFlow(DownloadQueueState.Stopped)
@@ -126,7 +114,7 @@ private class MoreScreenModel(
 
     init {
         // Handle running/paused status change and queue progress updating
-        screenModelScope.launchIO {
+        viewModelScope.launchIO {
             combine(
                 downloadManager.isDownloaderRunning,
                 downloadManager.queueState,

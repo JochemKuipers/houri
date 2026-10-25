@@ -1,6 +1,6 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.novel
 
-import cafe.adriel.voyager.core.model.ScreenModel
+import androidx.lifecycle.ViewModel
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.text.TextSearchSource
 import eu.kanade.tachiyomi.source.text.TextTocSource
@@ -40,7 +40,7 @@ class NovelTocScreenModel(
      * right and only the position within it is wrong. See [flattenToc].
      */
     private val currentDocument: String? = null,
-) : ScreenModel {
+) : ViewModel() {
 
     private val _state = MutableStateFlow<State>(State.Loading)
     val state: StateFlow<State> = _state.asStateFlow()
@@ -108,10 +108,10 @@ class NovelTocScreenModel(
  *
  * A blank query clears the results rather than searching for nothing.
  */
-class NovelSearchScreenModel(
+class NovelSearchViewModel(
     private val source: TextSearchSource,
     private val chapter: SChapter,
-) : ScreenModel {
+) : ViewModel() {
 
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()

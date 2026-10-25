@@ -17,7 +17,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.DialogWindowProvider
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
-import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsScreenModel
+import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import tachiyomi.i18n.MR
@@ -51,7 +51,7 @@ private enum class SettingsTab {
  *    renderer and it is not negotiable, so every row there — scale types, crop, spreads, tap-zone
  *    layouts per viewer — would be a setting that silently does nothing.
  *  - an **image** chapter additionally gets the reading mode, and the colour filter once its pages
- *    exist (see [ReaderSettingsScreenModel.hasPagesFlow] for why a text chapter's documents do not
+ *    exist (see [ReaderSettingsViewModel.hasPagesFlow] for why a text chapter's documents do not
  *    count as pages here).
  */
 @Composable
@@ -59,7 +59,7 @@ fun ReaderSettingsDialog(
     onDismissRequest: () -> Unit,
     onShowMenus: () -> Unit,
     onHideMenus: () -> Unit,
-    screenModel: ReaderSettingsScreenModel,
+    screenModel: ReaderSettingsViewModel,
 ) {
     val isTextChapter = screenModel.isTextChapterFlow.collectAsState().value
     val hasPages = screenModel.hasPagesFlow.collectAsState().value

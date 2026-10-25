@@ -276,7 +276,7 @@ class ReaderViewModel(
                 )
                 // KMK --> No in-reader chapter-list refresh after a local-source delete:
                 // the list is an init() snapshot and deleteChapters only removes files (the DB
-                // row persists until the next source fetch, which MangaScreenModel already
+                // row persists until the next source fetch, which MangaViewModel already
                 // triggers on its side). Rebuilding lists mid-read would swap ReaderChapter and
                 // loader state under the open chapter; the reader re-reads on next open.
                 // KMK <--

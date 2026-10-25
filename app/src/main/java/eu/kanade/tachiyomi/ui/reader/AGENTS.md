@@ -1,12 +1,12 @@
 # ui/reader/ — Reader
 
-Fullscreen reading surface. Deliberately a classic `Activity`, NOT a Voyager `Screen` (fullscreen, `singleTask`, S-Pen remote actions, container transforms).
+Fullscreen reading surface. Deliberately a classic `Activity`, NOT a Nav3 route (fullscreen, `singleTask`, S-Pen remote actions, container transforms).
 
 ## Entry
 
 - `ReaderActivity.kt` — `singleTask` Activity. `ReaderActivity.newIntent(context, mangaId, chapterId, page)`.
   Uses AndroidX `viewModels<ReaderViewModel> { graph.viewModelFactory }` + `graph.inject(this)` with
-  `@Inject lateinit var` fields. `ReaderViewModel.kt` holds chapter/page state (not a Voyager ScreenModel).
+  `@Inject lateinit var` fields. `ReaderViewModel.kt` holds chapter/page state (AndroidX ViewModel).
 
 ## Key directories
 
@@ -64,7 +64,7 @@ The reader's preferences are layered on as an injected stylesheet; the document 
 | `NovelBuiltinFonts.kt` | The curated variable fonts bundled in `app/src/main/assets/novel-fonts/`, grouped by kind. No Android imports, so it is unit-testable |
 | `NovelScrollBridge.kt` | `window.KmkReader` — how the host measures and scrolls the document, and `quoteForJs` |
 | `NovelNavigation.kt` | Contents rows and search results: the pure mapping from source models to renderable ones |
-| `NovelReaderScreenModels.kt` | `NovelTocScreenModel` + `NovelSearchScreenModel` |
+| `NovelReaderScreenModels.kt` | `NovelTocScreenModel` + `NovelSearchViewModel` |
 | `NovelTypography.kt` | The settings value. No Android imports, so it is unit-testable |
 | `NovelReaderTheme.kt` | The general reader theme's background, as the book's stylesheet can use it |
 | `NovelTypographyCss.kt` | Turns that value into a stylesheet; `styleTag` escapes `</` |
@@ -438,14 +438,14 @@ spellings are read out of the OPF is in `core/archive/AGENTS.md`.
 
 ## Conventions
 
-- Reader stays an `Activity` — do not migrate it into Voyager.
-- State in `ReaderViewModel` (AndroidX); inner screens use Voyager ScreenModels, not the reverse.
+- Reader stays an `Activity` — do not migrate it into Nav3.
+- State in `ReaderViewModel` (AndroidX); inner models extend `mihon.core.viewmodel.StateViewModel` or plain `ViewModel`.
 - Upscale changes stay behind the MTL gate; per-series toggles via `UpscaleMangaStore`.
 - Logging: `xLogE()` / `xLog()` from `exh.log` for KMK code; `logcat {}` for Mihon code.
 
 ## Anti-patterns
 
-- Do not launch the reader through a Voyager `Screen` push — use `ReaderActivity.newIntent(...)`.
+- Do not launch the reader through a Nav3 route push — use `ReaderActivity.newIntent(...)`.
 - Do not merge the pager and webtoon image processors back into one path.
 - Do not grow `WebGpuViewer.kt` past wiring — a new state machine belongs in its own file as a
   `WebGpuViewer` extension, so the class stays readable as a whole.

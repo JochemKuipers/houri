@@ -6,7 +6,7 @@ import tachiyomi.domain.track.model.Track
  * Coordinates tracker sync for the unified-tracker feature (pref per-manga/per-category
  * preferred tracker). Previously the “which tracker is authoritative?” logic was
  * inlined in `TrackInfoDialogHome` yellow-highlight, `TrackChapter.await`, and
- * `MangaScreenModel` fill-metadata, duplicating the `max chapter progress` rule.
+ * `MangaViewModel` fill-metadata, duplicating the `max chapter progress` rule.
  *
  * Single-responsibility: resolves the preferred tracker and syncs chapter progress
  * atomically, keeping the 3 call sites consistent. Pure logic, no Android deps.

@@ -1,8 +1,5 @@
 package eu.kanade.tachiyomi.ui.browse
 
-import androidx.compose.animation.graphics.res.animatedVectorResource
-import androidx.compose.animation.graphics.res.rememberAnimatedVectorPainter
-import androidx.compose.animation.graphics.vector.AnimatedImageVector
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -11,149 +8,127 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.navigator.Navigator
-import cafe.adriel.voyager.navigator.tab.LocalTabNavigator
-import cafe.adriel.voyager.navigator.tab.TabOptions
+import androidx.navigation3.runtime.result.ResultEffect
+import dev.zacsweers.metrox.viewmodel.metroViewModel
 import eu.kanade.core.preference.asState
-import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.components.TabbedScreen
-import eu.kanade.presentation.util.Tab
-import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.connections.discord.DiscordRPCService
 import eu.kanade.tachiyomi.data.connections.discord.DiscordScreen
-import eu.kanade.tachiyomi.ui.browse.extension.ExtensionsScreenModel
+import eu.kanade.tachiyomi.ui.browse.extension.ExtensionsViewModel
 import eu.kanade.tachiyomi.ui.browse.extension.extensionsTab
-import eu.kanade.tachiyomi.ui.browse.feed.AnizenMultiFeedScreenModel
-import eu.kanade.tachiyomi.ui.browse.feed.FeedScreenModel
+import eu.kanade.tachiyomi.ui.browse.feed.AnizenMultiFeedViewModel
+import eu.kanade.tachiyomi.ui.browse.feed.FeedViewModel
 import eu.kanade.tachiyomi.ui.browse.feed.feedTab
 import eu.kanade.tachiyomi.ui.browse.migration.sources.migrateSourceTab
-import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
 import eu.kanade.tachiyomi.ui.browse.source.sourcesTab
+import eu.kanade.tachiyomi.ui.home.TabReselectEventKey
 import eu.kanade.tachiyomi.ui.main.MainActivity
 import kotlinx.collections.immutable.persistentListOf
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.receiveAsFlow
 import mihon.app.di.globalAppGraph
+import mihon.core.navigation.GlobalSearchRoute
+import mihon.core.navigation.util.LocalBackStack
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 
-data object BrowseTab : Tab {
-    private fun readResolve(): Any = BrowseTab
+@Composable
+fun BrowseTab() {
+    val context = LocalContext.current
+    val backStack = LocalBackStack.current
+    val scope = rememberCoroutineScope()
+    // SY -->
+    val hideFeedTab by remember { globalAppGraph.uiPreferences.hideFeedTab().asState(scope) }
+    val feedTabInFront by remember { globalAppGraph.uiPreferences.feedTabInFront().asState(scope) }
+    // SY <--
 
-    override val options: TabOptions
-        @Composable
-        get() {
-            val isSelected = LocalTabNavigator.current.current.key == key
-            val image = AnimatedImageVector.animatedVectorResource(R.drawable.anim_browse_enter)
-            return TabOptions(
-                index = 3u,
-                title = stringResource(MR.strings.browse),
-                icon = rememberAnimatedVectorPainter(image, isSelected),
+    // Hoisted for extensions tab's search bar
+    val extensionsViewModel = metroViewModel<ExtensionsViewModel>()
+    val extensionsState by extensionsViewModel.state.collectAsState()
+
+    // KMK -->
+    val feedViewModel = metroViewModel<FeedViewModel>()
+    val bulkFavoriteViewModel = metroViewModel<BulkFavoriteViewModel>()
+    val anizenMultiFeedViewModel = metroViewModel<AnizenMultiFeedViewModel>()
+    // KMK <--
+
+    // SY -->
+    val tabs = when {
+        hideFeedTab ->
+            persistentListOf(
+                sourcesTab(),
+                extensionsTab(extensionsViewModel),
+                migrateSourceTab(),
             )
-        }
 
-    override suspend fun onReselect(navigator: Navigator) {
-        navigator.push(GlobalSearchScreen())
+        feedTabInFront ->
+            persistentListOf(
+                feedTab(
+                    // KMK -->
+                    feedViewModel,
+                    bulkFavoriteViewModel,
+                    anizenMultiFeedViewModel,
+                    // KMK <--
+                ),
+                sourcesTab(),
+                extensionsTab(extensionsViewModel),
+                migrateSourceTab(),
+            )
+
+        else ->
+            persistentListOf(
+                sourcesTab(),
+                feedTab(
+                    // KMK -->
+                    feedViewModel,
+                    bulkFavoriteViewModel,
+                    anizenMultiFeedViewModel,
+                    // KMK <--
+                ),
+                extensionsTab(extensionsViewModel),
+                migrateSourceTab(),
+            )
     }
+    // SY <--
 
-    private val switchToExtensionTabChannel = Channel<Unit>(1, BufferOverflow.DROP_OLDEST)
+    val state = rememberPagerState { tabs.size }
 
-    fun showExtension() {
-        switchToExtensionTabChannel.trySend(Unit)
-    }
+    // KMK --> Multi-feed merged into the feed tab: header is shorter, so the
+    // extensions index depends on the visible tabs.
+    val extensionsIndex = if (hideFeedTab) 1 else 2
 
-    @Composable
-    override fun Content() {
-        val context = LocalContext.current
-        val scope = rememberCoroutineScope()
-        // SY -->
-        val hideFeedTab by remember { globalAppGraph.uiPreferences.hideFeedTab().asState(scope) }
-        val feedTabInFront by remember { globalAppGraph.uiPreferences.feedTabInFront().asState(scope) }
-        // SY <--
-
-        // Hoisted for extensions tab's search bar
-        val extensionsScreenModel = rememberScreenModel { ExtensionsScreenModel() }
-        val extensionsState by extensionsScreenModel.state.collectAsState()
-
+    TabbedScreen(
+        titleRes = MR.strings.browse,
+        tabs = tabs,
+        state = state,
+        searchQuery = extensionsState.searchQuery,
+        onChangeSearchQuery = extensionsViewModel::search,
         // KMK -->
-        val feedScreenModel = rememberScreenModel { FeedScreenModel() }
-        val bulkFavoriteScreenModel = rememberScreenModel { BulkFavoriteScreenModel() }
-        val anizenMultiFeedScreenModel = rememberScreenModel { AnizenMultiFeedScreenModel() }
+        feedScreenModel = feedViewModel,
+        bulkFavoriteScreenModel = bulkFavoriteViewModel,
         // KMK <--
+    )
 
-        // SY -->
-        val tabs = when {
-            hideFeedTab ->
-                persistentListOf(
-                    sourcesTab(),
-                    extensionsTab(extensionsScreenModel),
-                    migrateSourceTab(),
-                )
+    // Replaces the Voyager-era switchToExtensionTab channel; HomeScreen sends this event when
+    // the Browse tab is opened with the extensions shortcut.
+    ResultEffect<Unit>(resultKey = BrowseSwitchToExtensionEventKey) {
+        state.scrollToPage(extensionsIndex)
+    }
 
-            feedTabInFront ->
-                persistentListOf(
-                    feedTab(
-                        // KMK -->
-                        feedScreenModel,
-                        bulkFavoriteScreenModel,
-                        anizenMultiFeedScreenModel,
-                        // KMK <--
-                    ),
-                    sourcesTab(),
-                    extensionsTab(extensionsScreenModel),
-                    migrateSourceTab(),
-                )
+    // Voyager reselect (BrowseTab.onReselect) opened the global search screen
+    ResultEffect<Unit>(resultKey = TabReselectEventKey) {
+        backStack.add(GlobalSearchRoute())
+    }
 
-            else ->
-                persistentListOf(
-                    sourcesTab(),
-                    feedTab(
-                        // KMK -->
-                        feedScreenModel,
-                        bulkFavoriteScreenModel,
-                        anizenMultiFeedScreenModel,
-                        // KMK <--
-                    ),
-                    extensionsTab(extensionsScreenModel),
-                    migrateSourceTab(),
-                )
+    LaunchedEffect(Unit) {
+        (context as? MainActivity)?.ready = true
+
+        // AM (DISCORD) -->
+        with(DiscordRPCService) {
+            discordScope.launchIO { setScreen(context, DiscordScreen.BROWSE) }
         }
-        // SY <--
-
-        val state = rememberPagerState { tabs.size }
-
-        // KMK --> Multi-feed merged into the feed tab: header is shorter, so the
-        // extensions index depends on the visible tabs.
-        val extensionsIndex = if (hideFeedTab) 1 else 2
-
-        TabbedScreen(
-            titleRes = MR.strings.browse,
-            tabs = tabs,
-            state = state,
-            searchQuery = extensionsState.searchQuery,
-            onChangeSearchQuery = extensionsScreenModel::search,
-            // KMK -->
-            feedScreenModel = feedScreenModel,
-            bulkFavoriteScreenModel = bulkFavoriteScreenModel,
-            // KMK <--
-        )
-        LaunchedEffect(extensionsIndex) {
-            switchToExtensionTabChannel.receiveAsFlow()
-                .collectLatest { state.scrollToPage(extensionsIndex) }
-        }
-
-        LaunchedEffect(Unit) {
-            (context as? MainActivity)?.ready = true
-
-            // AM (DISCORD) -->
-            with(DiscordRPCService) {
-                discordScope.launchIO { setScreen(context, DiscordScreen.BROWSE) }
-            }
-            // <-- AM (DISCORD)
-        }
+        // <-- AM (DISCORD)
     }
 }
+
+@Suppress("ConstPropertyName")
+const val BrowseSwitchToExtensionEventKey = "BrowseSwitchToExtensionEventKey"

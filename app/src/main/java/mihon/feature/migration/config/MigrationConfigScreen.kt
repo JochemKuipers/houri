@@ -45,25 +45,30 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.times
 import androidx.compose.ui.util.fastForEachIndexed
-import cafe.adriel.voyager.core.model.StateScreenModel
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dev.zacsweers.metro.AppScope
+import dev.zacsweers.metro.ContributesIntoMap
+import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.binding
+import dev.zacsweers.metrox.viewmodel.ViewModelKey
+import dev.zacsweers.metrox.viewmodel.metroViewModel
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.presentation.browse.components.SourceIcon
 import eu.kanade.presentation.components.AnimatedFloatingSearchBox
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.SOURCE_SEARCH_BOX_HEIGHT
-import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.source.online.HttpSource
-import eu.kanade.tachiyomi.ui.browse.migration.search.MigrateSearchScreen
 import eu.kanade.tachiyomi.util.system.LocaleHelper
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.update
 import mihon.app.di.globalAppGraph
-import mihon.feature.migration.list.MigrationListScreen
+import mihon.core.navigation.MigrateSearchRoute
+import mihon.core.navigation.MigrationListRoute
+import mihon.core.navigation.util.LocalBackStack
+import mihon.core.navigation.util.replace
+import mihon.core.viewmodel.StateViewModel
 import sh.calvin.reorderable.ReorderableCollectionItemScope
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.ReorderableLazyListState
@@ -92,465 +97,463 @@ import tachiyomi.source.local.isLocal
  *
  * @param mangaIds IDs of the manga that will be migrated using the sources configured on this screen.
  */
-class MigrationConfigScreen(private val mangaIds: Collection<Long>) : Screen() {
+@Composable
+fun MigrationConfigScreen(mangaIds: Collection<Long>) {
+    val backStack = LocalBackStack.current
 
-    constructor(mangaId: Long) : this(listOf(mangaId))
+    val screenModel = metroViewModel<MigrationConfigViewModel>()
+    val state by screenModel.state.collectAsState()
 
-    @Composable
-    override fun Content() {
-        val navigator = LocalNavigator.currentOrThrow
+    // KMK -->
+    var searchQuery by remember { mutableStateOf("") }
+    BackHandler(enabled = searchQuery.isNotBlank()) {
+        searchQuery = ""
+    }
+    // KMK <--
 
-        val screenModel = rememberScreenModel { ScreenModel() }
-        val state by screenModel.state.collectAsState()
+    var migrationSheetOpen by rememberSaveable { mutableStateOf(false) }
 
-        // KMK -->
-        var searchQuery by remember { mutableStateOf("") }
-        BackHandler(enabled = searchQuery.isNotBlank()) {
-            searchQuery = ""
-        }
-        // KMK <--
-
-        var migrationSheetOpen by rememberSaveable { mutableStateOf(false) }
-
-        fun continueMigration(openSheet: Boolean, extraSearchQuery: String?) {
-            if (openSheet) {
-                migrationSheetOpen = true
-                return
-            }
-            // KMK --> A lone entry with smart search off is a manual job, so open the search
-            // screen directly - the shape upstream uses. Routing it through MigrationListScreen,
-            // which then pushed a MigrateSearchScreen of its own, stacked two screens for one
-            // job: the entry underneath was already showing "not found" (the model marks it so
-            // and skips the search entirely), so backing out of the search landed on a list
-            // claiming nothing matched on any of the selected sources, and the next back had to
-            // go through an exit dialog before the screen would let go.
-            // KMK <--
-            val singleMangaId = mangaIds.singleOrNull()
-            val useSmartSearch = screenModel.sourcePreferences.migrationSmartSearchSingleEntry().get()
-            val screen = if (singleMangaId != null && !useSmartSearch) {
-                MigrateSearchScreen(singleMangaId)
-            } else {
-                MigrationListScreen(mangaIds, extraSearchQuery)
-            }
-            navigator.replace(screen)
-        }
-
-        if (state.isLoading) {
-            LoadingScreen()
+    fun continueMigration(openSheet: Boolean, extraSearchQuery: String?) {
+        if (openSheet) {
+            migrationSheetOpen = true
             return
         }
+        // KMK --> A lone entry with smart search off is a manual job, so open the search
+        // screen directly - the shape upstream uses. Routing it through MigrationListScreen,
+        // which then pushed a MigrateSearchScreen of its own, stacked two screens for one
+        // job: the entry underneath was already showing "not found" (the model marks it so
+        // and skips the search entirely), so backing out of the search landed on a list
+        // claiming nothing matched on any of the selected sources, and the next back had to
+        // go through an exit dialog before the screen would let go.
+        // KMK <--
+        val singleMangaId = mangaIds.singleOrNull()
+        val useSmartSearch = screenModel.sourcePreferences.migrationSmartSearchSingleEntry().get()
+        val route = if (singleMangaId != null && !useSmartSearch) {
+            MigrateSearchRoute(singleMangaId)
+        } else {
+            MigrationListRoute(mangaIds, extraSearchQuery)
+        }
+        backStack.replace(route)
+    }
 
-        val (selectedSources, availableSources) = state.sources
-            // KMK -->
-            .filter { sources ->
-                if (searchQuery.isBlank()) return@filter true
-                val source = sources.source
-                searchQuery.split(",").any {
-                    val input = it.trim()
-                    if (input.isEmpty()) return@any false
-                    source.name.contains(input, ignoreCase = true) ||
-                        source.id == input.toLongOrNull()
-                }
-            }
-            // KMK <--
-            .partition { it.isSelected }
-        val showLanguage by remember(state) {
-            derivedStateOf {
-                state.sources.distinctBy { it.source.lang }.size > 1
+    if (state.isLoading) {
+        LoadingScreen()
+        return
+    }
+
+    val (selectedSources, availableSources) = state.sources
+        // KMK -->
+        .filter { sources ->
+            if (searchQuery.isBlank()) return@filter true
+            val source = sources.source
+            searchQuery.split(",").any {
+                val input = it.trim()
+                if (input.isEmpty()) return@any false
+                source.name.contains(input, ignoreCase = true) ||
+                    source.id == input.toLongOrNull()
             }
         }
+        // KMK <--
+        .partition { it.isSelected }
+    val showLanguage by remember(state) {
+        derivedStateOf {
+            state.sources.distinctBy { it.source.lang }.size > 1
+        }
+    }
 
-        val lazyListState = rememberLazyListState()
-        Scaffold(
-            topBar = {
-                AppBar(
-                    title = stringResource(SYMR.strings.select_sources),
-                    navigateUp = navigator::pop,
-                    scrollBehavior = it,
-                    actions = {
-                        AppBarActions(
-                            persistentListOf(
-                                AppBar.Action(
-                                    title = stringResource(MR.strings.migrationConfigScreen_selectPinnedLabel),
-                                    icon = Icons.Outlined.PushPin,
-                                    onClick = { screenModel.toggleSelection(ScreenModel.SelectionConfig.Pinned) },
-                                ),
-                                AppBar.Action(
-                                    title = stringResource(MR.strings.migrationConfigScreen_selectNoneLabel),
-                                    icon = Icons.Outlined.Deselect,
-                                    onClick = { screenModel.toggleSelection(ScreenModel.SelectionConfig.None) },
-                                ),
-                                AppBar.OverflowAction(
-                                    title = stringResource(MR.strings.migrationConfigScreen_selectEnabledLabel),
-                                    onClick = { screenModel.toggleSelection(ScreenModel.SelectionConfig.Enabled) },
-                                ),
-                                AppBar.OverflowAction(
-                                    title = stringResource(MR.strings.migrationConfigScreen_selectAllLabel),
-                                    onClick = { screenModel.toggleSelection(ScreenModel.SelectionConfig.All) },
-                                ),
+    val lazyListState = rememberLazyListState()
+    Scaffold(
+        topBar = {
+            AppBar(
+                title = stringResource(SYMR.strings.select_sources),
+                navigateUp = backStack::removeLastOrNull,
+                scrollBehavior = it,
+                actions = {
+                    AppBarActions(
+                        persistentListOf(
+                            AppBar.Action(
+                                title = stringResource(MR.strings.migrationConfigScreen_selectPinnedLabel),
+                                icon = Icons.Outlined.PushPin,
+                                onClick = { screenModel.toggleSelection(MigrationConfigViewModel.SelectionConfig.Pinned) },
                             ),
-                        )
-                    },
-                )
-            },
-            floatingActionButton = {
-                // KMK -->
-                AnimatedVisibility(
-                    visible = selectedSources.isNotEmpty(),
-                    enter = fadeIn(),
-                    exit = fadeOut(),
-                    content = {
-                        // KMK <--
-                        ExtendedFloatingActionButton(
-                            text = { Text(text = stringResource(MR.strings.migrationConfigScreen_continueButtonText)) },
-                            icon = { Icon(imageVector = Icons.AutoMirrored.Outlined.ArrowForward, contentDescription = null) },
-                            onClick = {
-                                screenModel.saveSources()
-                                continueMigration(openSheet = true, extraSearchQuery = null)
-                            },
-                            expanded = lazyListState.shouldExpandFAB(),
-                        )
-                    },
-                )
-            },
-        ) { contentPadding ->
-            val reorderableState = rememberReorderableLazyListState(lazyListState, contentPadding) { from, to ->
-                val fromIndex = selectedSources.indexOfFirst { it.id == from.key }
-                val toIndex = selectedSources.indexOfFirst { it.id == to.key }
-                if (fromIndex == -1 || toIndex == -1) return@rememberReorderableLazyListState
-                screenModel.orderSource(fromIndex, toIndex)
-            }
+                            AppBar.Action(
+                                title = stringResource(MR.strings.migrationConfigScreen_selectNoneLabel),
+                                icon = Icons.Outlined.Deselect,
+                                onClick = { screenModel.toggleSelection(MigrationConfigViewModel.SelectionConfig.None) },
+                            ),
+                            AppBar.OverflowAction(
+                                title = stringResource(MR.strings.migrationConfigScreen_selectEnabledLabel),
+                                onClick = { screenModel.toggleSelection(MigrationConfigViewModel.SelectionConfig.Enabled) },
+                            ),
+                            AppBar.OverflowAction(
+                                title = stringResource(MR.strings.migrationConfigScreen_selectAllLabel),
+                                onClick = { screenModel.toggleSelection(MigrationConfigViewModel.SelectionConfig.All) },
+                            ),
+                        ),
+                    )
+                },
+            )
+        },
+        floatingActionButton = {
             // KMK -->
-            Box(
-                modifier = Modifier.padding(contentPadding),
-            ) {
-                val density = LocalDensity.current
-                var searchBoxHeight by remember { mutableStateOf(SOURCE_SEARCH_BOX_HEIGHT) }
-                // KMK <--
-
-                FastScrollLazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    state = lazyListState,
-                    // KMK -->
-                    contentPadding = PaddingValues(top = searchBoxHeight),
+            AnimatedVisibility(
+                visible = selectedSources.isNotEmpty(),
+                enter = fadeIn(),
+                exit = fadeOut(),
+                content = {
                     // KMK <--
-                ) {
-                    listOf(selectedSources, availableSources).fastForEachIndexed { listIndex, sources ->
-                        val selectedSourceList = listIndex == 0
-                        if (sources.isNotEmpty()) {
-                            val headerPrefix = if (selectedSourceList) "selected" else "available"
-                            item("$headerPrefix-header") {
-                                Text(
-                                    text = stringResource(
-                                        resource = if (selectedSourceList) {
-                                            MR.strings.migrationConfigScreen_selectedHeader
-                                        } else {
-                                            MR.strings.migrationConfigScreen_availableHeader
-                                        },
-                                    ),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    modifier = Modifier
-                                        .padding(MaterialTheme.padding.medium)
-                                        .animateItem(),
-                                )
-                            }
-                        }
-                        itemsIndexed(
-                            items = sources,
-                            key = { _, item -> item.id },
-                        ) { index, item ->
-                            SourceItemContainer(
-                                firstItem = index == 0,
-                                lastItem = index == (sources.size - 1),
-                                source = item,
-                                showLanguage = showLanguage,
-                                dragEnabled = selectedSourceList && sources.size > 1,
-                                state = reorderableState,
-                                key = { if (selectedSourceList) it.id else "available-${it.id}" },
-                                onClick = { screenModel.toggleSelection(item.id) },
+                    ExtendedFloatingActionButton(
+                        text = { Text(text = stringResource(MR.strings.migrationConfigScreen_continueButtonText)) },
+                        icon = { Icon(imageVector = Icons.AutoMirrored.Outlined.ArrowForward, contentDescription = null) },
+                        onClick = {
+                            screenModel.saveSources()
+                            continueMigration(openSheet = true, extraSearchQuery = null)
+                        },
+                        expanded = lazyListState.shouldExpandFAB(),
+                    )
+                },
+            )
+        },
+    ) { contentPadding ->
+        val reorderableState = rememberReorderableLazyListState(lazyListState, contentPadding) { from, to ->
+            val fromIndex = selectedSources.indexOfFirst { it.id == from.key }
+            val toIndex = selectedSources.indexOfFirst { it.id == to.key }
+            if (fromIndex == -1 || toIndex == -1) return@rememberReorderableLazyListState
+            screenModel.orderSource(fromIndex, toIndex)
+        }
+        // KMK -->
+        Box(
+            modifier = Modifier.padding(contentPadding),
+        ) {
+            val density = LocalDensity.current
+            var searchBoxHeight by remember { mutableStateOf(SOURCE_SEARCH_BOX_HEIGHT) }
+            // KMK <--
+
+            FastScrollLazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                state = lazyListState,
+                // KMK -->
+                contentPadding = PaddingValues(top = searchBoxHeight),
+                // KMK <--
+            ) {
+                listOf(selectedSources, availableSources).fastForEachIndexed { listIndex, sources ->
+                    val selectedSourceList = listIndex == 0
+                    if (sources.isNotEmpty()) {
+                        val headerPrefix = if (selectedSourceList) "selected" else "available"
+                        item("$headerPrefix-header") {
+                            Text(
+                                text = stringResource(
+                                    resource = if (selectedSourceList) {
+                                        MR.strings.migrationConfigScreen_selectedHeader
+                                    } else {
+                                        MR.strings.migrationConfigScreen_availableHeader
+                                    },
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                modifier = Modifier
+                                    .padding(MaterialTheme.padding.medium)
+                                    .animateItem(),
                             )
                         }
                     }
-                }
-
-                // KMK -->
-                AnimatedFloatingSearchBox(
-                    listState = lazyListState,
-                    searchQuery = searchQuery,
-                    onChangeSearchQuery = { searchQuery = it ?: "" },
-                    placeholderText = stringResource(KMR.strings.action_search_for_source),
-                    modifier = Modifier
-                        .background(MaterialTheme.colorScheme.background)
-                        .padding(
-                            horizontal = MaterialTheme.padding.medium,
-                            vertical = MaterialTheme.padding.small,
-                        )
-                        .align(Alignment.TopCenter),
-                    onGloballyPositioned = { layoutCoordinates ->
-                        searchBoxHeight = with(density) { layoutCoordinates.size.height.toDp() + 2 * MaterialTheme.padding.small }
-                    },
-                )
-                // KMK <--
-            }
-        }
-
-        if (migrationSheetOpen) {
-            MigrationConfigScreenSheet(
-                preferences = screenModel.sourcePreferences,
-                onDismissRequest = { migrationSheetOpen = false },
-                onStartMigration = { extraSearchQuery ->
-                    migrationSheetOpen = false
-                    continueMigration(openSheet = false, extraSearchQuery = extraSearchQuery)
-                },
-                // KMK -->
-                isSingleEntry = mangaIds.size == 1,
-                // KMK <--
-            )
-        }
-    }
-
-    @Composable
-    private fun LazyItemScope.SourceItemContainer(
-        firstItem: Boolean,
-        lastItem: Boolean,
-        source: MigrationSource,
-        showLanguage: Boolean,
-        dragEnabled: Boolean,
-        state: ReorderableLazyListState,
-        key: (MigrationSource) -> Any,
-        onClick: () -> Unit,
-    ) {
-        val shape = remember(firstItem, lastItem) {
-            val top = if (firstItem) 12.dp else 0.dp
-            val bottom = if (lastItem) 12.dp else 0.dp
-            RoundedCornerShape(top, top, bottom, bottom)
-        }
-
-        ReorderableItem(
-            state = state,
-            key = key(source),
-            enabled = dragEnabled,
-        ) { _ ->
-            ElevatedCard(
-                shape = shape,
-                modifier = Modifier
-                    .padding(horizontal = MaterialTheme.padding.medium)
-                    .animateItem(),
-            ) {
-                SourceItem(
-                    source = source,
-                    showLanguage = showLanguage,
-                    dragEnabled = dragEnabled,
-                    scope = this@ReorderableItem,
-                    onClick = onClick,
-                )
-            }
-        }
-
-        if (!lastItem) {
-            HorizontalDivider(modifier = Modifier.padding(horizontal = MaterialTheme.padding.medium))
-        }
-    }
-
-    @Composable
-    private fun SourceItem(
-        source: MigrationSource,
-        showLanguage: Boolean,
-        dragEnabled: Boolean,
-        scope: ReorderableCollectionItemScope,
-        onClick: () -> Unit,
-    ) {
-        ListItem(
-            headlineContent = {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    SourceIcon(source = source.source)
-                    Text(
-                        text = source.name,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (showLanguage) {
-                        Pill(
-                            // KMK -->
-                            text = FlagEmoji.getEmojiLangFlag(source.shortLanguage) + " (${source.upperShortLanguage})",
-                            // KMK <--
-                            style = MaterialTheme.typography.bodySmall,
+                    itemsIndexed(
+                        items = sources,
+                        key = { _, item -> item.id },
+                    ) { index, item ->
+                        SourceItemContainer(
+                            firstItem = index == 0,
+                            lastItem = index == (sources.size - 1),
+                            source = item,
+                            showLanguage = showLanguage,
+                            dragEnabled = selectedSourceList && sources.size > 1,
+                            state = reorderableState,
+                            key = { if (selectedSourceList) it.id else "available-${it.id}" },
+                            onClick = { screenModel.toggleSelection(item.id) },
                         )
                     }
                 }
+            }
+
+            // KMK -->
+            AnimatedFloatingSearchBox(
+                listState = lazyListState,
+                searchQuery = searchQuery,
+                onChangeSearchQuery = { searchQuery = it ?: "" },
+                placeholderText = stringResource(KMR.strings.action_search_for_source),
+                modifier = Modifier
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(
+                        horizontal = MaterialTheme.padding.medium,
+                        vertical = MaterialTheme.padding.small,
+                    )
+                    .align(Alignment.TopCenter),
+                onGloballyPositioned = { layoutCoordinates ->
+                    searchBoxHeight = with(density) { layoutCoordinates.size.height.toDp() + 2 * MaterialTheme.padding.small }
+                },
+            )
+            // KMK <--
+        }
+    }
+
+    if (migrationSheetOpen) {
+        MigrationConfigScreenSheet(
+            preferences = screenModel.sourcePreferences,
+            onDismissRequest = { migrationSheetOpen = false },
+            onStartMigration = { extraSearchQuery ->
+                migrationSheetOpen = false
+                continueMigration(openSheet = false, extraSearchQuery = extraSearchQuery)
             },
-            trailingContent = if (dragEnabled) {
-                {
-                    Icon(
-                        imageVector = Icons.Outlined.DragHandle,
-                        contentDescription = null,
-                        modifier = with(scope) {
-                            Modifier.draggableHandle()
-                        },
+            // KMK -->
+            isSingleEntry = mangaIds.size == 1,
+            // KMK <--
+        )
+    }
+}
+
+@Composable
+private fun LazyItemScope.SourceItemContainer(
+    firstItem: Boolean,
+    lastItem: Boolean,
+    source: MigrationSource,
+    showLanguage: Boolean,
+    dragEnabled: Boolean,
+    state: ReorderableLazyListState,
+    key: (MigrationSource) -> Any,
+    onClick: () -> Unit,
+) {
+    val shape = remember(firstItem, lastItem) {
+        val top = if (firstItem) 12.dp else 0.dp
+        val bottom = if (lastItem) 12.dp else 0.dp
+        RoundedCornerShape(top, top, bottom, bottom)
+    }
+
+    ReorderableItem(
+        state = state,
+        key = key(source),
+        enabled = dragEnabled,
+    ) { _ ->
+        ElevatedCard(
+            shape = shape,
+            modifier = Modifier
+                .padding(horizontal = MaterialTheme.padding.medium)
+                .animateItem(),
+        ) {
+            SourceItem(
+                source = source,
+                showLanguage = showLanguage,
+                dragEnabled = dragEnabled,
+                scope = this@ReorderableItem,
+                onClick = onClick,
+            )
+        }
+    }
+
+    if (!lastItem) {
+        HorizontalDivider(modifier = Modifier.padding(horizontal = MaterialTheme.padding.medium))
+    }
+}
+
+@Composable
+private fun SourceItem(
+    source: MigrationSource,
+    showLanguage: Boolean,
+    dragEnabled: Boolean,
+    scope: ReorderableCollectionItemScope,
+    onClick: () -> Unit,
+) {
+    ListItem(
+        headlineContent = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                SourceIcon(source = source.source)
+                Text(
+                    text = source.name,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (showLanguage) {
+                    Pill(
+                        // KMK -->
+                        text = FlagEmoji.getEmojiLangFlag(source.shortLanguage) + " (${source.upperShortLanguage})",
+                        // KMK <--
+                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
-            } else {
-                null
-            },
-            colors = ListItemDefaults.colors(
-                containerColor = Color.Transparent,
-            ),
-            modifier = Modifier.clickable(onClick = onClick),
+            }
+        },
+        trailingContent = if (dragEnabled) {
+            {
+                Icon(
+                    imageVector = Icons.Outlined.DragHandle,
+                    contentDescription = null,
+                    modifier = with(scope) {
+                        Modifier.draggableHandle()
+                    },
+                )
+            }
+        } else {
+            null
+        },
+        colors = ListItemDefaults.colors(
+            containerColor = Color.Transparent,
+        ),
+        modifier = Modifier.clickable(onClick = onClick),
+    )
+}
+
+@Inject
+@ViewModelKey
+@ContributesIntoMap(AppScope::class, binding = binding<ViewModel>())
+internal class MigrationConfigViewModel(
+    val sourcePreferences: SourcePreferences,
+    private val sourceManager: SourceManager,
+) : StateViewModel<MigrationConfigViewModel.State>(State()) {
+
+    // KMK -->
+    private val pinnedSources by lazy { sourcePreferences.pinnedSources().get().mapNotNull { it.toLongOrNull() } }
+    private val disabledSources by lazy { sourcePreferences.disabledSources().get().mapNotNull { it.toLongOrNull() } }
+    // KMK <--
+
+    private val sourcesComparator = { includedSources: /* KMK --> */ Map<Long, Int> /* KMK <-- */ ->
+        compareBy<MigrationSource>(
+            // KMK -->
+            // { !it.isSelected },
+            { includedSources[it.source.id] ?: Int.MAX_VALUE },
+            // KMK <--
+            { with(it) { "$name ($shortLanguage)" } },
         )
     }
 
-    private class ScreenModel(
-        val sourcePreferences: SourcePreferences = globalAppGraph.sourcePreferences,
-        private val sourceManager: SourceManager = globalAppGraph.sourceManager,
-    ) : StateScreenModel<ScreenModel.State>(State()) {
-
-        // KMK -->
-        private val pinnedSources by lazy { sourcePreferences.pinnedSources().get().mapNotNull { it.toLongOrNull() } }
-        private val disabledSources by lazy { sourcePreferences.disabledSources().get().mapNotNull { it.toLongOrNull() } }
-        // KMK <--
-
-        private val sourcesComparator = { includedSources: /* KMK --> */ Map<Long, Int> /* KMK <-- */ ->
-            compareBy<MigrationSource>(
-                // KMK -->
-                // { !it.isSelected },
-                { includedSources[it.source.id] ?: Int.MAX_VALUE },
-                // KMK <--
-                { with(it) { "$name ($shortLanguage)" } },
-            )
+    init {
+        viewModelScope.launchIO {
+            initSources()
+            mutableState.update { it.copy(isLoading = false) }
         }
+    }
 
-        init {
-            screenModelScope.launchIO {
-                initSources()
-                mutableState.update { it.copy(isLoading = false) }
-            }
-        }
-
-        private fun updateSources(action: (List<MigrationSource>) -> List<MigrationSource>) {
-            mutableState.update { state ->
-                val updatedSources = action(state.sources)
-                val includedSources = updatedSources.mapNotNull { if (!it.isSelected) null else it.id }
-                    // KMK -->
-                    .mapIndexed { index, id -> id to index }.toMap()
-                // KMK <--
-                state.copy(sources = updatedSources.sortedWith(sourcesComparator(includedSources)))
-            }
-            saveSources()
-        }
-
-        private fun initSources() {
-            val languages = sourcePreferences.enabledLanguages().get()
-            val includedSources = sourcePreferences.migrationSources().get()
+    private fun updateSources(action: (List<MigrationSource>) -> List<MigrationSource>) {
+        mutableState.update { state ->
+            val updatedSources = action(state.sources)
+            val includedSources = updatedSources.mapNotNull { if (!it.isSelected) null else it.id }
                 // KMK -->
                 .mapIndexed { index, id -> id to index }.toMap()
             // KMK <--
-            val sources = sourceManager
-                // KMK -->
-                .getVisibleSources()
-                // KMK <--
-                .asSequence()
-                // KMK --> Anything searchable, not just HttpSource. The filter excluded the local
-                // libraries outright - they are `CatalogueSource`, never `HttpSource` - so
-                // migrating *into* a local folder (a common destination for a downloaded series)
-                // was impossible: the source was not on the list to tick. Both are lang "other"
-                // and bypass the language filter like everywhere else.
-                .filter { it is HttpSource || it.isLocal() }
-                .filter { it is HttpSource || it.lang in languages }
-                .map {
-                    val source = Source(
-                        id = it.id,
-                        lang = it.lang,
-                        name = it.name,
-                        supportsLatest = false,
-                        isStub = false,
-                    )
-                    MigrationSource(
-                        source = source,
-                        isSelected = when {
-                            includedSources.isNotEmpty() -> source.id in includedSources
-                            pinnedSources.isNotEmpty() -> source.id in pinnedSources
-                            else -> source.id !in disabledSources
-                        },
-                    )
+            state.copy(sources = updatedSources.sortedWith(sourcesComparator(includedSources)))
+        }
+        saveSources()
+    }
+
+    private fun initSources() {
+        val languages = sourcePreferences.enabledLanguages().get()
+        val includedSources = sourcePreferences.migrationSources().get()
+            // KMK -->
+            .mapIndexed { index, id -> id to index }.toMap()
+        // KMK <--
+        val sources = sourceManager
+            // KMK -->
+            .getVisibleSources()
+            // KMK <--
+            .asSequence()
+            // KMK --> Anything searchable, not just HttpSource. The filter excluded the local
+            // libraries outright - they are `CatalogueSource`, never `HttpSource` - so
+            // migrating *into* a local folder (a common destination for a downloaded series)
+            // was impossible: the source was not on the list to tick. Both are lang "other"
+            // and bypass the language filter like everywhere else.
+            .filter { it is HttpSource || it.isLocal() }
+            .filter { it is HttpSource || it.lang in languages }
+            .map {
+                val source = Source(
+                    id = it.id,
+                    lang = it.lang,
+                    name = it.name,
+                    supportsLatest = false,
+                    isStub = false,
+                )
+                MigrationSource(
+                    source = source,
+                    isSelected = when {
+                        includedSources.isNotEmpty() -> source.id in includedSources
+                        pinnedSources.isNotEmpty() -> source.id in pinnedSources
+                        else -> source.id !in disabledSources
+                    },
+                )
+            }
+            .toList()
+
+        mutableState.update { state ->
+            state.copy(sources = sources.sortedWith(sourcesComparator(includedSources)))
+        }
+    }
+
+    fun toggleSelection(id: Long) {
+        updateSources { sources ->
+            sources.map { source ->
+                source.copy(isSelected = if (source.source.id == id) !source.isSelected else source.isSelected)
+            }
+        }
+    }
+
+    fun toggleSelection(config: SelectionConfig) {
+        val isSelected: (Long) -> Boolean = {
+            when (config) {
+                SelectionConfig.All -> true
+                SelectionConfig.None -> false
+                SelectionConfig.Pinned -> it in pinnedSources
+                SelectionConfig.Enabled -> it !in disabledSources
+            }
+        }
+        updateSources { sources ->
+            sources.map { source ->
+                source.copy(isSelected = isSelected(source.source.id))
+            }
+        }
+    }
+
+    fun orderSource(from: Int, to: Int) {
+        updateSources {
+            it.toMutableList()
+                .apply {
+                    add(to, removeAt(from))
                 }
                 .toList()
-
-            mutableState.update { state ->
-                state.copy(sources = sources.sortedWith(sourcesComparator(includedSources)))
-            }
-        }
-
-        fun toggleSelection(id: Long) {
-            updateSources { sources ->
-                sources.map { source ->
-                    source.copy(isSelected = if (source.source.id == id) !source.isSelected else source.isSelected)
-                }
-            }
-        }
-
-        fun toggleSelection(config: SelectionConfig) {
-            val isSelected: (Long) -> Boolean = {
-                when (config) {
-                    SelectionConfig.All -> true
-                    SelectionConfig.None -> false
-                    SelectionConfig.Pinned -> it in pinnedSources
-                    SelectionConfig.Enabled -> it !in disabledSources
-                }
-            }
-            updateSources { sources ->
-                sources.map { source ->
-                    source.copy(isSelected = isSelected(source.source.id))
-                }
-            }
-        }
-
-        fun orderSource(from: Int, to: Int) {
-            updateSources {
-                it.toMutableList()
-                    .apply {
-                        add(to, removeAt(from))
-                    }
-                    .toList()
-            }
-        }
-
-        fun saveSources() {
-            state.value.sources
-                .filter { source -> source.isSelected }
-                .map { source -> source.source.id }
-                .let { sources -> sourcePreferences.migrationSources().set(sources) }
-        }
-
-        data class State(
-            val isLoading: Boolean = true,
-            val sources: List<MigrationSource> = emptyList(),
-        )
-
-        enum class SelectionConfig {
-            All,
-            None,
-            Pinned,
-            Enabled,
         }
     }
 
-    data class MigrationSource(
-        val source: Source,
-        val isSelected: Boolean,
-        // KMK -->
-        val shortLanguage: String = LocaleHelper.getShortDisplayName(source.lang),
-        val upperShortLanguage: String = shortLanguage.uppercase(),
-        // KMK <--
-    ) {
-        val id: Long
-            inline get() = source.id
-
-        val name: String
-            inline get() = source.name
+    fun saveSources() {
+        state.value.sources
+            .filter { source -> source.isSelected }
+            .map { source -> source.source.id }
+            .let { sources -> sourcePreferences.migrationSources().set(sources) }
     }
+
+    data class State(
+        val isLoading: Boolean = true,
+        val sources: List<MigrationSource> = emptyList(),
+    )
+
+    enum class SelectionConfig {
+        All,
+        None,
+        Pinned,
+        Enabled,
+    }
+}
+
+data class MigrationSource(
+    val source: Source,
+    val isSelected: Boolean,
+    // KMK -->
+    val shortLanguage: String = LocaleHelper.getShortDisplayName(source.lang),
+    val upperShortLanguage: String = shortLanguage.uppercase(),
+    // KMK <--
+) {
+    val id: Long
+        inline get() = source.id
+
+    val name: String
+        inline get() = source.name
 }

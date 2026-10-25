@@ -33,7 +33,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.vectorResource
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.core.stack.mutableStateStackOf
 import com.kevinnzou.web.AccompanistWebChromeClient
 import com.kevinnzou.web.AccompanistWebViewClient
 import com.kevinnzou.web.LoadingState
@@ -50,6 +49,7 @@ import eu.kanade.tachiyomi.util.system.isDebugBuildType
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.launch
+import mihon.core.navigation.util.mutableStateStackOf
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource

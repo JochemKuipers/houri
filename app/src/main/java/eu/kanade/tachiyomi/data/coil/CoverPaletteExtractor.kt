@@ -17,7 +17,7 @@ import tachiyomi.core.common.util.system.logcat
  *
  * - [MangaCoverMetadata.setRatioAndColors], off Coil's fetch scope, for every cover
  *   displayed anywhere in the app;
- * - `MangaScreenModel.onCoverPaletteAvailable`, from the image the details screen has
+ * - `MangaViewModel.onCoverPaletteAvailable`, from the image the details screen has
  *   already decoded, so the theme appears without a second image request.
  *
  * Everything here is best-effort: covers arrive as hardware bitmaps, get recycled under

@@ -6,7 +6,6 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.presentation.more.settings.Preference
-import eu.kanade.presentation.util.Screen
 import mihon.app.di.globalAppGraph
 import tachiyomi.core.common.preference.PreferenceStore
 
@@ -37,8 +36,7 @@ import tachiyomi.core.common.preference.PreferenceStore
  */
 abstract class GenericSettingsScreen(
     private val titleRes: StringResource,
-) : Screen(),
-    eu.kanade.presentation.more.settings.screen.SearchableSettings {
+) : eu.kanade.presentation.more.settings.screen.SearchableSettings {
 
     @ReadOnlyComposable
     @Composable

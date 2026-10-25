@@ -7,7 +7,7 @@ import eu.kanade.core.util.addOrRemove
  * applies selection toggles to the processed chapter list through [onUpdateState].
  */
 internal class ChapterSelectionController(
-    private val onUpdateState: ((MangaScreenModel.State.Success) -> MangaScreenModel.State.Success) -> Unit,
+    private val onUpdateState: ((MangaViewModel.State.Success) -> MangaViewModel.State.Success) -> Unit,
 ) {
 
     private val selectedIds = HashSet<Long>()

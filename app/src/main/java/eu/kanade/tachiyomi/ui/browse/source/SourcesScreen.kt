@@ -1,30 +1,22 @@
 package eu.kanade.tachiyomi.ui.browse.source
 
 import androidx.compose.runtime.Composable
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.browse.BrowseTabWrapper
-import eu.kanade.presentation.util.Screen
-import eu.kanade.tachiyomi.ui.manga.MangaScreen
-import exh.recs.BrowseRecommendsScreen
-import exh.recs.RecommendsScreen
+import mihon.core.navigation.util.LocalBackStack
 import java.io.Serializable
 
 /**
- * Navigated to when invoking [MangaScreen.openSmartSearch] for entries to merge or
- * from [RecommendsScreen], [BrowseRecommendsScreen] for click a recommendation entry.
- * This will show a [sourcesTab] to select a source to search for entries to merge or
- * search for recommending entry.
+ * Shown when picking a source to "find in another source" (smart search) - from a manga's
+ * merge menu or from the recommends screens. Renders a [sourcesTab] inside a
+ * [BrowseTabWrapper] so it looks like a plain browsing screen.
  */
-class SourcesScreen(private val smartSearchConfig: SmartSearchConfig?) : Screen() {
-    @Composable
-    override fun Content() {
-        val navigator = LocalNavigator.currentOrThrow
-        BrowseTabWrapper(sourcesTab(smartSearchConfig), onBackPressed = navigator::pop)
-    }
-
-    /**
-     * initialized when invoking [MangaScreen.openSmartSearch] or [RecommendsScreen]
-     */
-    data class SmartSearchConfig(val origTitle: String, val origMangaId: Long? = null) : Serializable
+@Composable
+fun SourcesSearchScreen(smartSearchConfig: SmartSearchConfig?) {
+    val backStack = LocalBackStack.current
+    BrowseTabWrapper(sourcesTab(smartSearchConfig), onBackPressed = { backStack.removeLastOrNull() })
 }
+
+/**
+ * Initialized when invoking smart search or from the recommends screens.
+ */
+data class SmartSearchConfig(val origTitle: String, val origMangaId: Long? = null) : Serializable

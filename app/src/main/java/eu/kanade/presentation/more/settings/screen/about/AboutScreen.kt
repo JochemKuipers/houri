@@ -20,19 +20,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.more.LogoHeader
 import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
-import eu.kanade.presentation.util.LocalBackPress
-import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.updater.AppUpdateChecker
 import eu.kanade.tachiyomi.data.updater.RELEASE_URL
-import eu.kanade.tachiyomi.ui.more.NewUpdateScreen
-import eu.kanade.tachiyomi.ui.more.RoadmapScreen
 import eu.kanade.tachiyomi.util.lang.toDateTimestampString
 import eu.kanade.tachiyomi.util.system.isDebugBuildType
 import eu.kanade.tachiyomi.util.system.isPreviewBuildType
@@ -42,6 +36,10 @@ import eu.kanade.tachiyomi.util.system.updaterEnabled
 import kotlinx.coroutines.launch
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
+import mihon.core.navigation.NewUpdateRoute
+import mihon.core.navigation.OpenSourceLicensesRoute
+import mihon.core.navigation.RoadmapRoute
+import mihon.core.navigation.util.LocalBackStack
 import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
@@ -59,275 +57,259 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 
-class AboutScreen : Screen() {
-    /**
-     * Voyager persists the back stack with the `Serializable` saver, so Java deserialization
-     * calls this on every restored instance. It must hand back a *Serializable* object: it used
-     * to return the companion (`AboutScreen` unqualified resolves to the classifier's companion),
-     * which is not serializable, so `Parcel.readSerializable`'s checkcast threw and every cold
-     * start whose saved state still held this screen crashed on launch. A fresh instance is the
-     * screen, which is what the companion was standing in for anyway.
-     */
-    @Suppress("unused")
-    private fun readResolve(): Any = AboutScreen()
+@Composable
+fun AboutScreen() {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val uriHandler = LocalUriHandler.current
+    val backStack = LocalBackStack.current
+    var isCheckingUpdates by remember { mutableStateOf(false) }
+    var versionTapTimes by remember { mutableStateOf(listOf<Long>()) }
 
-    @Composable
-    override fun Content() {
-        val scope = rememberCoroutineScope()
-        val context = LocalContext.current
-        val uriHandler = LocalUriHandler.current
-        val handleBack = LocalBackPress.current
-        val navigator = LocalNavigator.currentOrThrow
-        var isCheckingUpdates by remember { mutableStateOf(false) }
-        var versionTapTimes by remember { mutableStateOf(listOf<Long>()) }
+    Scaffold(
+        topBar = { scrollBehavior ->
+            AppBar(
+                title = stringResource(MR.strings.pref_category_about),
+                navigateUp = backStack::removeLastOrNull,
+                scrollBehavior = scrollBehavior,
+            )
+        },
+    ) { contentPadding ->
+        ScrollbarLazyColumn(
+            contentPadding = contentPadding,
+        ) {
+            item {
+                LogoHeader()
+            }
 
-        Scaffold(
-            topBar = { scrollBehavior ->
-                AppBar(
-                    title = stringResource(MR.strings.pref_category_about),
-                    navigateUp = if (handleBack != null) handleBack::invoke else null,
-                    scrollBehavior = scrollBehavior,
+            item {
+                TextPreferenceWidget(
+                    title = stringResource(MR.strings.version),
+                    subtitle = getVersionName(withBuildDate = true),
+                    onPreferenceClick = {
+                        val now = System.currentTimeMillis()
+                        val pruned = (versionTapTimes.filter { now - it < 60_000 } + now)
+                        versionTapTimes = pruned
+                        if (eu.kanade.presentation.more.settings.RamGateState.isDisabled.value) {
+                            context.toast("RAM gate already disabled")
+                        } else if (pruned.size >= 10) {
+                            // Routed through RamGateState so the RAM-gated settings rows
+                            // recompose immediately; a bare SharedPreferences write left
+                            // them on their pre-toggle verdict.
+                            eu.kanade.presentation.more.settings.RamGateState.setDisabled(context, true)
+                            context.toast("RAM gate disabled – all features unlocked")
+                        }
+                    },
                 )
-            },
-        ) { contentPadding ->
-            ScrollbarLazyColumn(
-                contentPadding = contentPadding,
-            ) {
-                item {
-                    LogoHeader()
-                }
+            }
 
+            if (updaterEnabled) {
                 item {
                     TextPreferenceWidget(
-                        title = stringResource(MR.strings.version),
-                        subtitle = getVersionName(withBuildDate = true),
+                        title = stringResource(MR.strings.check_for_updates),
+                        widget = {
+                            AnimatedVisibility(visible = isCheckingUpdates) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    strokeWidth = 3.dp,
+                                )
+                            }
+                        },
                         onPreferenceClick = {
-                            val now = System.currentTimeMillis()
-                            val pruned = (versionTapTimes.filter { now - it < 60_000 } + now)
-                            versionTapTimes = pruned
-                            if (eu.kanade.presentation.more.settings.RamGateState.isDisabled.value) {
-                                context.toast("RAM gate already disabled")
-                            } else if (pruned.size >= 10) {
-                                // Routed through RamGateState so the RAM-gated settings rows
-                                // recompose immediately; a bare SharedPreferences write left
-                                // them on their pre-toggle verdict.
-                                eu.kanade.presentation.more.settings.RamGateState.setDisabled(context, true)
-                                context.toast("RAM gate disabled – all features unlocked")
+                            if (!isCheckingUpdates) {
+                                scope.launch {
+                                    isCheckingUpdates = true
+
+                                    checkVersion(
+                                        context = context,
+                                        onAvailableUpdate = { result ->
+                                            val updateScreen = NewUpdateRoute(
+                                                versionName = result.release.version,
+                                                changelogInfo = result.release.info,
+                                                releaseLink = result.release.releaseLink,
+                                                downloadLink = result.release.downloadLink,
+                                            )
+                                            backStack.add(updateScreen)
+                                        },
+                                        onFinish = {
+                                            isCheckingUpdates = false
+                                        },
+                                    )
+                                }
                             }
                         },
                     )
                 }
+            }
 
-                if (updaterEnabled) {
-                    item {
-                        TextPreferenceWidget(
-                            title = stringResource(MR.strings.check_for_updates),
-                            widget = {
-                                AnimatedVisibility(visible = isCheckingUpdates) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(28.dp),
-                                        strokeWidth = 3.dp,
-                                    )
-                                }
-                            },
-                            onPreferenceClick = {
-                                if (!isCheckingUpdates) {
-                                    scope.launch {
-                                        isCheckingUpdates = true
+            item {
+                TextPreferenceWidget(
+                    title = stringResource(MR.strings.whats_new),
+                    onPreferenceClick = { uriHandler.openUri(RELEASE_URL) },
+                )
+            }
 
-                                        checkVersion(
-                                            context = context,
-                                            onAvailableUpdate = { result ->
-                                                val updateScreen = NewUpdateScreen(
-                                                    versionName = result.release.version,
-                                                    changelogInfo = result.release.info,
-                                                    releaseLink = result.release.releaseLink,
-                                                    downloadLink = result.release.downloadLink,
-                                                )
-                                                navigator.push(updateScreen)
-                                            },
-                                            onFinish = {
-                                                isCheckingUpdates = false
-                                            },
-                                        )
-                                    }
-                                }
-                            },
-                        )
-                    }
-                }
-
+            if (isReleaseBuildType || isDebugBuildType) {
                 item {
                     TextPreferenceWidget(
-                        title = stringResource(MR.strings.whats_new),
-                        onPreferenceClick = { uriHandler.openUri(RELEASE_URL) },
-                    )
-                }
-
-                if (isReleaseBuildType || isDebugBuildType) {
-                    item {
-                        TextPreferenceWidget(
-                            title = stringResource(KMR.strings.whats_coming),
-                            onPreferenceClick = {
-                                navigator.push(RoadmapScreen())
-                            },
-                        )
-                    }
-                }
-                // KMK <--
-
-                item {
-                    TextPreferenceWidget(
-                        title = stringResource(MR.strings.help_translate),
+                        title = stringResource(KMR.strings.whats_coming),
                         onPreferenceClick = {
-                            uriHandler.openUri(
-                                "https://hosted.weblate.org/engage/komikku-app/",
-                            )
+                            backStack.add(RoadmapRoute)
                         },
                     )
                 }
-
-                item {
-                    TextPreferenceWidget(
-                        title = stringResource(MR.strings.licenses),
-                        onPreferenceClick = { navigator.push(OpenSourceLicensesScreen()) },
-                    )
-                }
-
-                item {
-                    TextPreferenceWidget(
-                        title = stringResource(MR.strings.privacy_policy),
-                        onPreferenceClick = { uriHandler.openUri("https://komikku-app.github.io/privacy/") },
-                    )
-                }
-
-                item {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 8.dp),
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
-                        LinkIcon(
-                            label = stringResource(MR.strings.website),
-                            icon = Icons.Outlined.Public,
-                            url = "https://komikku-app.github.io",
-                        )
-                        LinkIcon(
-                            label = "Discord",
-                            icon = CustomIcons.Discord,
-                            url = "https://discord.gg/JcQZYvCbYH",
-                        )
-                        // LinkIcon(
-                        //     label = "X",
-                        //     icon = CustomIcons.X,
-                        //     url = "https://x.com/mihonapp",
-                        // )
-                        // LinkIcon(
-                        //     label = "Facebook",
-                        //     icon = CustomIcons.Facebook,
-                        //     url = "https://facebook.com/mihonapp",
-                        // )
-                        // LinkIcon(
-                        //     label = "Reddit",
-                        //     icon = CustomIcons.Reddit,
-                        //     url = "https://www.reddit.com/r/mihonapp",
-                        // )
-                        LinkIcon(
-                            label = "GitHub",
-                            icon = CustomIcons.Github,
-                            url = "https://github.com/PineappleTwilight/komikku-pineapple",
-                        )
-                    }
-                }
             }
-        }
-    }
-
-    /**
-     * Checks version and shows a user prompt if an update is available.
-     */
-    private suspend fun checkVersion(
-        context: Context,
-        onAvailableUpdate: (GetApplicationRelease.Result.NewUpdate) -> Unit,
-        onFinish: () -> Unit,
-    ) {
-        val updateChecker = AppUpdateChecker()
-        withUIContext {
-            try {
-                when (val result = withIOContext { updateChecker.checkForUpdate(context, forceCheck = true) }) {
-                    is GetApplicationRelease.Result.NewUpdate -> {
-                        onAvailableUpdate(result)
-                    }
-                    is GetApplicationRelease.Result.NoNewUpdate -> {
-                        context.toast(MR.strings.update_check_no_new_updates)
-                    }
-                    is GetApplicationRelease.Result.OsTooOld -> {
-                        context.toast(MR.strings.update_check_eol)
-                    }
-                }
-            } catch (e: Exception) {
-                context.toast(e.message)
-                logcat(LogPriority.ERROR, e)
-            } finally {
-                onFinish()
-            }
-        }
-    }
-
-    companion object {
-        fun getVersionName(withBuildDate: Boolean): String {
-            val build = when {
-                isDebugBuildType -> {
-                    "Debug ${BuildConfig.COMMIT_SHA}".let {
-                        if (withBuildDate) {
-                            "$it (${getFormattedBuildTime()})"
-                        } else {
-                            it
-                        }
-                    }
-                }
-
-                isPreviewBuildType -> {
-                    "Beta r${BuildConfig.COMMIT_COUNT}".let {
-                        if (withBuildDate) {
-                            "$it (${BuildConfig.COMMIT_SHA}, ${getFormattedBuildTime()})"
-                        } else {
-                            "$it (${BuildConfig.COMMIT_SHA})"
-                        }
-                    }
-                }
-
-                else -> {
-                    "Stable ${BuildConfig.VERSION_NAME}".let {
-                        if (withBuildDate) {
-                            "$it (${getFormattedBuildTime()})"
-                        } else {
-                            it
-                        }
-                    }
-                }
-            }
-            // KMK --> The no-MTL flavor installs under its own app id and ships without the AI
-            // engine, so it names itself here instead of looking like a broken main build.
-            return if (BuildConfig.IS_NOMTL) "$build · No-MTL build" else build
             // KMK <--
-        }
 
-        internal fun getFormattedBuildTime(): String {
-            return try {
-                LocalDateTime.ofInstant(
-                    Instant.parse(BuildConfig.BUILD_TIME),
-                    ZoneId.systemDefault(),
+            item {
+                TextPreferenceWidget(
+                    title = stringResource(MR.strings.help_translate),
+                    onPreferenceClick = {
+                        uriHandler.openUri(
+                            "https://hosted.weblate.org/engage/komikku-app/",
+                        )
+                    },
                 )
-                    .toDateTimestampString(
-                        UiPreferences.dateFormat(
-                            globalAppGraph.uiPreferences.dateFormat().get(),
-                        ),
+            }
+
+            item {
+                TextPreferenceWidget(
+                    title = stringResource(MR.strings.licenses),
+                    onPreferenceClick = { backStack.add(OpenSourceLicensesRoute) },
+                )
+            }
+
+            item {
+                TextPreferenceWidget(
+                    title = stringResource(MR.strings.privacy_policy),
+                    onPreferenceClick = { uriHandler.openUri("https://komikku-app.github.io/privacy/") },
+                )
+            }
+
+            item {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.Center,
+                ) {
+                    LinkIcon(
+                        label = stringResource(MR.strings.website),
+                        icon = Icons.Outlined.Public,
+                        url = "https://komikku-app.github.io",
                     )
-            } catch (_: Exception) {
-                BuildConfig.BUILD_TIME
+                    LinkIcon(
+                        label = "Discord",
+                        icon = CustomIcons.Discord,
+                        url = "https://discord.gg/JcQZYvCbYH",
+                    )
+                    // LinkIcon(
+                    //     label = "X",
+                    //     icon = CustomIcons.X,
+                    //     url = "https://x.com/mihonapp",
+                    // )
+                    // LinkIcon(
+                    //     label = "Facebook",
+                    //     icon = CustomIcons.Facebook,
+                    //     url = "https://facebook.com/mihonapp",
+                    // )
+                    // LinkIcon(
+                    //     label = "Reddit",
+                    //     icon = CustomIcons.Reddit,
+                    //     url = "https://www.reddit.com/r/mihonapp",
+                    // )
+                    LinkIcon(
+                        label = "GitHub",
+                        icon = CustomIcons.Github,
+                        url = "https://github.com/PineappleTwilight/komikku-pineapple",
+                    )
+                }
             }
         }
+    }
+}
+
+/**
+ * Checks version and shows a user prompt if an update is available.
+ */
+private suspend fun checkVersion(
+    context: Context,
+    onAvailableUpdate: (GetApplicationRelease.Result.NewUpdate) -> Unit,
+    onFinish: () -> Unit,
+) {
+    val updateChecker = AppUpdateChecker()
+    withUIContext {
+        try {
+            when (val result = withIOContext { updateChecker.checkForUpdate(context, forceCheck = true) }) {
+                is GetApplicationRelease.Result.NewUpdate -> {
+                    onAvailableUpdate(result)
+                }
+                is GetApplicationRelease.Result.NoNewUpdate -> {
+                    context.toast(MR.strings.update_check_no_new_updates)
+                }
+                is GetApplicationRelease.Result.OsTooOld -> {
+                    context.toast(MR.strings.update_check_eol)
+                }
+            }
+        } catch (e: Exception) {
+            context.toast(e.message)
+            logcat(LogPriority.ERROR, e)
+        } finally {
+            onFinish()
+        }
+    }
+}
+
+fun getVersionName(withBuildDate: Boolean): String {
+    val build = when {
+        isDebugBuildType -> {
+            "Debug ${BuildConfig.COMMIT_SHA}".let {
+                if (withBuildDate) {
+                    "$it (${getFormattedBuildTime()})"
+                } else {
+                    it
+                }
+            }
+        }
+
+        isPreviewBuildType -> {
+            "Beta r${BuildConfig.COMMIT_COUNT}".let {
+                if (withBuildDate) {
+                    "$it (${BuildConfig.COMMIT_SHA}, ${getFormattedBuildTime()})"
+                } else {
+                    "$it (${BuildConfig.COMMIT_SHA})"
+                }
+            }
+        }
+
+        else -> {
+            "Stable ${BuildConfig.VERSION_NAME}".let {
+                if (withBuildDate) {
+                    "$it (${getFormattedBuildTime()})"
+                } else {
+                    it
+                }
+            }
+        }
+    }
+    // KMK --> The no-MTL flavor installs under its own app id and ships without the AI
+    // engine, so it names itself here instead of looking like a broken main build.
+    return if (BuildConfig.IS_NOMTL) "$build · No-MTL build" else build
+    // KMK <--
+}
+
+internal fun getFormattedBuildTime(): String {
+    return try {
+        LocalDateTime.ofInstant(
+            Instant.parse(BuildConfig.BUILD_TIME),
+            ZoneId.systemDefault(),
+        )
+            .toDateTimestampString(
+                UiPreferences.dateFormat(
+                    globalAppGraph.uiPreferences.dateFormat().get(),
+                ),
+            )
+    } catch (_: Exception) {
+        BuildConfig.BUILD_TIME
     }
 }

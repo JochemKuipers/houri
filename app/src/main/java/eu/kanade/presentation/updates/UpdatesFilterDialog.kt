@@ -19,7 +19,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import eu.kanade.presentation.components.TabbedDialog
 import eu.kanade.presentation.components.TabbedDialogPaddings
-import eu.kanade.tachiyomi.ui.updates.UpdatesSettingsScreenModel
+import eu.kanade.tachiyomi.ui.updates.UpdatesSettingsViewModel
 import kotlinx.collections.immutable.persistentListOf
 import tachiyomi.domain.updates.service.UpdatesPreferences
 import tachiyomi.i18n.MR
@@ -33,7 +33,7 @@ import tachiyomi.presentation.core.util.collectAsState
 @Composable
 fun UpdatesFilterDialog(
     onDismissRequest: () -> Unit,
-    screenModel: UpdatesSettingsScreenModel,
+    screenModel: UpdatesSettingsViewModel,
 ) {
     TabbedDialog(
         onDismissRequest = onDismissRequest,
@@ -53,7 +53,7 @@ fun UpdatesFilterDialog(
 
 @Composable
 private fun ColumnScope.FilterSheet(
-    screenModel: UpdatesSettingsScreenModel,
+    screenModel: UpdatesSettingsViewModel,
 ) {
     val filterDownloaded by screenModel.updatesPreferences.filterDownloaded().collectAsState()
     TriStateItem(

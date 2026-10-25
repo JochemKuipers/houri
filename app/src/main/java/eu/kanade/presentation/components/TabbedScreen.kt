@@ -24,8 +24,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.zIndex
 import dev.icerock.moko.resources.StringResource
-import eu.kanade.tachiyomi.ui.browse.BulkFavoriteScreenModel
-import eu.kanade.tachiyomi.ui.browse.feed.FeedScreenModel
+import eu.kanade.tachiyomi.ui.browse.BulkFavoriteViewModel
+import eu.kanade.tachiyomi.ui.browse.feed.FeedViewModel
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.launch
@@ -41,8 +41,8 @@ fun TabbedScreen(
     searchQuery: String? = null,
     onChangeSearchQuery: (String?) -> Unit = {},
     // KMK -->
-    feedScreenModel: FeedScreenModel,
-    bulkFavoriteScreenModel: BulkFavoriteScreenModel,
+    feedScreenModel: FeedViewModel,
+    bulkFavoriteScreenModel: BulkFavoriteViewModel,
     // KMK <--
 ) {
     val scope = rememberCoroutineScope()

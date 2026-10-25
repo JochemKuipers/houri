@@ -46,16 +46,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
-import cafe.adriel.voyager.core.model.StateScreenModel
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
+import androidx.lifecycle.viewModelScope
+import dev.zacsweers.metro.AppScope
+import dev.zacsweers.metro.Assisted
+import dev.zacsweers.metro.AssistedFactory
+import dev.zacsweers.metro.AssistedInject
+import dev.zacsweers.metro.ContributesIntoMap
+import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactory
+import dev.zacsweers.metrox.viewmodel.ManualViewModelAssistedFactoryKey
+import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import eu.kanade.domain.manga.interactor.GetExcludedScanlators
 import eu.kanade.domain.manga.interactor.SetExcludedScanlators
 import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.presentation.components.AppBar
-import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.util.chapter.ScanlatorCoverage
 import eu.kanade.tachiyomi.util.chapter.scanlatorCoverage
 import kotlinx.coroutines.flow.collectLatest
@@ -63,6 +66,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import mihon.app.di.globalAppGraph
+import mihon.core.navigation.util.LocalBackStack
+import mihon.core.viewmodel.StateViewModel
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 import tachiyomi.domain.chapter.interactor.GetChaptersByMangaId
@@ -81,225 +86,174 @@ import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 
 // KMK -->
-class ScanlatorPreferenceScreen(
-    private val mangaId: Long,
-) : Screen() {
+@Composable
+fun ScanlatorPreferenceScreen(
+    mangaId: Long,
+) {
+    val backStack = LocalBackStack.current
+    val model = assistedMetroViewModel<ScanlatorPreferenceViewModel, ScanlatorPreferenceViewModel.Factory> {
+        create(mangaId)
+    }
+    val state by model.state.collectAsState()
+    // KMK --> without remember any recomposition snaps back to the priority tab
+    var selectedTab by remember { mutableIntStateOf(0) }
 
-    @Composable
-    override fun Content() {
-        val navigator = LocalNavigator.currentOrThrow
-        val model = rememberScreenModel { ScanlatorPreferenceModel(mangaId) }
-        val state by model.state.collectAsState()
-        // KMK --> without remember any recomposition snaps back to the priority tab
-        var selectedTab by remember { mutableIntStateOf(0) }
+    // Guarantee the system back button exits this screen (users reported getting stuck here).
+    BackHandler { backStack.removeLastOrNull() }
 
-        // Guarantee the system back button exits this screen (users reported getting stuck here).
-        BackHandler { navigator.pop() }
-
-        Scaffold(
-            topBar = {
-                AppBar(
-                    title = stringResource(KMR.strings.scanlator_preference),
-                    navigateUp = navigator::pop,
+    Scaffold(
+        topBar = {
+            AppBar(
+                title = stringResource(KMR.strings.scanlator_preference),
+                navigateUp = backStack::removeLastOrNull,
+            )
+        },
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues),
+        ) {
+            PrimaryTabRow(selectedTabIndex = selectedTab) {
+                Tab(
+                    selected = selectedTab == 0,
+                    onClick = { selectedTab = 0 },
+                    text = { Text(stringResource(KMR.strings.scanlator_priority)) },
                 )
-            },
-        ) { paddingValues ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues),
-            ) {
-                PrimaryTabRow(selectedTabIndex = selectedTab) {
-                    Tab(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        text = { Text(stringResource(KMR.strings.scanlator_priority)) },
-                    )
-                    Tab(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        text = { Text(stringResource(KMR.strings.blacklisted_chapters)) },
-                    )
-                    Tab(
-                        selected = selectedTab == 2,
-                        onClick = { selectedTab = 2 },
-                        text = { Text(stringResource(KMR.strings.scanlator_ranges)) },
-                    )
-                }
-                when (selectedTab) {
-                    0 -> PriorityTab(state, model)
-                    1 -> BlacklistTab(state, model)
-                    else -> RangesTab(state, model)
-                }
+                Tab(
+                    selected = selectedTab == 1,
+                    onClick = { selectedTab = 1 },
+                    text = { Text(stringResource(KMR.strings.blacklisted_chapters)) },
+                )
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
+                    text = { Text(stringResource(KMR.strings.scanlator_ranges)) },
+                )
+            }
+            when (selectedTab) {
+                0 -> PriorityTab(state, model)
+                1 -> BlacklistTab(state, model)
+                else -> RangesTab(state, model)
             }
         }
     }
+}
 
-    @Composable
-    private fun PriorityTab(
-        state: ScanlatorPreferenceModel.State,
-        model: ScanlatorPreferenceModel,
-    ) {
-        val listState = rememberLazyListState()
-        // The order only decides anything while the merge is on, so with it off the list must not
-        // accept drags or persist a new priority that nothing will read.
-        val mergeEnabled = state.mergeEnabled
-        // KMK --> drag against a local mirror: persisting every move to the DB rebuilds
-        // state.orderedScanlators mid-drag and fights the finger. Resync when settled.
-        val dragList = remember { state.orderedScanlators.toMutableStateList() }
-        val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
-            if (!mergeEnabled) return@rememberReorderableLazyListState
-            dragList.apply { add(to.index, removeAt(from.index)) }
-            model.setPriority(dragList.map { it.name })
-        }
-        LaunchedEffect(state.orderedScanlators) {
-            if (!reorderableState.isAnyItemDragging) {
-                dragList.clear()
-                dragList.addAll(state.orderedScanlators)
-            }
-        }
-
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(MaterialTheme.padding.small),
-        ) {
-            if (state.autoPriority) {
-                item(key = "auto_priority") {
-                    Text(
-                        text = stringResource(KMR.strings.scanlator_priority_auto),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(
-                            horizontal = MaterialTheme.padding.small,
-                            vertical = MaterialTheme.padding.extraSmall,
-                        ),
-                    )
-                }
-            } else if (!mergeEnabled) {
-                item(key = "merge_off") {
-                    Text(
-                        text = stringResource(KMR.strings.scanlator_priority_merge_off),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(
-                            horizontal = MaterialTheme.padding.small,
-                            vertical = MaterialTheme.padding.extraSmall,
-                        ),
-                    )
-                }
-            }
-            items(dragList, key = { it.name }) { entry ->
-                ReorderableItem(reorderableState, key = entry.name) {
-                    val excluded = entry.name in state.excludedScanlators
-                    ElevatedCard(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = MaterialTheme.padding.extraSmall)
-                            .animateItem(),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = MaterialTheme.padding.small),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Outlined.DragHandle,
-                                contentDescription = null,
-                                tint = if (mergeEnabled) {
-                                    Color.Unspecified
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier
-                                    .padding(MaterialTheme.padding.small)
-                                    .then(if (mergeEnabled) Modifier.draggableHandle() else Modifier),
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = entry.name,
-                                    style = MaterialTheme.typography.bodyLarge,
-                                )
-                                Text(
-                                    text = stringResource(KMR.strings.scanlator_chapter_count, entry.count),
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
-                                entry.coverage?.let { coverage ->
-                                    // KMK -->
-                                    val moreText = if (coverage.hiddenCount > 0) {
-                                        stringResource(KMR.strings.scanlator_coverage_more, coverage.hiddenCount)
-                                    } else {
-                                        null
-                                    }
-                                    Text(
-                                        text = buildString {
-                                            append(coverage.groups.joinToString(", "))
-                                            if (moreText != null) append(", ").append(moreText)
-                                        },
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    // KMK <--
-                                }
-                            }
-                            IconButton(onClick = { model.toggleExcluded(entry.name) }) {
-                                Icon(
-                                    imageVector = if (excluded) {
-                                        Icons.Outlined.VisibilityOff
-                                    } else {
-                                        Icons.Outlined.Visibility
-                                    },
-                                    contentDescription = stringResource(KMR.strings.action_exclude_scanlator),
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+@Composable
+private fun PriorityTab(
+    state: ScanlatorPreferenceViewModel.State,
+    model: ScanlatorPreferenceViewModel,
+) {
+    val listState = rememberLazyListState()
+    // The order only decides anything while the merge is on, so with it off the list must not
+    // accept drags or persist a new priority that nothing will read.
+    val mergeEnabled = state.mergeEnabled
+    // KMK --> drag against a local mirror: persisting every move to the DB rebuilds
+    // state.orderedScanlators mid-drag and fights the finger. Resync when settled.
+    val dragList = remember { state.orderedScanlators.toMutableStateList() }
+    val reorderableState = rememberReorderableLazyListState(listState) { from, to ->
+        if (!mergeEnabled) return@rememberReorderableLazyListState
+        dragList.apply { add(to.index, removeAt(from.index)) }
+        model.setPriority(dragList.map { it.name })
+    }
+    LaunchedEffect(state.orderedScanlators) {
+        if (!reorderableState.isAnyItemDragging) {
+            dragList.clear()
+            dragList.addAll(state.orderedScanlators)
         }
     }
 
-    @Composable
-    private fun BlacklistTab(
-        state: ScanlatorPreferenceModel.State,
-        model: ScanlatorPreferenceModel,
+    LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(MaterialTheme.padding.small),
     ) {
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(MaterialTheme.padding.small),
-        ) {
-            if (state.blacklist.isEmpty()) {
-                item {
-                    Text(
-                        text = stringResource(KMR.strings.blacklist_empty),
-                        modifier = Modifier.padding(MaterialTheme.padding.medium),
-                    )
-                }
+        if (state.autoPriority) {
+            item(key = "auto_priority") {
+                Text(
+                    text = stringResource(KMR.strings.scanlator_priority_auto),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(
+                        horizontal = MaterialTheme.padding.small,
+                        vertical = MaterialTheme.padding.extraSmall,
+                    ),
+                )
             }
-            items(state.blacklist, key = { it }) { key ->
-                val number = key.substringBefore("@").toDoubleOrNull()?.asChapterLabel() ?: key.substringBefore("@")
-                val scanlator = key.substringAfter("@", "")
+        } else if (!mergeEnabled) {
+            item(key = "merge_off") {
+                Text(
+                    text = stringResource(KMR.strings.scanlator_priority_merge_off),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(
+                        horizontal = MaterialTheme.padding.small,
+                        vertical = MaterialTheme.padding.extraSmall,
+                    ),
+                )
+            }
+        }
+        items(dragList, key = { it.name }) { entry ->
+            ReorderableItem(reorderableState, key = entry.name) {
+                val excluded = entry.name in state.excludedScanlators
                 ElevatedCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(vertical = MaterialTheme.padding.extraSmall),
+                        .padding(vertical = MaterialTheme.padding.extraSmall)
+                        .animateItem(),
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = MaterialTheme.padding.small),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        Icon(
+                            imageVector = Icons.Outlined.DragHandle,
+                            contentDescription = null,
+                            tint = if (mergeEnabled) {
+                                Color.Unspecified
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier
+                                .padding(MaterialTheme.padding.small)
+                                .then(if (mergeEnabled) Modifier.draggableHandle() else Modifier),
+                        )
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(text = number, style = MaterialTheme.typography.bodyLarge)
-                            if (scanlator.isNotBlank()) {
+                            Text(
+                                text = entry.name,
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                            Text(
+                                text = stringResource(KMR.strings.scanlator_chapter_count, entry.count),
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            entry.coverage?.let { coverage ->
+                                // KMK -->
+                                val moreText = if (coverage.hiddenCount > 0) {
+                                    stringResource(KMR.strings.scanlator_coverage_more, coverage.hiddenCount)
+                                } else {
+                                    null
+                                }
                                 Text(
-                                    text = scanlator,
+                                    text = buildString {
+                                        append(coverage.groups.joinToString(", "))
+                                        if (moreText != null) append(", ").append(moreText)
+                                    },
                                     style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
+                                // KMK <--
                             }
                         }
-                        IconButton(onClick = { model.removeBlacklisted(key) }) {
+                        IconButton(onClick = { model.toggleExcluded(entry.name) }) {
                             Icon(
-                                imageVector = Icons.Outlined.Delete,
-                                contentDescription = stringResource(MR.strings.action_remove),
+                                imageVector = if (excluded) {
+                                    Icons.Outlined.VisibilityOff
+                                } else {
+                                    Icons.Outlined.Visibility
+                                },
+                                contentDescription = stringResource(KMR.strings.action_exclude_scanlator),
                             )
                         }
                     }
@@ -307,177 +261,241 @@ class ScanlatorPreferenceScreen(
             }
         }
     }
+}
 
-    @Composable
-    private fun RangesTab(
-        state: ScanlatorPreferenceModel.State,
-        model: ScanlatorPreferenceModel,
+@Composable
+private fun BlacklistTab(
+    state: ScanlatorPreferenceViewModel.State,
+    model: ScanlatorPreferenceViewModel,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(MaterialTheme.padding.small),
     ) {
-        var showAddDialog by remember { mutableStateOf(false) }
-
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(MaterialTheme.padding.small),
-        ) {
-            item(key = "add_range") {
-                OutlinedButton(
-                    onClick = { showAddDialog = true },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(text = stringResource(KMR.strings.scanlator_range_add))
-                }
-            }
-
-            if (state.rangeRules.isEmpty()) {
-                item(key = "ranges_empty") {
-                    Text(
-                        text = stringResource(KMR.strings.scanlator_ranges_empty),
-                        modifier = Modifier.padding(MaterialTheme.padding.medium),
-                    )
-                }
-            }
-
-            items(state.rangeRules, key = { it }) { raw ->
-                val rule = remember(raw) { parseScanlatorRangeRule(raw) }
-                if (rule != null) {
-                    RangeRuleItem(
-                        rule = rule,
-                        onRemove = { model.removeRangeRule(raw) },
-                    )
-                }
+        if (state.blacklist.isEmpty()) {
+            item {
+                Text(
+                    text = stringResource(KMR.strings.blacklist_empty),
+                    modifier = Modifier.padding(MaterialTheme.padding.medium),
+                )
             }
         }
-
-        if (showAddDialog) {
-            RangeRuleDialog(
-                scanlators = state.orderedScanlators.map { it.name },
-                onConfirm = { from, to, scanlator ->
-                    model.addRangeRule(from, to, scanlator)
-                    showAddDialog = false
-                },
-                onDismiss = { showAddDialog = false },
-            )
-        }
-    }
-
-    @Composable
-    private fun RangeRuleItem(
-        rule: ScanlatorRangeRule,
-        onRemove: () -> Unit,
-    ) {
-        ElevatedCard(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = MaterialTheme.padding.extraSmall),
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = MaterialTheme.padding.small),
-                verticalAlignment = Alignment.CenterVertically,
+        items(state.blacklist, key = { it }) { key ->
+            val number = key.substringBefore("@").toDoubleOrNull()?.asChapterLabel() ?: key.substringBefore("@")
+            val scanlator = key.substringAfter("@", "")
+            ElevatedCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = MaterialTheme.padding.extraSmall),
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "${rule.from.asChapterLabel()} – ${rule.to.asChapterLabel()}",
-                        style = MaterialTheme.typography.bodyLarge,
-                    )
-                    Text(
-                        text = rule.scanlator,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-                IconButton(onClick = onRemove) {
-                    Icon(
-                        imageVector = Icons.Outlined.Delete,
-                        contentDescription = stringResource(MR.strings.action_remove),
-                    )
+                Row(
+                    modifier = Modifier.padding(horizontal = MaterialTheme.padding.small),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = number, style = MaterialTheme.typography.bodyLarge)
+                        if (scanlator.isNotBlank()) {
+                            Text(
+                                text = scanlator,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                    IconButton(onClick = { model.removeBlacklisted(key) }) {
+                        Icon(
+                            imageVector = Icons.Outlined.Delete,
+                            contentDescription = stringResource(MR.strings.action_remove),
+                        )
+                    }
                 }
             }
         }
     }
+}
 
-    @OptIn(ExperimentalLayoutApi::class)
-    @Composable
-    private fun RangeRuleDialog(
-        scanlators: List<String>,
-        onConfirm: (Double, Double, String) -> Unit,
-        onDismiss: () -> Unit,
+@Composable
+private fun RangesTab(
+    state: ScanlatorPreferenceViewModel.State,
+    model: ScanlatorPreferenceViewModel,
+) {
+    var showAddDialog by remember { mutableStateOf(false) }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(MaterialTheme.padding.small),
     ) {
-        var fromText by remember { mutableStateOf("") }
-        var toText by remember { mutableStateOf("") }
-        var selectedScanlator by remember { mutableStateOf<String?>(null) }
+        item(key = "add_range") {
+            OutlinedButton(
+                onClick = { showAddDialog = true },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(text = stringResource(KMR.strings.scanlator_range_add))
+            }
+        }
 
-        val from = fromText.toDoubleOrNull()
-        val to = toText.toDoubleOrNull()
-        val valid = from != null && to != null && from <= to && !selectedScanlator.isNullOrEmpty()
+        if (state.rangeRules.isEmpty()) {
+            item(key = "ranges_empty") {
+                Text(
+                    text = stringResource(KMR.strings.scanlator_ranges_empty),
+                    modifier = Modifier.padding(MaterialTheme.padding.medium),
+                )
+            }
+        }
 
-        AlertDialog(
-            onDismissRequest = onDismiss,
-            title = { Text(text = stringResource(KMR.strings.scanlator_range_add)) },
-            text = {
-                Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
-                ) {
-                    OutlinedTextField(
-                        value = fromText,
-                        onValueChange = { fromText = it },
-                        label = { Text(text = stringResource(KMR.strings.scanlator_range_from)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = toText,
-                        onValueChange = { toText = it },
-                        label = { Text(text = stringResource(KMR.strings.scanlator_range_to)) },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                        singleLine = true,
-                    )
-                    Text(
-                        text = stringResource(KMR.strings.scanlator_range_scanlator),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
-                    ) {
-                        scanlators.forEach { name ->
-                            FilterChip(
-                                selected = name == selectedScanlator,
-                                onClick = { selectedScanlator = name },
-                                label = { Text(text = name) },
-                            )
-                        }
-                    }
-                }
+        items(state.rangeRules, key = { it }) { raw ->
+            val rule = remember(raw) { parseScanlatorRangeRule(raw) }
+            if (rule != null) {
+                RangeRuleItem(
+                    rule = rule,
+                    onRemove = { model.removeRangeRule(raw) },
+                )
+            }
+        }
+    }
+
+    if (showAddDialog) {
+        RangeRuleDialog(
+            scanlators = state.orderedScanlators.map { it.name },
+            onConfirm = { from, to, scanlator ->
+                model.addRangeRule(from, to, scanlator)
+                showAddDialog = false
             },
-            confirmButton = {
-                val scanlator = selectedScanlator
-                TextButton(
-                    enabled = valid,
-                    onClick = {
-                        if (from != null && to != null && scanlator != null) {
-                            onConfirm(from, to, scanlator)
-                        }
-                    },
-                ) {
-                    Text(text = stringResource(MR.strings.action_ok))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = onDismiss) {
-                    Text(text = stringResource(MR.strings.action_cancel))
-                }
-            },
+            onDismiss = { showAddDialog = false },
         )
     }
+}
+
+@Composable
+private fun RangeRuleItem(
+    rule: ScanlatorRangeRule,
+    onRemove: () -> Unit,
+) {
+    ElevatedCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = MaterialTheme.padding.extraSmall),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = MaterialTheme.padding.small),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "${rule.from.asChapterLabel()} – ${rule.to.asChapterLabel()}",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = rule.scanlator,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            IconButton(onClick = onRemove) {
+                Icon(
+                    imageVector = Icons.Outlined.Delete,
+                    contentDescription = stringResource(MR.strings.action_remove),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RangeRuleDialog(
+    scanlators: List<String>,
+    onConfirm: (Double, Double, String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var fromText by remember { mutableStateOf("") }
+    var toText by remember { mutableStateOf("") }
+    var selectedScanlator by remember { mutableStateOf<String?>(null) }
+
+    val from = fromText.toDoubleOrNull()
+    val to = toText.toDoubleOrNull()
+    val valid = from != null && to != null && from <= to && !selectedScanlator.isNullOrEmpty()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = stringResource(KMR.strings.scanlator_range_add)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+            ) {
+                OutlinedTextField(
+                    value = fromText,
+                    onValueChange = { fromText = it },
+                    label = { Text(text = stringResource(KMR.strings.scanlator_range_from)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = toText,
+                    onValueChange = { toText = it },
+                    label = { Text(text = stringResource(KMR.strings.scanlator_range_to)) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                )
+                Text(
+                    text = stringResource(KMR.strings.scanlator_range_scanlator),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
+                ) {
+                    scanlators.forEach { name ->
+                        FilterChip(
+                            selected = name == selectedScanlator,
+                            onClick = { selectedScanlator = name },
+                            label = { Text(text = name) },
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            val scanlator = selectedScanlator
+            TextButton(
+                enabled = valid,
+                onClick = {
+                    if (from != null && to != null && scanlator != null) {
+                        onConfirm(from, to, scanlator)
+                    }
+                },
+            ) {
+                Text(text = stringResource(MR.strings.action_ok))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(MR.strings.action_cancel))
+            }
+        },
+    )
 }
 
 private fun Double.asChapterLabel(): String =
     if (this % 1.0 == 0.0) toInt().toString() else toString()
 
 // KMK -->
-class ScanlatorPreferenceModel(
-    private val mangaId: Long,
-) : StateScreenModel<ScanlatorPreferenceModel.State>(State()) {
+@AssistedInject
+class ScanlatorPreferenceViewModel(
+    @Assisted private val mangaId: Long,
+    private val updateManga: UpdateManga,
+    private val getChaptersByMangaId: GetChaptersByMangaId,
+    private val getManga: GetManga,
+    private val getExcludedScanlators: GetExcludedScanlators,
+    private val setExcludedScanlators: SetExcludedScanlators,
+    private val libraryPreferences: LibraryPreferences,
+) : StateViewModel<ScanlatorPreferenceViewModel.State>(State()) {
+
+    @AssistedFactory
+    @ManualViewModelAssistedFactoryKey
+    @ContributesIntoMap(AppScope::class)
+    interface Factory : ManualViewModelAssistedFactory {
+        fun create(mangaId: Long): ScanlatorPreferenceViewModel
+    }
 
     data class State(
         val orderedScanlators: List<ScanlatorEntry> = emptyList(),
@@ -494,15 +512,8 @@ class ScanlatorPreferenceModel(
         val coverage: ScanlatorCoverage? = null,
     )
 
-    private val updateManga: UpdateManga = globalAppGraph.updateManga
-    private val getChaptersByMangaId: GetChaptersByMangaId = globalAppGraph.getChaptersByMangaId
-    private val getManga: GetManga = globalAppGraph.getManga
-    private val getExcludedScanlators: GetExcludedScanlators = globalAppGraph.getExcludedScanlators
-    private val setExcludedScanlators: SetExcludedScanlators = globalAppGraph.setExcludedScanlators
-    private val libraryPreferences: LibraryPreferences = globalAppGraph.libraryPreferences
-
     init {
-        screenModelScope.launch {
+        viewModelScope.launch {
             getManga.subscribe(mangaId)
                 .combine(libraryPreferences.smartScanlatorMerge().changes()) { manga, mergeEnabled ->
                     manga to mergeEnabled
@@ -518,7 +529,7 @@ class ScanlatorPreferenceModel(
                     )
                 }
         }
-        screenModelScope.launch {
+        viewModelScope.launch {
             getExcludedScanlators.subscribe(mangaId).collectLatest { excluded ->
                 mutableState.update { it.copy(excludedScanlators = excluded.toSet()) }
             }
@@ -562,11 +573,11 @@ class ScanlatorPreferenceModel(
     }
 
     fun setPriority(names: List<String>) {
-        screenModelScope.launch { updateManga.await(MangaUpdate(id = mangaId, scanlatorPriority = names)) }
+        viewModelScope.launch { updateManga.await(MangaUpdate(id = mangaId, scanlatorPriority = names)) }
     }
 
     fun toggleExcluded(name: String) {
-        screenModelScope.launch {
+        viewModelScope.launch {
             val current = state.value.excludedScanlators
             setExcludedScanlators.await(
                 mangaId,
@@ -576,7 +587,7 @@ class ScanlatorPreferenceModel(
     }
 
     fun removeBlacklisted(key: String) {
-        screenModelScope.launch {
+        viewModelScope.launch {
             updateManga.await(
                 MangaUpdate(id = mangaId, blacklistedChapters = state.value.blacklist - key),
             )
@@ -584,7 +595,7 @@ class ScanlatorPreferenceModel(
     }
 
     fun addRangeRule(from: Double, to: Double, scanlator: String) {
-        screenModelScope.launch {
+        viewModelScope.launch {
             val rule = encodeScanlatorRangeRule(ScanlatorRangeRule(from, to, scanlator))
             val current = state.value.rangeRules
             if (rule in current) return@launch
@@ -595,7 +606,7 @@ class ScanlatorPreferenceModel(
     }
 
     fun removeRangeRule(raw: String) {
-        screenModelScope.launch {
+        viewModelScope.launch {
             updateManga.await(
                 MangaUpdate(id = mangaId, scanlatorRangeRules = state.value.rangeRules - raw),
             )

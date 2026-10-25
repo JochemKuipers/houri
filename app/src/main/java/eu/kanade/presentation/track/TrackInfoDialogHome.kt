@@ -56,12 +56,12 @@ import dev.icerock.moko.resources.StringResource
 import eu.kanade.presentation.components.DropdownMenu
 import eu.kanade.presentation.theme.TachiyomiPreviewTheme
 import eu.kanade.presentation.track.components.TrackLogoIcon
-import eu.kanade.presentation.util.isTabletUi
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.Tracker
 import eu.kanade.tachiyomi.ui.manga.track.TrackItem
 import eu.kanade.tachiyomi.util.lang.toLocalDate
 import mihon.app.di.globalAppGraph
+import mihon.presentation.core.util.isTabletUi
 import tachiyomi.domain.track.service.TrackerProgressSync
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR

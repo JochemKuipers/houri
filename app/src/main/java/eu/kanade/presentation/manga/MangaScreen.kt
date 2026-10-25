@@ -78,8 +78,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastAny
 import androidx.compose.ui.util.fastMap
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import eu.kanade.domain.source.service.SourcePreferences
@@ -119,10 +117,9 @@ import eu.kanade.tachiyomi.source.online.english.EightMuses
 import eu.kanade.tachiyomi.ui.manga.ChapterList
 import eu.kanade.tachiyomi.ui.manga.MangaInfoErrorKind
 import eu.kanade.tachiyomi.ui.manga.MangaInfoUiState
-import eu.kanade.tachiyomi.ui.manga.MangaScreenModel
+import eu.kanade.tachiyomi.ui.manga.MangaViewModel
 import eu.kanade.tachiyomi.ui.manga.MergedMangaData
 import eu.kanade.tachiyomi.ui.manga.PagePreviewState
-import eu.kanade.tachiyomi.ui.manga.scanlator.ScanlatorPreferenceScreen
 import eu.kanade.tachiyomi.util.system.copyToClipboard
 import exh.metadata.MetadataUtil
 import exh.source.getMainSource
@@ -136,6 +133,8 @@ import exh.ui.metadata.adapters.NHentaiDescription
 import exh.ui.metadata.adapters.PururinDescription
 import exh.util.isLewd
 import mihon.app.di.globalAppGraph
+import mihon.core.navigation.ScanlatorPreferenceRoute
+import mihon.core.navigation.util.LocalBackStack
 import tachiyomi.domain.chapter.model.BookmarkColor
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.service.missingChaptersCount
@@ -162,7 +161,7 @@ import kotlin.math.roundToInt
 
 @Composable
 fun MangaScreen(
-    state: MangaScreenModel.State.Success,
+    state: MangaViewModel.State.Success,
     snackbarHostState: SnackbarHostState,
     nextUpdate: Instant?,
     isTabletUi: Boolean,
@@ -437,7 +436,7 @@ fun MangaScreen(
 
 @Composable
 private fun MangaScreenSmallImpl(
-    state: MangaScreenModel.State.Success,
+    state: MangaViewModel.State.Success,
     snackbarHostState: SnackbarHostState,
     nextUpdate: Instant?,
     chapterSwipeStartAction: LibraryPreferences.ChapterSwipeAction,
@@ -969,12 +968,12 @@ private fun MangaScreenSmallImpl(
 
                     // KMK -->
                     item(key = "scanlator-preference-${state.manga.id}") {
-                        val entryNavigator = LocalNavigator.currentOrThrow
+                        val entryNavigator = LocalBackStack.current
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clickable {
-                                    entryNavigator.push(ScanlatorPreferenceScreen(state.manga.id))
+                                    entryNavigator.add(ScanlatorPreferenceRoute(state.manga.id))
                                 }
                                 .padding(horizontal = MaterialTheme.padding.medium)
                                 .padding(vertical = MaterialTheme.padding.small),
@@ -1040,7 +1039,7 @@ private fun MangaScreenSmallImpl(
 
 @Composable
 private fun MangaScreenLargeImpl(
-    state: MangaScreenModel.State.Success,
+    state: MangaViewModel.State.Success,
     snackbarHostState: SnackbarHostState,
     nextUpdate: Instant?,
     chapterSwipeStartAction: LibraryPreferences.ChapterSwipeAction,
@@ -1522,12 +1521,12 @@ private fun MangaScreenLargeImpl(
                             // KMK <--
                             // KMK -->
                             item(key = "scanlator-preference-${state.manga.id}-end") {
-                                val entryNavigator = LocalNavigator.currentOrThrow
+                                val entryNavigator = LocalBackStack.current
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clickable {
-                                            entryNavigator.push(ScanlatorPreferenceScreen(state.manga.id))
+                                            entryNavigator.add(ScanlatorPreferenceRoute(state.manga.id))
                                         }
                                         .padding(horizontal = MaterialTheme.padding.medium)
                                         .padding(vertical = MaterialTheme.padding.small),
@@ -2058,7 +2057,7 @@ fun UpscaleMangaToggle(manga: tachiyomi.domain.manga.model.Manga) {
 
 // SY -->
 typealias MetadataDescriptionComposable = @Composable (
-    state: MangaScreenModel.State.Success,
+    state: MangaViewModel.State.Success,
     openMetadataViewer: () -> Unit,
     search: (String) -> Unit,
 ) -> Unit

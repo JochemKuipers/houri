@@ -12,28 +12,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.navigator.Navigator
+import androidx.navigation3.runtime.NavBackStack
+import androidx.navigation3.runtime.NavKey
 import eu.kanade.core.preference.asState
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.presentation.browse.RelatedMangasContent
 import eu.kanade.presentation.browse.components.BrowseSourceSimpleToolbar
 import eu.kanade.presentation.components.BulkSelectionToolbar
-import eu.kanade.tachiyomi.ui.browse.BulkFavoriteScreenModel
-import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceScreen
-import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchScreen
+import eu.kanade.tachiyomi.ui.browse.BulkFavoriteViewModel
 import kotlinx.coroutines.CoroutineScope
 import mihon.app.di.globalAppGraph
+import mihon.core.navigation.BrowseSourceRoute
+import mihon.core.navigation.GlobalSearchRoute
+import mihon.core.navigation.MangaRoute
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.presentation.core.components.material.Scaffold
 
 @Composable
 fun RelatedMangasScreen(
-    screenModel: MangaScreenModel,
-    bulkFavoriteScreenModel: BulkFavoriteScreenModel,
+    screenModel: MangaViewModel,
+    bulkFavoriteScreenModel: BulkFavoriteViewModel,
     navigateUp: () -> Unit,
-    navigator: Navigator,
+    backStack: NavBackStack<NavKey>,
+    resultEventBus: androidx.navigation3.runtime.result.ResultEventBus,
     scope: CoroutineScope,
-    successState: MangaScreenModel.State.Success,
+    successState: MangaViewModel.State.Success,
 ) {
     val sourcePreferences: SourcePreferences = globalAppGraph.sourcePreferences
     var displayMode by sourcePreferences.sourceDisplayMode().asState(scope)
@@ -91,21 +94,21 @@ fun RelatedMangasScreen(
                 if (bulkFavoriteState.selectionMode) {
                     bulkFavoriteScreenModel.toggleSelection(manga)
                 } else {
-                    navigator.push(MangaScreen(manga.id, true))
+                    backStack.add(MangaRoute(manga.id, true))
                 }
             },
             onMangaLongClick = { manga ->
                 if (!bulkFavoriteState.selectionMode) {
                     bulkFavoriteScreenModel.addRemoveManga(manga, haptic)
                 } else {
-                    navigator.push(MangaScreen(manga.id, true))
+                    backStack.add(MangaRoute(manga.id, true))
                 }
             },
             onKeywordClick = { query ->
-                navigator.push(BrowseSourceScreen(successState.source.id, query))
+                backStack.add(BrowseSourceRoute(successState.source.id, query))
             },
             onKeywordLongClick = { query ->
-                navigator.push(GlobalSearchScreen(query))
+                backStack.add(GlobalSearchRoute(query))
             },
             selection = bulkFavoriteState.selection,
         )

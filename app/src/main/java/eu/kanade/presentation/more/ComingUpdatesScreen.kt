@@ -18,7 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import eu.kanade.presentation.manga.components.MarkdownRender
 import eu.kanade.presentation.theme.TachiyomiPreviewTheme
-import eu.kanade.tachiyomi.ui.more.NewUpdateScreenModel
+import eu.kanade.tachiyomi.ui.more.NewUpdateViewModel
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
@@ -30,7 +30,7 @@ import tachiyomi.presentation.core.screens.InfoScreen
 fun ComingUpdatesScreen(
     versionName: String,
     changelogInfo: String,
-    stage: NewUpdateScreenModel.Stage,
+    stage: NewUpdateViewModel.Stage,
     downloadProgress: () -> Int,
     onOpenInBrowser: () -> Unit,
     onAcceptUpdate: () -> Unit,
@@ -41,16 +41,16 @@ fun ComingUpdatesScreen(
         headingText = stringResource(KMR.strings.update_check_notification_preview_available),
         subtitleText = versionName,
         acceptText = when (stage) {
-            NewUpdateScreenModel.Stage.Available -> stringResource(KMR.strings.update_check_try_now)
-            NewUpdateScreenModel.Stage.Downloading -> stringResource(
+            NewUpdateViewModel.Stage.Available -> stringResource(KMR.strings.update_check_try_now)
+            NewUpdateViewModel.Stage.Downloading -> stringResource(
                 MR.strings.downloading_with_progress,
                 downloadProgress(),
             )
-            NewUpdateScreenModel.Stage.Downloaded -> stringResource(MR.strings.action_install)
-            NewUpdateScreenModel.Stage.Failed -> stringResource(MR.strings.action_retry)
+            NewUpdateViewModel.Stage.Downloaded -> stringResource(MR.strings.action_install)
+            NewUpdateViewModel.Stage.Failed -> stringResource(MR.strings.action_retry)
         },
         onAcceptClick = onAcceptUpdate,
-        canAccept = stage != NewUpdateScreenModel.Stage.Downloading,
+        canAccept = stage != NewUpdateViewModel.Stage.Downloading,
         rejectText = stringResource(MR.strings.action_not_now),
         onRejectClick = onRejectUpdate,
     ) {
@@ -91,7 +91,7 @@ private fun ComingUpdatesScreenPreview() {
                 - Hello ([@cuong-tran](@https://github.com/cuong-tran))
                 - World
             """.trimIndent(),
-            stage = NewUpdateScreenModel.Stage.Available,
+            stage = NewUpdateViewModel.Stage.Available,
             downloadProgress = { 0 },
             onOpenInBrowser = {},
             onRejectUpdate = {},

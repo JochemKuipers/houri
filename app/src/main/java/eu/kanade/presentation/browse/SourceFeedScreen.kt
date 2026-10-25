@@ -27,7 +27,7 @@ import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.AppBarTitle
 import eu.kanade.presentation.components.BulkSelectionToolbar
 import eu.kanade.presentation.components.SearchToolbar
-import eu.kanade.tachiyomi.ui.browse.BulkFavoriteScreenModel
+import eu.kanade.tachiyomi.ui.browse.BulkFavoriteViewModel
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import tachiyomi.domain.manga.model.Manga
@@ -112,7 +112,7 @@ fun SourceFeedScreen(
     onSourceSettingClick: (() -> Unit?)?,
     onSortFeedClick: (() -> Unit)?,
     onLongClickManga: (Manga) -> Unit,
-    bulkFavoriteScreenModel: BulkFavoriteScreenModel,
+    bulkFavoriteScreenModel: BulkFavoriteViewModel,
     // KMK <--
 ) {
     // KMK -->

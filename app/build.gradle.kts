@@ -368,7 +368,10 @@ dependencies {
     }
     implementation(libs.richeditor.compose)
     implementation(libs.aboutLibraries.compose)
-    implementation(libs.bundles.voyager)
+    implementation(projects.core.navigation)
+    implementation(projects.core.viewmodel)
+    implementation(androidx.bundles.navigation3)
+    implementation(androidx.lifecycle.viewmodelNavigation3)
     implementation(libs.compose.materialmotion)
     implementation(libs.swipe)
     implementation(libs.compose.webview)

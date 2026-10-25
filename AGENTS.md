@@ -4,7 +4,7 @@
 **Commit:** 89a39453c
 **Branch:** master
 
-Houri (`applicationId app.houri`) — Android manga reader (min SDK 26, target 36, compile 37, JVM 17 / Kotlin) forked from **Mihon** + **TachiyomiSY**. Stack: Jetpack Compose + Material3, Voyager navigation, SQLDelight, Metro DI (+ legacy Injekt bridge).
+Houri (`applicationId app.houri`) — Android manga reader (min SDK 26, target 36, compile 37, JVM 17 / Kotlin) forked from **Mihon** + **TachiyomiSY**. Stack: Jetpack Compose + Material3, Jetpack Navigation 3 (androidx.navigation3), SQLDelight, Metro DI (+ legacy Injekt bridge).
 
 **Scale:** ~2300 files, ~190k lines Kotlin/Java.
 
@@ -167,12 +167,12 @@ Version catalogs: `gradle/libs.versions.toml`, `kotlinx.versions.toml`, `android
 
 **DI** – **Metro** (`dev.zacsweers.metro`) via `AppGraph` (`mihon/app/di/AppGraph.kt`). Annotate constructors `@Inject`; resolve from Compose/services via `context.appGraph.<accessor>` (`mihon.app.di.appGraph`), from non-Context classes via `globalAppGraph.<accessor>` (set in `App.onCreate`). Activities get `graph.inject(this)` + `@Inject lateinit var` fields; ViewModels use `@AssistedInject` + nested `@AssistedFactory` (`@ViewModelAssistedFactoryKey`) and are resolved with `viewModels<T> { graph.viewModelFactory }`. **Do not add new `uy.kohesive.injekt` usage** — it survives only as an extension-ABI bridge (`MetroInteropModule`, source-api base classes) plus a few documented infra keeps (see `todo.md` chore notes). Legacy registration lives in `DomainModule.kt`/`KMKDomainModule.kt`/`SYDomainModule.kt` (`eu/kanade/domain/`) and `di/AppModule.kt`/`PreferenceModule.kt`/`SYPreferenceModule.kt`.
 
-**UI & navigation** – [Voyager](https://voyager.adriel.cafe/): `Screen` in `eu.kanade.tachiyomi.ui.*`, composables in `eu.kanade.presentation.*`. Base type: `eu.kanade.presentation.util.Screen`. State via `rememberScreenModel { … }`; most models extend `StateScreenModel<State>` or bases like `SearchScreenModel`; some use plain `ScreenModel`. Prefer `screenModelScope` and `ioCoroutineScope`; use `launchIO` / `withIOContext` from `tachiyomi.core.common.util.lang`. `rememberCoroutineScope()` is fine in Compose; long-lived services may use their own `CoroutineScope`.
+**UI & navigation** – [Navigation 3](https://developer.android.com/guide/navigation/navigation-3) (`androidx.navigation3`, cf. `core/navigation/`): every screen is a `@Serializable` route (`mihon.core.navigation.*Route`) rendered by the single `NavDisplay` in `MainActivity`. Composables live in `eu/kanade/tachiyomi/ui/*` (routes + screen fns) and `eu/kanade/presentation/*` (content). State via Metro ViewModels: no-arg `metroViewModel<VM>()`, parameterized `assistedMetroViewModel<VM, VM.Factory> { create(...) }`; models extend `mihon.core.viewmodel.StateViewModel<S>` or plain `ViewModel`. Use `viewModelScope` and `ioCoroutineScope` (`mihon.core.viewmodel`); use `launchIO` / `withIOContext` from `tachiyomi.core.common.util.lang`. `rememberCoroutineScope()` is fine in Compose; long-lived services may use their own `CoroutineScope`. Cross-screen events go through the nav3 `ResultEventBus` (e.g. `TabEvent`, `ShowBottomEvent`, `LibrarySearchEventKey`); in-tab sub-navigation (track dialogs) uses nested Nav3 back stacks inside an `AdaptiveSheet`.
 
-**Activities (not Voyager)** – `MainActivity` (sole Voyager host), `ReaderActivity`
+**Activities (not NavDisplay)** – `MainActivity` (sole Nav3 host), `ReaderActivity`
 (`ReaderActivity.newIntent(...)`; AndroidX `ReaderViewModel` — see `ui/reader/AGENTS.md`),
 `WebViewActivity`, `UnlockActivity`, OAuth login activities, trampoline `DeepLinkActivity`
-(real resolution: Voyager `DeepLinkScreen`/`DeepLinkScreenModel`).
+(real resolution: Nav3 `DeepLinkRoute`/`DeepLinkViewModel`).
 
 **Domain / data / DB** – One class per operation under `domain/…/interactor/` (see `domain/AGENTS.md`);
 SQLDelight in `data/src/main/sqldelight/tachiyomi/` — schema change = new `.sqm` + regenerate
@@ -191,7 +191,7 @@ NOT by architectural layer:
 
 | Package root | Origin | Content |
 |---|---|---|
-| `eu.kanade.tachiyomi.*` | Original Tachiyomi | Activities, Voyager screens, widgets, legacy Injekt DI, data services (backup/download/sync/track) |
+| `eu.kanade.tachiyomi.*` | Original Tachiyomi | Activities, Nav3 screen fns/routes, widgets, legacy Injekt DI, data services (backup/download/sync/track) |
 | `eu.kanade.domain.*` | Tachiyomi refactor | App-level domain interactors + Injekt modules (`DomainModule`, `KMKDomainModule`, `SYDomainModule`) |
 | `eu.kanade.presentation.*` | Compose migration | Compose screens, components, theme |
 | `exh.*` | TachiyomiSY/ExHentai | E-Hentai/MangaDex/delegated sources, metadata, recs (see `exh/AGENTS.md`) |
@@ -371,7 +371,7 @@ MockK (`mockk`/`coEvery`/`coVerifySequence`) + `runTest` for suspend, `.create()
 ## Key files
 
 - `App.kt` – Injekt bootstrap, logging setup
-- `MainActivity.kt` – Voyager host
+- `MainActivity.kt` – Nav3 host (`NavDisplay` + `AppNavGraph`)
 - `app/src/main/java/eu/kanade/tachiyomi/di/AppModule.kt` – core DI
 - `app/src/main/java/eu/kanade/domain/DomainModule.kt` – domain interactors
 - `app/src/main/java/eu/kanade/domain/KMKDomainModule.kt` – Komikku-specific domain

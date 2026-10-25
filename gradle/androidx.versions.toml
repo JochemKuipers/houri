@@ -3,6 +3,9 @@ agp_version = "9.3.2"
 lifecycle_version = "2.11.0"
 paging_version = "3.5.1"
 interpolator_version = "1.0.0"
+# KMK --> Navigation 3 (replaces Voyager, cf. mihonapp/mihon#3984)
+nav3_version = "1.2.0-rc01"
+# KMK <--
 
 [libraries]
 gradle = { module = "com.android.tools.build:gradle", version.ref = "agp_version" }
@@ -20,6 +23,15 @@ profileinstaller = "androidx.profileinstaller:profileinstaller:1.4.1"
 lifecycle-common = { module = "androidx.lifecycle:lifecycle-common", version.ref = "lifecycle_version" }
 lifecycle-process = { module = "androidx.lifecycle:lifecycle-process", version.ref = "lifecycle_version" }
 lifecycle-runtimektx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle_version" }
+lifecycle-viewmodel = { module = "androidx.lifecycle:lifecycle-viewmodel", version.ref = "lifecycle_version" }
+# KMK --> Navigation 3 (replaces Voyager, cf. mihonapp/mihon#3984)
+lifecycle-viewmodelNavigation3 = { module = "androidx.lifecycle:lifecycle-viewmodel-navigation3", version.ref = "lifecycle_version" }
+navigation3-runtime = { module = "androidx.navigation3:navigation3-runtime", version.ref = "nav3_version" }
+navigation3-ui = { module = "androidx.navigation3:navigation3-ui", version.ref = "nav3_version" }
+# Nav3 only exposes savedstate-compose on its runtime classpath; the saveable serializers
+# (SnapshotStateListSerializer) are a compile-time API for the TopLevelBackStack saver.
+savedstate-compose = { module = "androidx.savedstate:savedstate-compose", version = "1.4.0" }
+# KMK <--
 
 workmanager = "androidx.work:work-runtime:2.11.2"
 
@@ -35,3 +47,6 @@ test-uiautomator = "androidx.test.uiautomator:uiautomator:2.4.0"
 
 [bundles]
 lifecycle = ["lifecycle-common", "lifecycle-process", "lifecycle-runtimektx"]
+# KMK --> Navigation 3 (replaces Voyager, cf. mihonapp/mihon#3984)
+navigation3 = ["navigation3-runtime", "navigation3-ui"]
+# KMK <--

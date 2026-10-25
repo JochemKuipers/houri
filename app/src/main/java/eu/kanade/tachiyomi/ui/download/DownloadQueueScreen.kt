@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberTopAppBarState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -46,17 +47,17 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.ViewCompat
 import androidx.core.view.updatePadding
 import androidx.recyclerview.widget.LinearLayoutManager
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
+import dev.zacsweers.metrox.viewmodel.metroViewModel
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.components.DropdownMenu
 import eu.kanade.presentation.components.NestedMenuItem
 import eu.kanade.presentation.theme.colorscheme.AndroidViewColorScheme
-import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.databinding.DownloadListBinding
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.coroutines.flow.collectLatest
+import mihon.core.navigation.MangaRoute
+import mihon.core.navigation.util.LocalBackStack
 import tachiyomi.core.common.util.lang.launchUI
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.Pill
@@ -65,248 +66,244 @@ import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import kotlin.math.roundToInt
 
-object DownloadQueueScreen : Screen() {
-    @Suppress("unused")
-    private fun readResolve(): Any = DownloadQueueScreen
+@Composable
+fun DownloadQueueScreen() {
+    val backStack = LocalBackStack.current
+    val scope = rememberCoroutineScope()
+    val screenModel = metroViewModel<DownloadQueueViewModel>()
+    val downloadList by screenModel.state.collectAsState()
 
-    @Composable
-    override fun Content() {
-        val navigator = LocalNavigator.currentOrThrow
-        val scope = rememberCoroutineScope()
-        val screenModel = rememberScreenModel {
-            DownloadQueueScreenModel(
-                // KMK -->
-                navigator = navigator,
-                // KMK <--
-            )
-        }
-        val downloadList by screenModel.state.collectAsState()
-        val downloadCount by remember {
-            derivedStateOf { downloadList.sumOf { it.subItems.size } }
-        }
+    // KMK --> Replaces the Navigator the Voyager ScreenModel held: the row menu's
+    // "show manga" action now surfaces as an event the screen routes.
+    LaunchedEffect(Unit) {
+        screenModel.openMangaEvent.collectLatest { backStack.add(MangaRoute(it)) }
+    }
+    // KMK <--
+    val downloadCount by remember {
+        derivedStateOf { downloadList.sumOf { it.subItems.size } }
+    }
 
-        val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
-        var fabExpanded by remember { mutableStateOf(true) }
-        val nestedScrollConnection = remember {
-            // All this lines just for fab state :/
-            object : NestedScrollConnection {
-                override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                    fabExpanded = available.y >= 0
-                    return scrollBehavior.nestedScrollConnection.onPreScroll(available, source)
-                }
-
-                override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                    return scrollBehavior.nestedScrollConnection.onPostScroll(consumed, available, source)
-                }
-
-                override suspend fun onPreFling(available: Velocity): Velocity {
-                    return scrollBehavior.nestedScrollConnection.onPreFling(available)
-                }
-
-                override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                    return scrollBehavior.nestedScrollConnection.onPostFling(consumed, available)
-                }
-            }
-        }
-
-        Scaffold(
-            topBar = {
-                AppBar(
-                    titleContent = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = stringResource(MR.strings.label_download_queue),
-                                maxLines = 1,
-                                modifier = Modifier.weight(1f, false),
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            if (downloadCount > 0) {
-                                val pillAlpha = if (isSystemInDarkTheme()) 0.12f else 0.08f
-                                Pill(
-                                    text = "$downloadCount",
-                                    modifier = Modifier.padding(start = 4.dp),
-                                    color = MaterialTheme.colorScheme.onBackground
-                                        .copy(alpha = pillAlpha),
-                                    fontSize = 14.sp,
-                                )
-                            }
-                        }
-                    },
-                    navigateUp = navigator::pop,
-                    actions = {
-                        if (downloadList.isNotEmpty()) {
-                            var sortExpanded by remember { mutableStateOf(false) }
-                            val onDismissRequest = { sortExpanded = false }
-                            DropdownMenu(
-                                expanded = sortExpanded,
-                                onDismissRequest = onDismissRequest,
-                            ) {
-                                NestedMenuItem(
-                                    text = { Text(text = stringResource(MR.strings.action_order_by_upload_date)) },
-                                    children = { closeMenu ->
-                                        DropdownMenuItem(
-                                            text = { Text(text = stringResource(MR.strings.action_newest)) },
-                                            onClick = {
-                                                screenModel.reorderQueue(
-                                                    { it.download.chapter.dateUpload },
-                                                    true,
-                                                )
-                                                closeMenu()
-                                            },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(text = stringResource(MR.strings.action_oldest)) },
-                                            onClick = {
-                                                screenModel.reorderQueue(
-                                                    { it.download.chapter.dateUpload },
-                                                    false,
-                                                )
-                                                closeMenu()
-                                            },
-                                        )
-                                    },
-                                )
-                                NestedMenuItem(
-                                    text = { Text(text = stringResource(MR.strings.action_order_by_chapter_number)) },
-                                    children = { closeMenu ->
-                                        DropdownMenuItem(
-                                            text = { Text(text = stringResource(MR.strings.action_asc)) },
-                                            onClick = {
-                                                screenModel.reorderQueue(
-                                                    { it.download.chapter.chapterNumber },
-                                                    false,
-                                                )
-                                                closeMenu()
-                                            },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(text = stringResource(MR.strings.action_desc)) },
-                                            onClick = {
-                                                screenModel.reorderQueue(
-                                                    { it.download.chapter.chapterNumber },
-                                                    true,
-                                                )
-                                                closeMenu()
-                                            },
-                                        )
-                                    },
-                                )
-                            }
-
-                            AppBarActions(
-                                persistentListOf(
-                                    AppBar.Action(
-                                        title = stringResource(MR.strings.action_sort),
-                                        icon = Icons.AutoMirrored.Outlined.Sort,
-                                        onClick = { sortExpanded = true },
-                                    ),
-                                    AppBar.OverflowAction(
-                                        title = stringResource(MR.strings.action_cancel_all),
-                                        onClick = { screenModel.clearQueue() },
-                                    ),
-                                ),
-                            )
-                        }
-                    },
-                    scrollBehavior = scrollBehavior,
-                )
-            },
-            floatingActionButton = {
-                val isRunning by screenModel.isDownloaderRunning.collectAsState()
-                AnimatedVisibility(
-                    visible = downloadList.isNotEmpty(),
-                    enter = scaleIn() + fadeIn(),
-                    exit = scaleOut() + fadeOut(),
-                ) {
-                    ExtendedFloatingActionButton(
-                        text = {
-                            val id = if (isRunning) {
-                                MR.strings.action_pause
-                            } else {
-                                MR.strings.action_resume
-                            }
-                            Text(text = stringResource(id))
-                        },
-                        icon = {
-                            val icon = if (isRunning) {
-                                Icons.Outlined.Pause
-                            } else {
-                                Icons.Filled.PlayArrow
-                            }
-                            Icon(imageVector = icon, contentDescription = null)
-                        },
-                        onClick = {
-                            if (isRunning) {
-                                screenModel.pauseDownloads()
-                            } else {
-                                screenModel.startDownloads()
-                            }
-                        },
-                        expanded = fabExpanded,
-                    )
-                }
-            },
-        ) { contentPadding ->
-            if (downloadList.isEmpty()) {
-                EmptyScreen(
-                    stringRes = MR.strings.information_no_downloads,
-                    modifier = Modifier.padding(contentPadding),
-                )
-                return@Scaffold
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior(rememberTopAppBarState())
+    var fabExpanded by remember { mutableStateOf(true) }
+    val nestedScrollConnection = remember {
+        // All this lines just for fab state :/
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                fabExpanded = available.y >= 0
+                return scrollBehavior.nestedScrollConnection.onPreScroll(available, source)
             }
 
-            val density = LocalDensity.current
-            val layoutDirection = LocalLayoutDirection.current
-            val left = with(density) { contentPadding.calculateLeftPadding(layoutDirection).toPx().roundToInt() }
-            val top = with(density) { contentPadding.calculateTopPadding().toPx().roundToInt() }
-            val right = with(density) { contentPadding.calculateRightPadding(layoutDirection).toPx().roundToInt() }
-            val bottom = with(density) { contentPadding.calculateBottomPadding().toPx().roundToInt() }
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                return scrollBehavior.nestedScrollConnection.onPostScroll(consumed, available, source)
+            }
 
-            // KMK -->
-            val colorScheme = AndroidViewColorScheme(MaterialTheme.colorScheme)
-            // KMK <--
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                return scrollBehavior.nestedScrollConnection.onPreFling(available)
+            }
 
-            Box(modifier = Modifier.nestedScroll(nestedScrollConnection)) {
-                AndroidView(
-                    modifier = Modifier.fillMaxWidth(),
-                    factory = { context ->
-                        screenModel.controllerBinding = DownloadListBinding.inflate(LayoutInflater.from(context))
-                        screenModel.adapter = DownloadAdapter(
-                            screenModel.listener,
-                            // KMK -->
-                            colorScheme,
-                            // KMK <--
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                return scrollBehavior.nestedScrollConnection.onPostFling(consumed, available)
+            }
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            AppBar(
+                titleContent = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = stringResource(MR.strings.label_download_queue),
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f, false),
+                            overflow = TextOverflow.Ellipsis,
                         )
-                        screenModel.controllerBinding.root.adapter = screenModel.adapter
-                        screenModel.adapter?.isHandleDragEnabled = true
-                        screenModel.controllerBinding.root.layoutManager = LinearLayoutManager(context)
-
-                        ViewCompat.setNestedScrollingEnabled(screenModel.controllerBinding.root, true)
-
-                        scope.launchUI {
-                            screenModel.getDownloadStatusFlow()
-                                .collect(screenModel::onStatusChange)
-                        }
-                        scope.launchUI {
-                            screenModel.getDownloadProgressFlow()
-                                .collect(screenModel::onUpdateDownloadedPages)
-                        }
-
-                        screenModel.controllerBinding.root
-                    },
-                    update = {
-                        screenModel.controllerBinding.root
-                            .updatePadding(
-                                left = left,
-                                top = top,
-                                right = right,
-                                bottom = bottom,
+                        if (downloadCount > 0) {
+                            val pillAlpha = if (isSystemInDarkTheme()) 0.12f else 0.08f
+                            Pill(
+                                text = "$downloadCount",
+                                modifier = Modifier.padding(start = 4.dp),
+                                color = MaterialTheme.colorScheme.onBackground
+                                    .copy(alpha = pillAlpha),
+                                fontSize = 14.sp,
                             )
+                        }
+                    }
+                },
+                navigateUp = backStack::removeLastOrNull,
+                actions = {
+                    if (downloadList.isNotEmpty()) {
+                        var sortExpanded by remember { mutableStateOf(false) }
+                        val onDismissRequest = { sortExpanded = false }
+                        DropdownMenu(
+                            expanded = sortExpanded,
+                            onDismissRequest = onDismissRequest,
+                        ) {
+                            NestedMenuItem(
+                                text = { Text(text = stringResource(MR.strings.action_order_by_upload_date)) },
+                                children = { closeMenu ->
+                                    DropdownMenuItem(
+                                        text = { Text(text = stringResource(MR.strings.action_newest)) },
+                                        onClick = {
+                                            screenModel.reorderQueue(
+                                                { it.download.chapter.dateUpload },
+                                                true,
+                                            )
+                                            closeMenu()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(text = stringResource(MR.strings.action_oldest)) },
+                                        onClick = {
+                                            screenModel.reorderQueue(
+                                                { it.download.chapter.dateUpload },
+                                                false,
+                                            )
+                                            closeMenu()
+                                        },
+                                    )
+                                },
+                            )
+                            NestedMenuItem(
+                                text = { Text(text = stringResource(MR.strings.action_order_by_chapter_number)) },
+                                children = { closeMenu ->
+                                    DropdownMenuItem(
+                                        text = { Text(text = stringResource(MR.strings.action_asc)) },
+                                        onClick = {
+                                            screenModel.reorderQueue(
+                                                { it.download.chapter.chapterNumber },
+                                                false,
+                                            )
+                                            closeMenu()
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text(text = stringResource(MR.strings.action_desc)) },
+                                        onClick = {
+                                            screenModel.reorderQueue(
+                                                { it.download.chapter.chapterNumber },
+                                                true,
+                                            )
+                                            closeMenu()
+                                        },
+                                    )
+                                },
+                            )
+                        }
 
-                        screenModel.adapter?.updateDataSet(downloadList)
+                        AppBarActions(
+                            persistentListOf(
+                                AppBar.Action(
+                                    title = stringResource(MR.strings.action_sort),
+                                    icon = Icons.AutoMirrored.Outlined.Sort,
+                                    onClick = { sortExpanded = true },
+                                ),
+                                AppBar.OverflowAction(
+                                    title = stringResource(MR.strings.action_cancel_all),
+                                    onClick = { screenModel.clearQueue() },
+                                ),
+                            ),
+                        )
+                    }
+                },
+                scrollBehavior = scrollBehavior,
+            )
+        },
+        floatingActionButton = {
+            val isRunning by screenModel.isDownloaderRunning.collectAsState()
+            AnimatedVisibility(
+                visible = downloadList.isNotEmpty(),
+                enter = scaleIn() + fadeIn(),
+                exit = scaleOut() + fadeOut(),
+            ) {
+                ExtendedFloatingActionButton(
+                    text = {
+                        val id = if (isRunning) {
+                            MR.strings.action_pause
+                        } else {
+                            MR.strings.action_resume
+                        }
+                        Text(text = stringResource(id))
                     },
+                    icon = {
+                        val icon = if (isRunning) {
+                            Icons.Outlined.Pause
+                        } else {
+                            Icons.Filled.PlayArrow
+                        }
+                        Icon(imageVector = icon, contentDescription = null)
+                    },
+                    onClick = {
+                        if (isRunning) {
+                            screenModel.pauseDownloads()
+                        } else {
+                            screenModel.startDownloads()
+                        }
+                    },
+                    expanded = fabExpanded,
                 )
             }
+        },
+    ) { contentPadding ->
+        if (downloadList.isEmpty()) {
+            EmptyScreen(
+                stringRes = MR.strings.information_no_downloads,
+                modifier = Modifier.padding(contentPadding),
+            )
+            return@Scaffold
+        }
+
+        val density = LocalDensity.current
+        val layoutDirection = LocalLayoutDirection.current
+        val left = with(density) { contentPadding.calculateLeftPadding(layoutDirection).toPx().roundToInt() }
+        val top = with(density) { contentPadding.calculateTopPadding().toPx().roundToInt() }
+        val right = with(density) { contentPadding.calculateRightPadding(layoutDirection).toPx().roundToInt() }
+        val bottom = with(density) { contentPadding.calculateBottomPadding().toPx().roundToInt() }
+
+        // KMK -->
+        val colorScheme = AndroidViewColorScheme(MaterialTheme.colorScheme)
+        // KMK <--
+
+        Box(modifier = Modifier.nestedScroll(nestedScrollConnection)) {
+            AndroidView(
+                modifier = Modifier.fillMaxWidth(),
+                factory = { context ->
+                    screenModel.controllerBinding = DownloadListBinding.inflate(LayoutInflater.from(context))
+                    screenModel.adapter = DownloadAdapter(
+                        screenModel.listener,
+                        // KMK -->
+                        colorScheme,
+                        // KMK <--
+                    )
+                    screenModel.controllerBinding.root.adapter = screenModel.adapter
+                    screenModel.adapter?.isHandleDragEnabled = true
+                    screenModel.controllerBinding.root.layoutManager = LinearLayoutManager(context)
+
+                    ViewCompat.setNestedScrollingEnabled(screenModel.controllerBinding.root, true)
+
+                    scope.launchUI {
+                        screenModel.getDownloadStatusFlow()
+                            .collect(screenModel::onStatusChange)
+                    }
+                    scope.launchUI {
+                        screenModel.getDownloadProgressFlow()
+                            .collect(screenModel::onUpdateDownloadedPages)
+                    }
+
+                    screenModel.controllerBinding.root
+                },
+                update = {
+                    screenModel.controllerBinding.root
+                        .updatePadding(
+                            left = left,
+                            top = top,
+                            right = right,
+                            bottom = bottom,
+                        )
+
+                    screenModel.adapter?.updateDataSet(downloadList)
+                },
+            )
         }
     }
 }

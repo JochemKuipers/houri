@@ -15,11 +15,11 @@ import tachiyomi.domain.manga.model.applyFilter
 import tachiyomi.domain.track.model.Track
 
 /**
- * Single-responsibility handler extracted from [eu.kanade.tachiyomi.ui.library.LibraryScreenModel.applyFilters]
+ * Single-responsibility handler extracted from [eu.kanade.tachiyomi.ui.library.LibraryViewModel.applyFilters]
  * (530 lines of filter lambdas inlined in the god-class ViewModel).
  *
  * Previously `applyFilters` was a private extension on `List<LibraryItem>` inside
- * `LibraryScreenModel`, coupling filtering to the ViewModel's 31 injected deps and
+ * `LibraryViewModel`, coupling filtering to the ViewModel's 31 injected deps and
  * making it untestable. This handler owns only filtering concerns and is injectable /
  * unit-testable, enforcing modularity.
  *
@@ -143,7 +143,7 @@ class LibraryFilterHandler(
 
     /**
      * Shim to avoid coupling this handler to LibraryPreferences' internal `ItemPreferences`
-     * data class (which lives inside LibraryScreenModel). ViewModel maps its prefs to this shim
+     * data class (which lives inside LibraryViewModel). ViewModel maps its prefs to this shim
      * before delegating, preserving layer isolation.
      */
     data class ItemPreferencesShim(

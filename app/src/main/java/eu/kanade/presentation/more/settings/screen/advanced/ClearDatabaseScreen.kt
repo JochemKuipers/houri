@@ -30,20 +30,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.fastMap
-import cafe.adriel.voyager.core.model.StateScreenModel
-import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import dev.zacsweers.metro.AppScope
+import dev.zacsweers.metro.ContributesIntoMap
+import dev.zacsweers.metro.Inject
+import dev.zacsweers.metro.binding
+import dev.zacsweers.metrox.viewmodel.ViewModelKey
+import dev.zacsweers.metrox.viewmodel.metroViewModel
 import eu.kanade.presentation.browse.components.SourceIcon
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
-import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import mihon.app.di.globalAppGraph
+import mihon.core.navigation.util.LocalBackStack
+import mihon.core.viewmodel.StateViewModel
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchUI
 import tachiyomi.core.common.util.lang.withNonCancellableContext
@@ -61,172 +65,172 @@ import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
 import tachiyomi.presentation.core.util.selectedBackground
 
-class ClearDatabaseScreen : Screen() {
+@Composable
+fun ClearDatabaseScreen() {
+    val context = LocalContext.current
+    val backStack = LocalBackStack.current
+    val model = metroViewModel<ClearDatabaseViewModel>()
+    val state by model.state.collectAsState()
+    val scope = rememberCoroutineScope()
 
-    @Composable
-    override fun Content() {
-        val context = LocalContext.current
-        val navigator = LocalNavigator.currentOrThrow
-        val model = rememberScreenModel { ClearDatabaseScreenModel() }
-        val state by model.state.collectAsState()
-        val scope = rememberCoroutineScope()
-
-        when (val s = state) {
-            is ClearDatabaseScreenModel.State.Loading -> LoadingScreen()
-            is ClearDatabaseScreenModel.State.Ready -> {
-                if (s.showConfirmation) {
-                    var keepReadManga by remember { mutableStateOf(true) }
-                    AlertDialog(
-                        title = {
-                            Text(text = stringResource(MR.strings.are_you_sure))
-                        },
-                        text = {
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
-                            ) {
-                                Text(text = stringResource(MR.strings.clear_database_text))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = stringResource(MR.strings.clear_db_exclude_read),
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    Switch(
-                                        checked = keepReadManga,
-                                        onCheckedChange = { keepReadManga = it },
-                                    )
-                                }
-                                if (!keepReadManga) {
-                                    Text(
-                                        text = stringResource(MR.strings.clear_database_history_warning),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.error,
-                                    )
-                                }
-                            }
-                        },
-                        onDismissRequest = model::hideConfirmation,
-                        confirmButton = {
-                            TextButton(
-                                onClick = {
-                                    scope.launchUI {
-                                        model.removeMangaBySourceId(keepReadManga)
-                                        model.clearSelection()
-                                        model.hideConfirmation()
-                                        context.toast(MR.strings.clear_database_completed)
-                                    }
-                                },
-                            ) {
-                                Text(text = stringResource(MR.strings.action_ok))
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(onClick = model::hideConfirmation) {
-                                Text(text = stringResource(MR.strings.action_cancel))
-                            }
-                        },
-                    )
-                }
-
-                Scaffold(
-                    topBar = { scrollBehavior ->
-                        AppBar(
-                            title = stringResource(MR.strings.pref_clear_database),
-                            navigateUp = navigator::pop,
-                            actions = {
-                                if (s.items.isNotEmpty()) {
-                                    AppBarActions(
-                                        actions = persistentListOf(
-                                            AppBar.Action(
-                                                title = stringResource(MR.strings.action_select_all),
-                                                icon = Icons.Outlined.SelectAll,
-                                                onClick = model::selectAll,
-                                            ),
-                                            AppBar.Action(
-                                                title = stringResource(MR.strings.action_select_inverse),
-                                                icon = Icons.Outlined.FlipToBack,
-                                                onClick = model::invertSelection,
-                                            ),
-                                        ),
-                                    )
-                                }
-                            },
-                            scrollBehavior = scrollBehavior,
-                        )
+    when (val s = state) {
+        is ClearDatabaseViewModel.State.Loading -> LoadingScreen()
+        is ClearDatabaseViewModel.State.Ready -> {
+            if (s.showConfirmation) {
+                var keepReadManga by remember { mutableStateOf(true) }
+                AlertDialog(
+                    title = {
+                        Text(text = stringResource(MR.strings.are_you_sure))
                     },
-                ) { contentPadding ->
-                    if (s.items.isEmpty()) {
-                        EmptyScreen(
-                            message = stringResource(MR.strings.database_clean),
-                            modifier = Modifier.padding(contentPadding),
-                        )
-                    } else {
-                        LazyColumnWithAction(
-                            contentPadding = contentPadding,
-                            actionLabel = stringResource(MR.strings.action_delete),
-                            actionEnabled = s.selection.isNotEmpty(),
-                            onClickAction = model::showConfirmation,
+                    text = {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
                         ) {
-                            items(s.items) { sourceWithCount ->
-                                ClearDatabaseItem(
-                                    source = sourceWithCount.source,
-                                    count = sourceWithCount.count,
-                                    isSelected = s.selection.contains(sourceWithCount.id),
-                                    onClickSelect = { model.toggleSelection(sourceWithCount.source) },
+                            Text(text = stringResource(MR.strings.clear_database_text))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = stringResource(MR.strings.clear_db_exclude_read),
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Switch(
+                                    checked = keepReadManga,
+                                    onCheckedChange = { keepReadManga = it },
                                 )
                             }
+                            if (!keepReadManga) {
+                                Text(
+                                    text = stringResource(MR.strings.clear_database_history_warning),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
+                    },
+                    onDismissRequest = model::hideConfirmation,
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                scope.launchUI {
+                                    model.removeMangaBySourceId(keepReadManga)
+                                    model.clearSelection()
+                                    model.hideConfirmation()
+                                    context.toast(MR.strings.clear_database_completed)
+                                }
+                            },
+                        ) {
+                            Text(text = stringResource(MR.strings.action_ok))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = model::hideConfirmation) {
+                            Text(text = stringResource(MR.strings.action_cancel))
+                        }
+                    },
+                )
+            }
+
+            Scaffold(
+                topBar = { scrollBehavior ->
+                    AppBar(
+                        title = stringResource(MR.strings.pref_clear_database),
+                        navigateUp = backStack::removeLastOrNull,
+                        actions = {
+                            if (s.items.isNotEmpty()) {
+                                AppBarActions(
+                                    actions = persistentListOf(
+                                        AppBar.Action(
+                                            title = stringResource(MR.strings.action_select_all),
+                                            icon = Icons.Outlined.SelectAll,
+                                            onClick = model::selectAll,
+                                        ),
+                                        AppBar.Action(
+                                            title = stringResource(MR.strings.action_select_inverse),
+                                            icon = Icons.Outlined.FlipToBack,
+                                            onClick = model::invertSelection,
+                                        ),
+                                    ),
+                                )
+                            }
+                        },
+                        scrollBehavior = scrollBehavior,
+                    )
+                },
+            ) { contentPadding ->
+                if (s.items.isEmpty()) {
+                    EmptyScreen(
+                        message = stringResource(MR.strings.database_clean),
+                        modifier = Modifier.padding(contentPadding),
+                    )
+                } else {
+                    LazyColumnWithAction(
+                        contentPadding = contentPadding,
+                        actionLabel = stringResource(MR.strings.action_delete),
+                        actionEnabled = s.selection.isNotEmpty(),
+                        onClickAction = model::showConfirmation,
+                    ) {
+                        items(s.items) { sourceWithCount ->
+                            ClearDatabaseItem(
+                                source = sourceWithCount.source,
+                                count = sourceWithCount.count,
+                                isSelected = s.selection.contains(sourceWithCount.id),
+                                onClickSelect = { model.toggleSelection(sourceWithCount.source) },
+                            )
                         }
                     }
                 }
             }
         }
     }
+}
 
-    @Composable
-    private fun ClearDatabaseItem(
-        source: Source,
-        count: Long,
-        isSelected: Boolean,
-        onClickSelect: () -> Unit,
+@Composable
+private fun ClearDatabaseItem(
+    source: Source,
+    count: Long,
+    isSelected: Boolean,
+    onClickSelect: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .selectedBackground(isSelected)
+            .clickable(onClick = onClickSelect)
+            .padding(horizontal = 8.dp)
+            .height(56.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
+        SourceIcon(source = source)
+        Column(
             modifier = Modifier
-                .selectedBackground(isSelected)
-                .clickable(onClick = onClickSelect)
-                .padding(horizontal = 8.dp)
-                .height(56.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .padding(start = 8.dp)
+                .weight(1f),
         ) {
-            SourceIcon(source = source)
-            Column(
-                modifier = Modifier
-                    .padding(start = 8.dp)
-                    .weight(1f),
-            ) {
-                Text(
-                    text = source.visualName,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(text = stringResource(MR.strings.clear_database_source_item_count, count))
-            }
-            Checkbox(
-                checked = isSelected,
-                onCheckedChange = { onClickSelect() },
+            Text(
+                text = source.visualName,
+                style = MaterialTheme.typography.bodyMedium,
             )
+            Text(text = stringResource(MR.strings.clear_database_source_item_count, count))
         }
+        Checkbox(
+            checked = isSelected,
+            onCheckedChange = { onClickSelect() },
+        )
     }
 }
 
-private class ClearDatabaseScreenModel : StateScreenModel<ClearDatabaseScreenModel.State>(State.Loading) {
+@Inject
+@ViewModelKey
+@ContributesIntoMap(AppScope::class, binding = binding<ViewModel>())
+class ClearDatabaseViewModel : StateViewModel<ClearDatabaseViewModel.State>(State.Loading) {
     private val getSourcesWithNonLibraryManga: GetSourcesWithNonLibraryManga = globalAppGraph.getSourcesWithNonLibraryManga
     private val deleteNonLibraryManga: DeleteNonLibraryManga = globalAppGraph.deleteNonLibraryManga
     private val removeResettedHistory: RemoveResettedHistory = globalAppGraph.removeResettedHistory
 
     init {
-        screenModelScope.launchIO {
+        viewModelScope.launchIO {
             getSourcesWithNonLibraryManga.subscribe()
                 .collectLatest { list ->
                     mutableState.update { old ->

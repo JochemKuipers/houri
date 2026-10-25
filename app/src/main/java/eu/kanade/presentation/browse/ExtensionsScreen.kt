@@ -42,24 +42,23 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.unit.dp
-import cafe.adriel.voyager.navigator.LocalNavigator
-import cafe.adriel.voyager.navigator.currentOrThrow
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.presentation.browse.components.BaseBrowseItem
 import eu.kanade.presentation.browse.components.ExtensionIcon
 import eu.kanade.presentation.components.WarningBanner
 import eu.kanade.presentation.manga.components.DotSeparatorNoSpaceText
-import eu.kanade.presentation.more.settings.screen.browse.ExtensionStoresScreen
 import eu.kanade.presentation.theme.TachiyomiPreviewTheme
 import eu.kanade.presentation.util.animateItemFastScroll
 import eu.kanade.presentation.util.rememberRequestPackageInstallsPermissionState
 import eu.kanade.tachiyomi.extension.model.Extension
 import eu.kanade.tachiyomi.extension.model.InstallStep
 import eu.kanade.tachiyomi.ui.browse.extension.ExtensionUiModel
-import eu.kanade.tachiyomi.ui.browse.extension.ExtensionsScreenModel
+import eu.kanade.tachiyomi.ui.browse.extension.ExtensionsViewModel
 import eu.kanade.tachiyomi.util.system.LocaleHelper
 import eu.kanade.tachiyomi.util.system.launchRequestPackageInstallsPermission
 import kotlinx.collections.immutable.persistentListOf
+import mihon.core.navigation.ExtensionStoresRoute
+import mihon.core.navigation.util.LocalBackStack
 import mihon.domain.extension.model.ExtensionStore
 import mihon.domain.extension.model.KOMIKKU_SIGNATURE
 import tachiyomi.i18n.MR
@@ -80,7 +79,7 @@ import tachiyomi.presentation.core.util.secondaryItemAlpha
 
 @Composable
 fun ExtensionScreen(
-    state: ExtensionsScreenModel.State,
+    state: ExtensionsViewModel.State,
     contentPadding: PaddingValues,
     searchQuery: String?,
     onLongClickItem: (Extension) -> Unit,
@@ -94,7 +93,7 @@ fun ExtensionScreen(
     onClickUpdateAll: () -> Unit,
     onRefresh: () -> Unit,
 ) {
-    val navigator = LocalNavigator.currentOrThrow
+    val backStack = LocalBackStack.current
 
     PullRefresh(
         refreshing = state.isRefreshing,
@@ -116,7 +115,7 @@ fun ExtensionScreen(
                         EmptyScreenAction(
                             stringRes = MR.strings.extensionStores,
                             icon = Icons.Outlined.Settings,
-                            onClick = { navigator.push(ExtensionStoresScreen()) },
+                            onClick = { backStack.add(ExtensionStoresRoute()) },
                         ),
                     ),
                 )
@@ -142,7 +141,7 @@ fun ExtensionScreen(
 
 @Composable
 private fun ExtensionContent(
-    state: ExtensionsScreenModel.State,
+    state: ExtensionsViewModel.State,
     contentPadding: PaddingValues,
     onLongClickItem: (Extension) -> Unit,
     onClickItemCancel: (Extension) -> Unit,
@@ -158,7 +157,7 @@ private fun ExtensionContent(
     var trustState by remember { mutableStateOf<Extension.Untrusted?>(null) }
     val installGranted = rememberRequestPackageInstallsPermissionState(initialValue = true)
     // KMK -->
-    val navigator = LocalNavigator.current
+    val backStack = LocalBackStack.current
     // KMK <--
 
     FastScrollLazyColumn(
@@ -199,7 +198,7 @@ private fun ExtensionContent(
                                 // KMK -->
                                 KMR.strings.extensions_page_more -> {
                                     {
-                                        Button(onClick = { navigator?.push(ExtensionStoresScreen()) }) {
+                                        Button(onClick = { backStack.add(ExtensionStoresRoute()) }) {
                                             Text(
                                                 text = stringResource(MR.strings.action_addExtensionStore),
                                                 style = LocalTextStyle.current.copy(
