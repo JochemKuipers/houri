@@ -1036,20 +1036,24 @@ private fun browseSource(
     }
     when (route) {
         // When doing a migrate/recommend => replace previous screen to perform search again.
+        // KMK --> HomeRoute is the floor, as in MangaToolbar's onHomeClicked: without it a
+        // stack holding none of the searched routes was popped to empty, and the add below
+        // re-seeded with the route alone - rootless, and the next back press crashed NavDisplay.
         is SmartSearchRoute -> {
-            backStack.popUntil { it is SmartSearchRoute }
+            backStack.popUntil { it is HomeRoute || it is SmartSearchRoute }
             if (backStack.size > 1) backStack.replace(route) else backStack.add(route)
         }
 
         is SourceFeedRoute -> {
-            backStack.popUntil { it is SourceFeedRoute }
+            backStack.popUntil { it is HomeRoute || it is SourceFeedRoute }
             if (backStack.size > 1) backStack.replace(route) else backStack.add(route)
         }
 
         else -> {
-            backStack.popUntil { it is BrowseSourceRoute }
+            backStack.popUntil { it is HomeRoute || it is BrowseSourceRoute }
             if (backStack.size > 1) backStack.replace(route) else backStack.add(route)
         }
+        // KMK <--
     }
 }
 // KMK <--

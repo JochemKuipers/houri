@@ -248,7 +248,11 @@ fun HomeScreen() {
                     // TabNavigator had (`!navigator.canPop`).
                     if (backStack.size > 1) {
                         backStack.removeLastOrNull()
-                    } else {
+                    } else if (topLevelBackStack.backStack.size > 1) {
+                        // Same stale-enabled race MainActivity's outer handler guards against:
+                        // this handler's own tab stack can already have been popped to its last
+                        // tab by the previous press, and TopLevelBackStack's start key is the
+                        // floor here. removeLast() re-checks the size itself.
                         topLevelBackStack.removeLast()
                     }
                     // KMK <--

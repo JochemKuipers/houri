@@ -84,6 +84,25 @@ files moved. See .github/scripts/release_notes.py.
   appear empty — instead of every file on the device.
 
 ### Fix
+- **Crash on back at the home screen**: pressing back — or double-pressing it quickly — could
+  crash the app with "NavDisplay backstack cannot be empty". Navigation 3 can deliver a back
+  press whose handler is one frame out of date, and the app's own back handlers took that press
+  at face value and popped the home screen itself off the stack; every remaining entry then had
+  nothing to stand on. The home screen, the tabs and the tracker sheet now treat their root as
+  the floor: a back press at the very bottom is left to the system instead of emptying the
+  stack.
+- **Crash after tapping a source badge on a manga page**: opening a source from a manga that
+  had no matching source screen below it in the stack used to silently discard the home screen
+  while rebuilding the stack, leaving the app rootless — the next back press then crashed it the
+  same way. The home screen is now the floor for that rebuild too, so the source screen simply
+  opens on top of it.
+- **WebGPU reader crash while backgrounding**: losing the GPU device in the middle of drawing
+  a frame — which is what backgrounding a low-memory phone does — could crash the whole app
+  with a native `SIGSEGV` from the WebGPU queue: the frame had already passed its "is the
+  device alive" check, and the loss landed while it was still drawing, leaving the submit to
+  run on a dead handle that nothing in Kotlin could catch. The device is now re-checked right
+  before the frame is submitted and the half-drawn frame is dropped, letting the normal
+  device-loss recovery take over instead of taking the process down.
 - **Rotation**: rotating the device (or rotating in the reader and then leaving a chapter) no
   longer drops you back on the Library tab — the tab you were on, along with the scroll
   position and other saved state of every screen, now survives the orientation change.

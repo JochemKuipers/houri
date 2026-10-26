@@ -404,7 +404,18 @@ class MainActivity : BaseActivity() {
                         val slideDistance = rememberSlideDistance()
                         NavDisplay(
                             backStack = backStack,
-                            onBack = { backStack.removeLastOrNull() },
+                            // KMK --> nav3 dispatches onBack from a callback whose enabled state can
+                            // be stale by one frame: a second press in the same frame as the pop
+                            // that emptied previousEntries, or a press racing a programmatic
+                            // popUntilRoot, still reaches this lambda (NavigationBackHandler's own
+                            // onBackCompleted comment admits it and prefers that over an
+                            // IndexOutOfBounds). Popping HomeRoute here was the last remaining way
+                            // this stack emptied and crashed NavDisplay with "backstack cannot be
+                            // empty". HomeRoute is the floor: at size 1 back belongs to the system.
+                            onBack = {
+                                if (backStack.size > 1) backStack.removeLastOrNull()
+                            },
+                            // KMK <--
                             sceneStrategies = listOf(twoPaneStrategy, overlaySheetSceneStrategy),
                             transitionSpec = {
                                 materialSharedAxisXIn(

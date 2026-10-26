@@ -76,6 +76,12 @@ class TopLevelBackStack(val startKey: NavKey) {
     }
 
     fun removeLast() {
+        // KMK --> The tab stack's root is the floor. nav3 can dispatch onBack with an enabled
+        // state stale by one frame (see NavigationBackHandler's onBackCompleted comment), so this
+        // can be reached when the previous press already popped to the last tab - popping it
+        // emptied the stack and crashed NavDisplay with "backstack cannot be empty".
+        if (backStack.size <= 1) return
+        // KMK <--
         backStack.removeAt(backStack.lastIndex)
         topLevelKey = backStack.last()
     }

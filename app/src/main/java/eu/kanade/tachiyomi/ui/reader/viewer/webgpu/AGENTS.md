@@ -603,6 +603,7 @@ above — a type mismatch that a compiler will not catch.
 | `Re-driving ... last=unfinished` | The worker left the page mid-flight without completing a trace. Usually cancellation. |
 | `DecodeTrace STALL` | The watchdog saw a page past its stage deadline. The worker cannot report its own stall. |
 | `Device not available` / blank pages after backgrounding | Device loss; check the recovery path above, not the page. |
+| `F/libc Fatal signal 11 (SIGSEGV), ... fault addr 0x0 ... (WebGPU-Render-T)` with `Java_androidx_webgpu_GPUQueue_submit` above `submitAndRelease` in the tombstone | Device loss landed **mid-frame**: `render()` passed its entry `isAvailable` gate, then the draw suspended (tile generation), and the loss invalidated the native queue before `submitAndRelease`. Submitting on the dead handle is a null-deref inside `libwebgpu_c_bundled` that kills the process — no Kotlin exception can catch it. `render()` re-checks `isAvailable` immediately before the submit and drops the frame; the residual recheck→JNI window cannot be closed from Kotlin (UNVERIFIED how wide). Same rule as `cleanup()`: once the device is lost, nothing drives its objects. |
 | `device lost reason=1: CreateAndroidSurfaceKHR failed with VK_ERROR_NATIVE_WINDOW_IN_USE_KHR`, preceded by `BufferQueueProducer ... connect: already connected` and `vulkan: native_window_api_connect() failed` | A **second** swapchain was created on a window the old one still owned. Dawn can defer `vkDestroySurfaceKHR` past `close()`, so recovery must drop the old `GPUSurface` *and* release the retained `ANativeWindow` (`NativeWindow.release`) **before** it builds the replacement — see `recoverFromDeviceLoss`. The `SurfaceTexture-0-…` name means the TextureView path (API < 34), where the window is a `SurfaceTexture`'s BufferQueue. |
 | Blank/garbage page in dual-page mode only | Check `spreadPage` lifecycle — see landmines. |
 | Pages decode then vanish when scrolling back | Eviction. Check `isOnScreen` immunity and `pageDistance` anchoring. |
@@ -646,6 +647,17 @@ line, for instance, does not appear anywhere in the current tree.
   `close()`, so it fails with `VK_ERROR_NATIVE_WINDOW_IN_USE_KHR` and loses the device it was
   trying to recover. Closing the `GPUSurface` is not enough; the retained `ANativeWindow` has to
   go too.
+- **`render()`'s `isAvailable` gate is a point-in-time check, not a lock.** The gate runs once
+  at entry, then the draw suspends inside `fn` (tile generation waits on it) — a device loss
+  landing in that window invalidates every device-bound handle *before* the frame's
+  `queue.submitAndRelease`. The Kotlin `deviceLost` flag only flips when the loss callback runs,
+  so nothing between the gate and the submit observes it, and submitting on the dead handle
+  segfaults in native code with no exception path. `cleanup()` has always held the rule ("once
+  the device is lost there is nothing to free"); `render()` now re-checks `isAvailable`
+  immediately before the submit and drops the frame instead. **Rule: any native call after a
+  suspending step inside a frame must re-assert the device is alive first — and never add one
+  that assumes the entry gate still holds.** UNVERIFIED: the window between the recheck and the
+  JNI call itself remains; only a native-side guard can close it.
 - **Never assume a queued page reached the loader.** `HttpPageLoader`'s collector is
   `.filter { it.status == Page.State.Queue }`, so offering a page in any other state is a
   silent no-op — no log, no work. Anything that re-offers a page must set `Queue` itself.

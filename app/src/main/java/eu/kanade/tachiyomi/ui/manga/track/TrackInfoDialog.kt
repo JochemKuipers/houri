@@ -153,7 +153,14 @@ fun TrackInfoDialog(
         ) {
             NavDisplay(
                 backStack = sheetBackStack,
-                onBack = { sheetBackStack.removeLastOrNull() },
+                // KMK --> Same stale-enabled race as the two main NavDisplays: a press racing
+                // the pop that emptied previousEntries can reach this with the sheet's home
+                // route as the last entry. Popping it crashed NavDisplay with an empty
+                // backstack; the sheet's home route is the floor.
+                onBack = {
+                    if (sheetBackStack.size > 1) sheetBackStack.removeLastOrNull()
+                },
+                // KMK <--
                 sizeTransform = SizeTransform(),
                 transitionSpec = { trackFade },
                 popTransitionSpec = { trackFade },
