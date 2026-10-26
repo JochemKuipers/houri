@@ -74,7 +74,10 @@ fun LocalBookImportRow(
             style = MaterialTheme.typography.bodyMedium,
         )
         Button(
-            onClick = { picker.launch(arrayOf(EPUB_MIME, ANY_MIME)) },
+            // KMK --> EPUB only: the picker used to also offer */* so every file on the device
+            // was selectable. application/octet-stream stays because that is the type most
+            // file providers hand an .epub.
+            onClick = { picker.launch(arrayOf(EPUB_MIME, OCTET_MIME)) },
             enabled = !busy,
         ) {
             Text(stringResource(KMR.strings.local_book_import))
@@ -172,4 +175,4 @@ private const val EPUB_MIME = "application/epub+zip"
  * `application/octet-stream` and a picker offering only the registered type shows an empty folder.
  * What is not a book is dropped by the importer on its extension, and reported as skipped.
  */
-private const val ANY_MIME = "*/*"
+private const val OCTET_MIME = "application/octet-stream"

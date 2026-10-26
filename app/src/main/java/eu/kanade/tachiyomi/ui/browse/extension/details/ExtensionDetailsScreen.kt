@@ -9,6 +9,7 @@ import dev.zacsweers.metrox.viewmodel.assistedMetroViewModel
 import eu.kanade.presentation.browse.ExtensionDetailsScreen
 import eu.kanade.tachiyomi.source.online.HttpSource
 import kotlinx.coroutines.flow.collectLatest
+import mihon.core.navigation.ExtensionDetailsRoute
 import mihon.core.navigation.SourcePreferencesRoute
 import mihon.core.navigation.WebViewRoute
 import mihon.core.navigation.util.LocalBackStack
@@ -61,9 +62,12 @@ fun ExtensionDetailsScreen(pkgName: String) {
 
     LaunchedEffect(Unit) {
         viewModel.events.collectLatest { event ->
-            if (event is ExtensionDetailsEvent.Uninstalled) {
+            // KMK --> Pop only this screen, and only while it is still the one on top:
+            // an event pop racing a back-press used to remove whatever was underneath.
+            if (event is ExtensionDetailsEvent.Uninstalled && backStack.lastOrNull() is ExtensionDetailsRoute) {
                 backStack.removeLastOrNull()
             }
+            // KMK <--
         }
     }
 }

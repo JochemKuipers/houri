@@ -66,7 +66,16 @@ class ExtensionDetailsViewModel(
                     .map { it.firstOrNull { extension -> extension.pkgName == pkgName } }
                     .collectLatest { extension ->
                         if (extension == null) {
-                            _events.send(ExtensionDetailsEvent.Uninstalled)
+                            // KMK --> The manager's map starts empty and is filled asynchronously,
+                            // so a null on the first emission means "not loaded yet", not
+                            // "uninstalled". Only report an uninstall after one was actually
+                            // seen; reporting the load race popped the screen the user had just
+                            // opened, and a back-press in the same window then popped the root
+                            // and crashed NavDisplay ("backstack cannot be empty").
+                            if (state.value.extension != null) {
+                                _events.send(ExtensionDetailsEvent.Uninstalled)
+                            }
+                            // KMK <--
                             return@collectLatest
                         }
                         mutableState.update { state ->

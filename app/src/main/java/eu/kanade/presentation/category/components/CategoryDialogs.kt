@@ -212,7 +212,10 @@ fun CreateSubcategoryDialog(
         },
         title = { Text(text = stringResource(KMR.strings.create_subcategory_title)) },
         text = {
-            Column {
+            // KMK --> Scrollable: the name field plus the role picker's five rows overflow a
+            // fixed-height AlertDialog on a small screen and pushed the buttons off.
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                // KMK <--
                 OutlinedTextField(
                     value = name,
                     onValueChange = { name = it },
@@ -318,6 +321,9 @@ private fun SubcategorySourceRow(
             text = label,
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 2,
+            // KMK --> Space after the radio: without it the label started at the radio's edge.
+            modifier = Modifier.padding(start = MaterialTheme.padding.small),
+            // KMK <--
         )
     }
 }
@@ -381,7 +387,10 @@ fun CategoryCreateDialog(
         },
         text = {
             // SY -->
-            Column {
+            // KMK --> Scrollable: with the subcategory role picker the form outgrows a
+            // fixed-height AlertDialog.
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                // KMK <--
                 extraMessage?.let { Text(it) }
                 // SY <--
 
@@ -622,13 +631,10 @@ fun ChangeCategoryDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
             ) {
                 // KMK -->
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    placeholder = { Text(stringResource(KMR.strings.category_manager_search)) },
-                    leadingIcon = { Icon(imageVector = Icons.Outlined.Search, contentDescription = null) },
-                    singleLine = true,
+                CategorySearchField(
+                    query = searchQuery,
+                    onQuery = { searchQuery = it },
+                    placeholder = KMR.strings.category_manager_search,
                 )
                 // KMK --> The dropdown owns the full width and the collapse pair sits on its own
                 // end-aligned line, mirroring the Edit Categories layout: sharing one row would

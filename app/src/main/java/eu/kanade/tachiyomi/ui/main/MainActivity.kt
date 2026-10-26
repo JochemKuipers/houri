@@ -14,13 +14,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -67,7 +60,6 @@ import androidx.navigation3.runtime.result.LocalResultEventBus
 import androidx.navigation3.runtime.result.ResultEventBus
 import androidx.navigation3.runtime.result.rememberResultEventBus
 import androidx.navigation3.runtime.result.rememberResultEventBusNavEntryDecorator
-import androidx.navigation3.scene.Scene
 import androidx.navigation3.ui.NavDisplay
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.connections.service.ConnectionsPreferences
@@ -87,7 +79,6 @@ import eu.kanade.presentation.components.SyncingBannerBackgroundColor
 import eu.kanade.presentation.components.UpdatingBannerBackgroundColor
 import eu.kanade.presentation.more.settings.screen.ConfigureExhDialog
 import eu.kanade.presentation.more.settings.screen.about.WhatsNewDialog
-import eu.kanade.presentation.util.UiMotion
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.BackupRestoreStatus
 import eu.kanade.tachiyomi.data.LibraryUpdateStatus
@@ -159,6 +150,9 @@ import mihon.core.navigation.util.rememberOverlaySheetSceneStrategy
 import mihon.core.navigation.util.rememberTopLevelBackStack
 import mihon.core.navigation.util.rememberTwoPaneSettingsSceneStrategy
 import mihon.presentation.core.util.isTabletUi
+import soup.compose.material.motion.animation.materialSharedAxisXIn
+import soup.compose.material.motion.animation.materialSharedAxisXOut
+import soup.compose.material.motion.animation.rememberSlideDistance
 import tachiyomi.core.common.Constants
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.Preference
@@ -403,14 +397,42 @@ class MainActivity : BaseActivity() {
                 ) { contentPadding ->
                     // Consume insets already used by app state banners
                     Box {
-                        // Shows current screen
+                        // KMK --> Upstream's materialSharedAxisX (soup motion library) replaces the
+                        // Voyager-style slideInHorizontally + fadeIn pair: the shared-axis slide
+                        // runs as a graphicsLayer translation, where the old pair re-drew both
+                        // screens every frame and dropped frames on low-end devices.
+                        val slideDistance = rememberSlideDistance()
                         NavDisplay(
                             backStack = backStack,
                             onBack = { backStack.removeLastOrNull() },
                             sceneStrategies = listOf(twoPaneStrategy, overlaySheetSceneStrategy),
-                            transitionSpec = screenTransition(forward = true),
-                            popTransitionSpec = screenTransition(forward = false),
-                            predictivePopTransitionSpec = { screenTransition(forward = false)() },
+                            transitionSpec = {
+                                materialSharedAxisXIn(
+                                    forward = true,
+                                    slideDistance = slideDistance,
+                                ) togetherWith materialSharedAxisXOut(
+                                    forward = true,
+                                    slideDistance = slideDistance,
+                                )
+                            },
+                            popTransitionSpec = {
+                                materialSharedAxisXIn(
+                                    forward = false,
+                                    slideDistance = slideDistance,
+                                ) togetherWith materialSharedAxisXOut(
+                                    forward = false,
+                                    slideDistance = slideDistance,
+                                )
+                            },
+                            predictivePopTransitionSpec = {
+                                materialSharedAxisXIn(
+                                    forward = false,
+                                    slideDistance = slideDistance,
+                                ) togetherWith materialSharedAxisXOut(
+                                    forward = false,
+                                    slideDistance = slideDistance,
+                                )
+                            },
                             entryDecorators = listOf(
                                 rememberSaveableStateHolderNavEntryDecorator(),
                                 rememberViewModelStoreNavEntryDecorator(),
@@ -907,18 +929,6 @@ class MainActivity : BaseActivity() {
         const val INTENT_SEARCH_FILTER = "filter"
     }
 }
-
-// KMK --> Same motion design the Voyager ScreenTransition used, scoped to the NavDisplay's
-// Scene transitions: slide + fade with EMPHASIZED easing, direction keyed by push vs pop.
-private fun screenTransition(forward: Boolean): AnimatedContentTransitionScope<Scene<NavKey>>.() -> ContentTransform = {
-    val enterOffset: (Int) -> Int = { if (forward) it / 6 else -it / 6 }
-    val exitOffset: (Int) -> Int = { if (forward) -it / 6 else it / 6 }
-    slideInHorizontally(tween(UiMotion.SCREEN_ENTER, easing = UiMotion.EMPHASIZED), enterOffset) +
-        fadeIn(tween(UiMotion.SCREEN_ENTER, easing = UiMotion.EMPHASIZED)) togetherWith
-        slideOutHorizontally(tween(UiMotion.SCREEN_EXIT, easing = UiMotion.EMPHASIZED), exitOffset) +
-        fadeOut(tween(UiMotion.SCREEN_EXIT, easing = UiMotion.EMPHASIZED))
-}
-// KMK <--
 
 // Splash screen — pineapple spin burst visible during exit, so duration
 // allows at least one full 650ms burst loop.

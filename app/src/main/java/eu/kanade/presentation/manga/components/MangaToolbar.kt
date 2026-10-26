@@ -26,6 +26,7 @@ import eu.kanade.tachiyomi.util.system.isDebugBuildType
 import kotlinx.collections.immutable.persistentListOf
 import mihon.app.di.globalAppGraph
 import mihon.core.navigation.BrowseSourceRoute
+import mihon.core.navigation.HomeRoute
 import mihon.core.navigation.MangaRoute
 import mihon.core.navigation.SourceFeedRoute
 import mihon.core.navigation.util.LocalBackStack
@@ -89,7 +90,13 @@ fun MangaToolbar(
     val backStack = LocalBackStack.current
     fun onHomeClicked(): Boolean {
         backStack.popUntil { screen ->
-            screen is SourceFeedRoute || screen is BrowseSourceRoute
+            // KMK --> HomeRoute is the floor: without it a stack holding neither route
+            // (e.g. a deep-linked manga's Related tab) was popped to empty and
+            // crashed NavDisplay.
+            screen is HomeRoute ||
+                // KMK <--
+                screen is SourceFeedRoute ||
+                screen is BrowseSourceRoute
         }
         return true
     }

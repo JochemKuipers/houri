@@ -8,6 +8,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -18,6 +19,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import tachiyomi.domain.achievement.model.Achievement
 import tachiyomi.domain.achievement.model.AchievementTier
 
@@ -128,10 +130,13 @@ fun Modifier.tierAnimatedBackground(
     isSecret: Boolean,
     animationsEnabled: Boolean,
     progress: Float,
+    // KMK --> The gradient paints behind a rounded card; without a shape of its own it filled
+    // the card's rectangular bounds and showed sharp corners over every rounded one.
+    shape: RoundedCornerShape = RoundedCornerShape(12.dp),
 ): Modifier = composed {
     if (!isUnlocked || !animationsEnabled) return@composed this
     val brush = remember(tier, isNegative, isSecret, progress) {
         AchievementTierAnimation.brushForTier(tier, isNegative, isSecret, progress)
     }
-    if (brush == null) this else this.background(brush)
+    if (brush == null) this else this.background(brush, shape)
 }

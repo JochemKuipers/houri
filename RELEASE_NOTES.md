@@ -48,6 +48,9 @@ files moved. See .github/scripts/release_notes.py.
   are resolved once per process instead of per page, EXIF rotation is a straight-line pass
   instead of a per-pixel formula dispatch, and two per-page lookups (WebGPU availability, page
   identity keys) are cached.
+- **Import books**: the file picker now offers only EPUBs — plus the generic
+  `application/octet-stream` spelling most file managers give an `.epub`, so folders do not
+  appear empty — instead of every file on the device.
 
 ### Fix
 - **Rotation**: rotating the device (or rotating in the reader and then leaving a chapter) no
@@ -78,3 +81,8 @@ files moved. See .github/scripts/release_notes.py.
   "Failed to determine if … is child of …" error — and it now disappears from the chapter list on
   the first delete instead of needing a second attempt. The post-delete refresh used to race the
   file deletion and open the file mid-delete.
+- **Find duplicates**: the toolbar no longer overlaps the list — its rows and the "Find duplicates"
+  title used to stack on top of each other in the screen's top-left corner, leaving the entries
+  unreadable underneath.
+- **Achievements**: unlocked cards' animated gradient now follows the card's rounded corners
+  instead of painting sharp square corners that stuck out past every other card in the grid.

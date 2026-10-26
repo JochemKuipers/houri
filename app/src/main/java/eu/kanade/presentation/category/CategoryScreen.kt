@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import eu.kanade.presentation.category.components.ALL_CATEGORY_SORT_MODES
 import eu.kanade.presentation.category.components.CategoryFloatingActionButton
 import eu.kanade.presentation.category.components.CategoryListItem
+import eu.kanade.presentation.category.components.CategorySearchField
 import eu.kanade.presentation.category.components.CategorySortModeDropdown
 import eu.kanade.presentation.category.components.ReaderModePickerDialog
 import eu.kanade.presentation.category.components.TrackStatusPickerDialog
@@ -326,13 +327,10 @@ private fun CategoryContent(
     ) {
         // KMK -->
         item(key = "category-manager-controls") {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = onSearchQuery,
-                modifier = Modifier.fillMaxWidth().animateItem(),
-                placeholder = { Text(stringResource(KMR.strings.category_manager_search)) },
-                leadingIcon = { Icon(imageVector = Icons.Outlined.Search, contentDescription = null) },
-                singleLine = true,
+            CategorySearchField(
+                query = searchQuery,
+                onQuery = onSearchQuery,
+                placeholder = KMR.strings.category_manager_search,
             )
         }
         item(key = "category-manager-sort") {
