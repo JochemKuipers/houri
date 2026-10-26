@@ -72,6 +72,10 @@ class LocalSource(
     // SY -->
     private val allowHiddenFiles: () -> Boolean,
     // SY <--
+    // KMK -->
+    /** Whether the reader wants a book's declared cover prepended as its first page. */
+    private val wantsCoverPage: () -> Boolean = { true },
+    // KMK <--
 ) : Source,
     UnmeteredSource,
     TextSource,
@@ -93,7 +97,9 @@ class LocalSource(
      * Constructed lazily because it owns the archive leases and nothing should open one until a book
      * is actually read — which, for most users of the manga library, is never.
      */
-    private val books: LocalEpubTextAdapter by lazy { LocalEpubTextAdapter(context, fileSystem) }
+    private val books: LocalEpubTextAdapter by lazy {
+        LocalEpubTextAdapter(context, fileSystem, wantsCoverPage)
+    }
 
     override val textCapabilities: TextCapabilities =
         // SEARCH rides on this source implementing `TextSearchSource` (see `searchInChapter`);

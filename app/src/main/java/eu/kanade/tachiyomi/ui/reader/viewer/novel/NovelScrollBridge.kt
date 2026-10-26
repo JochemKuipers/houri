@@ -167,6 +167,23 @@ object NovelScrollBridge {
     /** Current scroll position as a fraction of the scrollable range, 0..1. */
     const val FRACTION: String = "(window.KmkReader && window.KmkReader.fraction()) || 0"
 
+    /**
+     * Which way the document's flow runs: `v` for the ordinary vertical scroll, `h` when the
+     * content extends horizontally - a vertical-writing (縦書き) or right-to-left book, where the
+     * document grows leftward and only a horizontal scroll moves it.
+     *
+     * The host asks once per document, after layout, because the answer decides which axis a
+     * tap's page-step scrolls along - and it is not the host's to guess: the publisher's own
+     * stylesheet can put a Latin typeset preface in an otherwise vertical novel, and the document
+     * itself is the only thing that knows which mode it ended up in after the reader's
+     * tri-state `verticalWriting` (which may be "follow the book") was applied.
+     */
+    const val FLOW: String =
+        "(function(){var d=document.documentElement;if(!d)return 'v';" +
+            "var cs;try{cs=window.getComputedStyle(d);}catch(e){return 'v';}" +
+            "var wm=cs.writingMode||'';var dir=cs.direction||'ltr';" +
+            "return (wm.indexOf('vertical')===0||dir==='rtl')?'h':'v';})()"
+
     /** Restores a previously reported fraction. Ignored until the document has laid out. */
     const val SET_FRACTION: String =
         "(function(){var r=window.KmkReader;if(!r)return false;r.setFraction(%f);return true;})()"

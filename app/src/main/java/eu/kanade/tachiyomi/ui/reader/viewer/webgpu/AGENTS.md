@@ -62,7 +62,7 @@ currently holds, and "nothing renders at all" is almost always the device, not t
 | Thread | Name | What runs there |
 |---|---|---|
 | Render | `WebGPU-Render-Thread` | `WebGpuRenderer.dispatcher`. `render()`, `renderPass`, `buildSpreadPage`, tile grids. Guarded by `WebGpuRenderer.mutex`. |
-| Decode | `WebGpuViewer-Decode` | `decodeExecutor`. Single thread: one page at a time, all decodes/preloads/byte transforms. |
+| Decode | `WebGpuViewer-Decode-N` | `decodeExecutor`. **A pool** (`decodeParallelism()`, 1–2 workers): each worker owns the page it popped under `lock`. All decodes/preloads/byte transforms; the native upscale stage additionally serializes on `byteTransformMutex`. |
 | Main | `MainScope` | stuck sweep, progress spinner, device-loss handler, `onTrimMemory` → `shrinkCacheOnTrim`, and the **memory monitor** (the fourth coroutine, `startMemoryMonitor`). |
 | Default | — | chapter preload/retry only. |
 
@@ -73,6 +73,15 @@ The viewer's `lock` (`Object`) covers `pageCache`, `decodeQueue`, `stuckRecords`
 `currentPage` swap. It does **not** cover the shell fields, which is why those are volatile.
 Never call `cleanup()`-bearing code while holding it — `releasePageResources` is deliberately
 lock-free for exactly that reason.
+
+**The decode pool preserves the single-flight invariant.** The one invariant the queue protects
+is "a page in a state `queueForDecode` treats as in-flight has a worker actually on it": the pop
+happens under `lock`, so N workers pop N *distinct* pages, and every worker exit path (including
+the plain returns `decodeReaderPage` takes) resets its own page. What the pool changes is only
+throughput: a slow decode no longer blocks the prioritized current page queued behind it. The
+in-flight trace registry is `activeDecodes` (one entry per worker) — **not** a single slot; the
+stall watchdog watches every entry. Small/TINY devices run one worker on purpose (two concurrent
+decodes double the transient bitmap spike the memory budget exists to prevent).
 
 ## PAGE STATE MACHINE
 
@@ -691,6 +700,22 @@ line, for instance, does not appear anywhere in the current tree.
   visible for exactly the frames the first upload takes. `renderSnapshot`'s `forEachImage` now
   paints the slot's underlay before checking what content exists. Same family as the two seam
   landmines above; the extent is still the **slot**.
+- **The 2026-10 seam root cause: two anchors for one boundary.** Every earlier seam fix reduced
+  the line's frequency because each addressed a *painter* for the boundary row, while the row kept
+  going unpainted. The actual defect: `TileRenderer`'s continuous placement rounds the shared
+  camera anchor (`snapX`/`snapY`) and hangs each grid's clip rect off it, but everything laid out
+  in `renderSnapshot` — the underlay rect, `renderFast`'s image quad, a `Render` page's slot fill,
+  the fade veil — hung off the **raw, unrounded** anchor. The two disagree by up to half a pixel;
+  the pixel-center rasterization rule hands the boundary row to *neither* page whenever a pixel
+  centre falls in the disagreement window, and the underlay shows through — whose colour is the
+  reader background whenever the theme is not "automatic background", i.e. a thin black line
+  between two white pages. It only fired for a **mixed** boundary pair (tiled vs. fast content
+  while a neighbour decoded, or decoded vs. placeholder), which is why it read as sporadic and
+  shrank with every fix that added another painter. `renderSnapshot` now rounds the anchor once,
+  with the same `kotlin.math.round` over the same expression `continuousAnchor` uses, so every
+  path claims bit-identical boundaries and the rasterizer's own rule gives each boundary row to
+  exactly one page. **Rule: continuous content is placed from the snapped anchor, never the raw
+  one — a second derivation of the same boundary is the seam, whatever paints it.**
 - **Double-tap opt-out is one flag with a tied shadow** (port of upstream `34fb12b` in the
   library's `ImageViewerState.kt` KMK island). The app sets `doubleTapZoomEnabled`
   (`WebGpuViewer`/`WebGpuViewerContinuous`, from `WebGpuConfig.resolveDoubleTapZoom()`), and the
@@ -776,7 +801,7 @@ line, for instance, does not appear anywhere in the current tree.
 | residency, eviction, split reconciliation, render walk | `WebGpuPageCache.kt` |
 | what the worker owes a page + the stuck ladder | `WebGpuDecodeQueue.kt` |
 | bytes → GPU image for one page | `WebGpuDecodePipeline.kt` |
-| the three long-lived coroutines + stall watchdog | `WebGpuViewerWorkers.kt` |
+| the long-lived coroutines (decode worker pool, liveness sweep, progress spinner) + stall watchdog | `WebGpuViewerWorkers.kt` |
 | progress / error / transition placeholders | `WebGpuPlaceholderPages.kt` |
 | spread pairing + height-match maths | `WebGpuSpread.kt`, `WebGpuSpreadHeightMatch.kt` |
 | preference → filter/transition wiring | `WebGpuViewerImageState.kt`, `WebGpuConfig.kt` |

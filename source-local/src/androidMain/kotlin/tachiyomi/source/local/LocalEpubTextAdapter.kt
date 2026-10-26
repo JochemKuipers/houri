@@ -50,6 +50,17 @@ import java.util.concurrent.ConcurrentHashMap
 internal class LocalEpubTextAdapter(
     private val context: Context,
     private val fileSystem: LocalSourceFileSystem,
+    // KMK -->
+    /**
+     * Whether the reader wants a book's declared cover prepended as its first page.
+     *
+     * A lambda read at enumeration time, for the same reason the manga half reads its toggles the
+     * same way: the answer can change while a source instance lives, and the source must not
+     * outlive a setting. The app combines both of the reader's answers here - the cover toggle
+     * and "show illustrations", since a text-only reading has no use for a cover image.
+     */
+    private val wantsCoverPage: () -> Boolean = { true },
+    // KMK <--
 ) {
 
     /**
@@ -63,9 +74,14 @@ internal class LocalEpubTextAdapter(
         bookProvider = { chapter -> openEpub(chapter) },
     )
 
-    private val text = EpubTextSource { chapter ->
-        resources.readerFor(chapter) ?: openEpub(chapter)?.let { resources.adopt(chapter.url, it) }
-    }
+    private val text = EpubTextSource(
+        readerFor = { chapter ->
+            resources.readerFor(chapter) ?: openEpub(chapter)?.let { resources.adopt(chapter.url, it) }
+        },
+        // KMK -->
+        wantsCoverPage = wantsCoverPage,
+        // KMK <--
+    )
 
     /** What a book reader can rely on. */
     val textCapabilities: TextCapabilities = TextCapabilities.EPUB.copy(SEARCH = true)

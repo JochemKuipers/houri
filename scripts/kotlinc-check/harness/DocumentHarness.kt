@@ -4,6 +4,7 @@
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelContinuous
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelDocument
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelInline
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelPageLayout
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelReaderTheme
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelScrollBridge
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
@@ -194,6 +195,58 @@ fun main() {
 
     check("fragment extracted", NovelContinuous.bodyFragment("<html><body>HELLO</body></html>"), "HELLO")
     check("fragment without a body is itself", NovelContinuous.bodyFragment("just text"), "just text")
+
+    // ---------------- paged mode: a different document, not a different stylesheet call ----------------
+    // A paged document carries the column box and the KmkPaged bridge beside the scroll bridge;
+    // a continuous one carries neither. The reader mode is a layout, and this is the whole of it.
+    val paged = NovelDocument.build(
+        REAL_SPINE_ITEM,
+        t,
+        BASE,
+        pageMode = NovelPageLayout.PageMode.PAGED,
+    )
+    contains("paged stylesheet injected", paged, "kmk-paged")
+    contains("paged bridge installed", paged, "window.KmkPaged")
+    absent("continuous document has no paged stylesheet", built, "kmk-paged")
+    absent("continuous document has no paged bridge", built, "window.KmkPaged")
+    checkTrue(
+        "paged columns clip and fill in order",
+        paged.contains("column-fill: auto") && paged.contains("overflow: hidden"),
+    )
+    // The paged box's html/body overrides must win by source order against the typography's own
+    // !important group - the same rule that puts the typography after the publisher.
+    checkTrue(
+        "paged stylesheet after the typography",
+        paged.indexOf("kmk-paged") > paged.indexOf("kmk-typography"),
+    )
+    checkTrue(
+        "paged bridge inside a script element",
+        paged.indexOf("<script>") < paged.indexOf("window.KmkPaged") &&
+            paged.indexOf("window.KmkPaged") < paged.indexOf("</script>"),
+    )
+    val double = NovelDocument.build(
+        REAL_SPINE_ITEM,
+        t,
+        BASE,
+        pageMode = NovelPageLayout.PageMode.DOUBLE,
+    )
+    contains("double-page build is also paginated", double, "window.KmkPaged")
+
+    // The host-side parsers: the bridge's answers arrive as the JSON encoding of the script's
+    // return value, and "cannot parse" must degrade to "do nothing", never to a wrong action.
+    checkTrue("layout parsed", NovelPageLayout.parseLayout("""{"n":12,"l":1,"w":1}""")?.screens == 12)
+    checkTrue("layout reports leftward forward", NovelPageLayout.parseLayout("""{"n":12,"l":1,"w":1}""")?.forwardIsLeft == true)
+    checkTrue("layout reports vertical writing", NovelPageLayout.parseLayout("""{"n":2,"l":1,"w":1}""")?.verticalWriting == true)
+    checkTrue("absent layout is null", NovelPageLayout.parseLayout("null") == null)
+    checkTrue("garbage layout is null", NovelPageLayout.parseLayout("SyntaxError") == null)
+    val turn = NovelPageLayout.parseTurn("""{"m":1,"p":3,"n":10,"s":0,"b":0}""")
+    checkTrue("turn parsed", turn != null && turn.moved && turn.screen == 3 && turn.screens == 10)
+    check("turn fraction", turn?.fraction ?: -1f, 3f / 9f)
+    checkTrue("unmoved turn is a document edge", NovelPageLayout.parseTurn("""{"m":0,"p":9,"n":10,"s":1,"b":0}""")?.moved == false)
+    checkTrue("absent turn is null", NovelPageLayout.parseTurn("null") == null)
+    check("fraction parsed", NovelPageLayout.parseFraction("0.25") ?: -1f, 0.25f)
+    checkTrue("absent fraction is null (NaN arrives JSON-encoded as null)", NovelPageLayout.parseFraction("null") == null)
+
 
     // A section's own <style> has to travel with it. Dropped, an appended section is laid out in the
     // *previous* section's type - a different line count for the same text, so the section is not the

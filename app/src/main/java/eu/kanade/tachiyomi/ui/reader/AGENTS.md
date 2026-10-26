@@ -47,6 +47,56 @@ model, the page state machine, the stuck-page ladder, the device-recovery rule (
 consumed and cannot be reused), a symptom→cause table, and the landmines that have already cost
 an incident each.
 
+## The novel reader's page modes: continuous, paged, double (KMK)
+
+The viewer has three layouts, one setting (`pref_novel_page_mode`): **continuous** (the original
+scroll, sections appended ahead of the reader), **paged** (one column per screen, turned like a
+paper book) and **double** (two columns per screen, the open spread).
+
+Pagination is CSS multi-column inside the same WebView: `body { overflow: hidden; height: <viewport> }`
+plus `column-count` splits the flow into column boxes, and the **body itself becomes the scroll
+container** — `overflow: hidden` boxes are script-scrollable but not gesture-scrollable, which is
+exactly the division a paged book wants. `KmkPaged` (in `NovelPageLayout.kt`) is installed only in
+paged documents; it measures the reader's computed margins, sizes the column box, and exposes a
+*normalised* position where forward is always `+1` — the sign of `scrollLeft` is the bridge's
+business, because a vertical-writing (縦書き) or RTL book lays columns right-to-left and scrolls
+toward **negative** offsets. The host never learns the sign, only `pagedForwardIsLeft` for the tap
+zones.
+
+Everything the continuous layer does is inert in a paged document: no probe (nothing scrolls for
+it to watch), no appends (a reflowed column box would renumber the reader's page), no stuck-edge
+tracking. Position arrives from the turns themselves; read-ahead warms the next document's markup
+when the reader nears the last page. A mode change re-renders the open document, carrying the
+reader's place as the document fraction — the one quantity that survives a reflow.
+
+**The document build runs on `Dispatchers.Default`.** The inliner base64-encodes every plate and
+stylesheet a document reads — megabytes of string surgery on an illustrated book — and building
+on the main thread cost a visible frame hitch on every turn. `showDocument` reads, inlines and
+builds in the background (guarded by the request token after each suspension), and only the
+`loadDataWithBaseURL` hop and the state the reader sees land on main. The continuous appends build
+their fragments the same way, and `readAhead` warms one document past wherever the reader is
+heading.
+
+**The flow direction is the document's answer.** `NovelScrollBridge.FLOW` reports, after layout,
+whether the flow runs horizontally (vertical writing or RTL). Continuous mode's `step()` scrolls
+the matching axis — a vertical-writing book scrolled only vertically never moved, so every tap used
+to read as "the document's edge" and skipped a whole section at a time — and the tap zones flip
+with it (`forwardOnRight`). Paged mode gets the same fact from its bridge at setup.
+
+## The cover as a first page (KMK)
+
+Most EPUBs keep the cover out of the spine — it lives in the package metadata (`cover-image` or the
+legacy `<meta name="cover">`), so a spine-walking reader never shows it. `EpubTextSource` (in
+`core/archive`) prepends a synthesized cover page at index 0 when the reader's `wantsCoverPage`
+lambda says so (default **on**; the app combines it with "show illustrations", since a text-only
+reading has no use for a plate), the book declares a cover, and the spine's first document does not
+already embed it. Every document after it shifts up by one — search hits, positions and the page
+list all speak the same shifted coordinates, and `NovelProgress.Position` carries the document's
+**URL** beside its index so a stored position still resolves after the list was renumbered. The
+cover's markup is a complete document naming the cover image by archive path, resolved through the
+archive-root base; the reader's injected stylesheet styles it (`body.kmk-cover`,
+`img#kmk-cover-img` — emitted in every document, inert everywhere but the cover).
+
 ## Novel / text reader (`viewer/novel/`, KMK)
 
 Renders text chapters (EPUB, web novel) in a WebView rather than in a native text widget. Chosen
@@ -58,17 +108,18 @@ The reader's preferences are layered on as an injected stylesheet; the document 
 |------|---------|
 | `NovelWebViewer.kt` | The WebView, taps and keys, document/chapter turning, the continuous window's orchestration, and the `ViewerProvider` that selects it |
 | `NovelDocument.kt` | Turns one spine item's XHTML into a document the engine can be handed |
+| `NovelPageLayout.kt` | The book as discrete pages: the column CSS, the `KmkPaged` bridge script, and the pure parsers for its replies. Pure |
 | `NovelContinuous.kt` | The book as one continuous scroll: segment markers, the probe, append/prepend/trim/seek scripts. Pure strings |
 | `NovelInline.kt` | Rewrites a document's images and stylesheets into `data:` URIs. Pure |
 | `NovelFonts.kt` | Fonts the reader imported, stored and offered beside the built-in families |
 | `NovelBuiltinFonts.kt` | The curated variable fonts bundled in `app/src/main/assets/novel-fonts/`, grouped by kind. No Android imports, so it is unit-testable |
-| `NovelScrollBridge.kt` | `window.KmkReader` — how the host measures and scrolls the document, and `quoteForJs` |
+| `NovelScrollBridge.kt` | `window.KmkReader` — how the host measures and scrolls the document — the `FLOW` direction probe, and `quoteForJs` |
 | `NovelNavigation.kt` | Contents rows and search results: the pure mapping from source models to renderable ones |
 | `NovelReaderScreenModels.kt` | `NovelTocScreenModel` + `NovelSearchViewModel` |
 | `NovelTypography.kt` | The settings value. No Android imports, so it is unit-testable |
 | `NovelReaderTheme.kt` | The general reader theme's background, as the book's stylesheet can use it |
-| `NovelTypographyCss.kt` | Turns that value into a stylesheet; `styleTag` escapes `</` |
-| `NovelProgress.kt` | Reading position and percentage progress |
+| `NovelTypographyCss.kt` | Turns that value into a stylesheet; `styleTag` escapes `</`; also styles the synthesized cover page |
+| `NovelProgress.kt` | Reading position and percentage progress. A `Position` carries the document's URL beside its index, so a restore survives the list being renumbered |
 
 The two sheets themselves are in `presentation/reader/NovelReaderDialogs.kt`, beside the rest of the
 reader's dialogs.
@@ -454,9 +505,17 @@ spellings are read out of the OPF is in `core/archive/AGENTS.md`.
 - Do not give a text preference a non-null `false` default. `null` = follow the publisher; `false` =
   force it, and it cannot then be unforced.
 - Do not re-run `loadDataWithBaseURL` to apply a typography change — it drops the scroll position on
-  every slider drag. Swap the stylesheet in the live DOM (`liveTypographyJs`).
+  every slider drag. Swap the stylesheet in the live DOM (`liveTypographyJs`). A *page-mode* change
+  is the one exception: it is a different layout, not a style, and it re-renders deliberately.
+- Do not build a novel document's markup on the main thread. The inliner base64-encodes every plate
+  the document reads; `showDocument` reads, inlines and builds on `Dispatchers.Default` and only the
+  load hop lands on main. A new cost in that path belongs behind the same `withContext`.
+- Do not decide a novel document's flow direction from the reader's own settings — a book's
+  stylesheet has as much say as the tri-state does. Ask the laid-out document
+  (`NovelScrollBridge.FLOW`, or the paged bridge's setup reply) and act on its answer.
 - Do not load a novel document at `EpubResourceReader.BASE_URL`. That is the archive root and is only
-  right for a spine item that already sits there; take the base from the page.
+  right for a spine item that already sits there; take the base from the page. (The synthesized cover
+  page is the one deliberate exception: it is built to resolve against the root.)
 - Do not let a viewer provider return null for a chapter it is the only renderer for. That is
   not a fallback, it is handing the reader to something that cannot display the content.
 - Do not add a method to `TextSource` / `TextResourceSource` / `TextPage`. Extensions implement them

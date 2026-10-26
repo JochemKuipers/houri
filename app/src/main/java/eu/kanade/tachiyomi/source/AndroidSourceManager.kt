@@ -111,6 +111,15 @@ class AndroidSourceManager(
                                     // SY -->
                                     sourcePreferences.allowLocalSourceHiddenFolders()::get,
                                     // SY <--
+                                    // KMK --> The book half asks this at enumeration time, so a
+                                    // cover toggle applies to the next chapter opened rather than
+                                    // to sources created after it. Both reader answers are
+                                    // combined here: a text-only reading has no use for a cover.
+                                    run {
+                                        val novelPrefs = globalAppGraph.novelTypographyPreferences
+                                        { novelPrefs.coverFirst.get() && novelPrefs.showImages.get() }
+                                    },
+                                    // KMK <--
                                 ),
                             ),
                         ).apply {

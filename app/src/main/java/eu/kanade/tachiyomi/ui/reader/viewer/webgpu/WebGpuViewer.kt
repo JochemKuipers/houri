@@ -60,6 +60,15 @@ private const val DEVICE_RECOVERY_ATTEMPTS = 3
 private const val DEVICE_RECOVERY_BACKOFF_MS = 250L
 
 /**
+ * Ceiling on how many decode workers run at once; the live count is [WebGpuViewer.decodeParallelism].
+ *
+ * Two is the whole useful range: the queue is LIFO on the reader's demand, so a second worker
+ * covers "the page on screen is stuck behind one slow decode" without turning preloading into a
+ * bandwidth fight.
+ */
+private const val DECODE_WORKER_LIMIT = 2
+
+/**
  * Smallest width a page or placeholder may claim.
  *
  * The GPU rejects a texture narrower than this (gralloc 0x3b), and a placeholder that reserved less
@@ -184,11 +193,67 @@ open class WebGpuViewer(
     @Volatile
     internal var isDestroyed = false
 
-    // Dedicated thread for decode worker to avoid blocking Dispatchers.Default pool
-    private val decodeExecutor = Executors.newSingleThreadExecutor { r ->
-        Thread(r, "WebGpuViewer-Decode").apply { isDaemon = true }
+    // Dedicated thread pool for the decode workers to avoid blocking Dispatchers.Default pool.
+    // KMK --> Sized for the worker count (see [decodeParallelism]); threads are created lazily by
+    // the pool, so a device that runs a single worker never pays for the second thread.
+    private val decodeExecutor = Executors.newFixedThreadPool(DECODE_WORKER_LIMIT) { r ->
+        decodeThreadsCreated++
+        Thread(r, "WebGpuViewer-Decode-$decodeThreadsCreated").apply { isDaemon = true }
     }
     internal val decodeDispatcher = decodeExecutor.asCoroutineDispatcher()
+
+    /** Names the pool threads; only ever touched under the pool's own creation path. */
+    private var decodeThreadsCreated = 0
+
+    /**
+     * The decode worker's single-thread past was a throughput choice, not an invariant: the page
+     * state machine's guarantee is that a page in [PageState.DECODING] has a worker *on it*, and
+     * the queue pop is under [lock], so N workers pop N distinct pages and the guarantee holds
+     * for each. Two workers let a slow decode (a JXL, a big webtoon strip, a network-read stall)
+     * stop blocking the page the reader is actually looking at, which was the common case the
+     * single thread could not help: the prioritized current page sat queued behind whatever the
+     * worker was already deep into.
+     *
+     * Small devices stay single-threaded on purpose. Two concurrent decodes hold two transient
+     * byte buffers and two decoded bitmaps; on a TINY/SMALL device that is exactly the spike the
+     * memory budget exists to prevent, and the decode throughput there is bounded by memory, not
+     * by threads.
+     */
+    internal fun decodeParallelism(): Int =
+        if (memoryBudget.deviceTier <= WebGpuMemoryBudget.DeviceTier.SMALL) 1 else DECODE_WORKER_LIMIT
+
+    /**
+     * The traces for the decodes currently in flight, one per worker.
+     *
+     * The single-slot [DecodeTrace] this replaces assumed one decode at a time; with a worker
+     * pool the watchdog has to see *every* page that never returns, or a stall on one worker is
+     * invisible while the other keeps the reader alive. Copy-on-write because the access pattern
+     * is one add and one remove per decode against a snapshot read once a second by the watchdog
+     * - a synchronized list would take its monitor on every read, and the watchdog holds no locks
+     * on purpose (the worker it is watching is usually holding them).
+     */
+    private val activeDecodes = java.util.concurrent.CopyOnWriteArrayList<DecodeTrace>()
+
+    internal fun registerActiveDecode(trace: DecodeTrace) {
+        activeDecodes.add(trace)
+    }
+
+    internal fun unregisterActiveDecode(trace: DecodeTrace) {
+        activeDecodes.remove(trace)
+    }
+
+    internal fun snapshotActiveDecodes(): List<DecodeTrace> = activeDecodes.toList()
+
+    /**
+     * Serializes the native byte-transform stage (display upscale) across workers.
+     *
+     * The upscaler's inference sessions are shared viewer-wide and were only ever exercised by one
+     * thread; concurrent inference into the same session is not a contract the engine states, and
+     * the transform is the minority of a decode for content that is not being upscaled at all.
+     * One mutex keeps the pool parallel for everything else. A coroutine mutex rather than a
+     * monitor because the transform is a suspend call.
+     */
+    internal val byteTransformMutex = kotlinx.coroutines.sync.Mutex()
 
     // Single lock for all page cache and queue operations
     @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
@@ -240,13 +305,10 @@ open class WebGpuViewer(
      */
     internal val requeryRecords = HashMap<PageKey, RequeryRecord>()
 
-    /**
-     * The page the decode worker is holding, published so the watchdog can report a stall from
-     * outside the worker. A worker stuck in native code cannot report itself, which is the entire
-     * reason this field exists.
-     */
-    @Volatile
-    internal var activeDecode: DecodeTrace? = null
+    // KMK --> The decode pipeline's in-flight trace registry used to be a single
+    // `activeDecode` slot here, assuming one worker; it is now [activeDecodes] + the
+    // register/unregister/snapshot helpers above, one entry per worker.
+    // KMK <--
 
     /**
      * How each page's last decode ended, keyed like [pageCache] - see

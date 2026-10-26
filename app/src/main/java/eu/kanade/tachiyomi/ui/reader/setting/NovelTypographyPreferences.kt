@@ -4,6 +4,8 @@ package eu.kanade.tachiyomi.ui.reader.setting
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelPageLayout
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelPageLayout.PageMode
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelProgress
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
 import kotlinx.coroutines.flow.Flow
@@ -91,6 +93,44 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
 
     val marginBottom: Preference<Float>
         get() = store.getFloat(NovelTypographySettingKeys.MARGIN_BOTTOM.key, NovelTypographySettingKeys.MARGIN_BOTTOM.default)
+
+    // ------------------------------------------------------------ layout
+
+    /**
+     * How the book is laid out: continuous scroll, discrete pages, or a two-column spread.
+     *
+     * Exposed as the page-mode enum rather than the raw int so no caller can store a value the
+     * reader cannot render; out-of-range values (a hand-edited pref, an older backup) resolve to
+     * continuous, which is what the reader did before the setting existed.
+     */
+    val pageMode: PageMode
+        get() = PageMode.fromPreference(
+            store.getInt(
+                NovelTypographySettingKeys.PAGE_MODE.key,
+                NovelTypographySettingKeys.PAGE_MODE.default,
+            ).get(),
+        )
+
+    /**
+     * The raw storage-backed preference behind [pageMode], for change observation.
+     *
+     * The viewer and the settings page both need to *watch* the mode, and `changes()` is a
+     * method on the preference rather than on the projected enum - so the raw handle is the
+     * surface they subscribe to, while every read that *acts* on the value goes through
+     * [pageMode] and can never see an out-of-range ordinal.
+     */
+    val pageModePref: Preference<Int>
+        get() = store.getInt(NovelTypographySettingKeys.PAGE_MODE.key, NovelTypographySettingKeys.PAGE_MODE.default)
+
+    /** Stores [mode] as the preference's ordinal. */
+    fun setPageMode(mode: PageMode) {
+        store.getInt(NovelTypographySettingKeys.PAGE_MODE.key, NovelTypographySettingKeys.PAGE_MODE.default)
+            .set(mode.ordinal)
+    }
+
+    /** Whether a book that declares a cover image opens on it. See [NovelTypographySettingKeys.COVER_FIRST]. */
+    val coverFirst: Preference<Boolean>
+        get() = store.getBoolean(NovelTypographySettingKeys.COVER_FIRST.key, NovelTypographySettingKeys.COVER_FIRST.default)
 
     // ------------------------------------------------------------ tri-state
 

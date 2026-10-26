@@ -774,6 +774,16 @@
     <string name="entry_type_render_as_comic">Render as comic</string>
     <string name="entry_type_render_as_book">Render as book</string>
     <string name="novel_show_images">Show illustrations</string>
+    <!-- KMK: how a book moves - one continuous scroll, discrete pages turned like a paper book,
+         or two columns per screen like an open spread. A change re-renders the open book. -->
+    <string name="novel_page_mode">Reading mode</string>
+    <string name="novel_page_mode_continuous">Continuous scroll</string>
+    <string name="novel_page_mode_paged">Paged</string>
+    <string name="novel_page_mode_double">Two pages</string>
+    <!-- KMK: most EPUBs keep the cover out of the spine, so a reader that only walks the spine
+         never shows it. On by default; skipped when the book's own first page already is the
+         cover. Applies to the next chapter opened. -->
+    <string name="novel_cover_first">Show cover as first page</string>
     <string name="novel_contents_no_reachable">No section of this chapter is listed</string>
     <string name="novel_contents_empty">This book has no table of contents</string>
     <string name="novel_search">Search in chapter</string>

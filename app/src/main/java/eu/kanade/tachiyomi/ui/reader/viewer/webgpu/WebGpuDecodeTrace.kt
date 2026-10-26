@@ -168,12 +168,18 @@ internal fun WebGpuViewer.traceStage(
 }
 
 /**
- * Watches for the decode worker sitting in one stage for too long.
+ * Watches for a decode worker sitting in one stage for too long.
  *
  * The worker cannot report its own stall: it is the thing that is stuck, and its own logging cannot
  * run while it is stuck. So the watch has to come from outside, which is all this is - it reads the
  * published trace fields and reports what it finds. It holds no lock while doing so, because the
  * thing it is watching is usually holding that lock.
+ *
+ * KMK --> The decode worker is a pool now, so every in-flight trace is watched, not just whichever
+ * one a single slot could name. Without this, a stall on the second worker was invisible whenever
+ * the first was healthy enough to keep the reader alive - exactly the misdiagnosis the trace
+ * exists to prevent.
+ * KMK <--
  */
 internal fun WebGpuViewer.startDecodeStallWatchdog() {
     scope.launch {
@@ -182,7 +188,9 @@ internal fun WebGpuViewer.startDecodeStallWatchdog() {
                 delay(DECODE_WATCHDOG_TICK_MS)
                 // A lambda, not a value: reportStallIfDue only invokes it on a tick that actually
                 // reports, so a healthy decode never pays for the lock or the string building.
-                activeDecode?.reportStallIfDue(System.currentTimeMillis(), ::decodeQueueSummary)
+                for (trace in snapshotActiveDecodes()) {
+                    trace.reportStallIfDue(System.currentTimeMillis(), ::decodeQueueSummary)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
@@ -194,7 +202,7 @@ internal fun WebGpuViewer.startDecodeStallWatchdog() {
     }
 }
 
-/** What is queued behind the page being decoded, so a stall reports how much of the chapter is stuck. */
+/** What is queued behind the pages being decoded, so a stall reports how much of the chapter is stuck. */
 private fun WebGpuViewer.decodeQueueSummary(): String {
     val queued = synchronized(lock) { decodeQueue.map { "${it.page.chapter.chapter.id}/${it.page.index}" } }
     return if (queued.isEmpty()) "none" else "${queued.size} [${queued.take(6).joinToString(",")}]"
@@ -208,7 +216,10 @@ private fun WebGpuViewer.decodeQueueSummary(): String {
  */
 internal fun WebGpuViewer.logQueueDepth(reason: String) {
     val depth = synchronized(lock) { decodeQueue.size }
-    logcat(LogPriority.DEBUG) { "DecodeQueue $reason depth=$depth active=${activeDecode?.label() ?: "idle"}" }
+    // KMK --> A pool has several pages in flight; one slot could only ever name one of them.
+    val active = snapshotActiveDecodes().joinToString(",") { it.label() }.ifEmpty { "idle" }
+    logcat(LogPriority.DEBUG) { "DecodeQueue $reason depth=$depth active=$active" }
+    // KMK <--
 }
 
 private fun DecodeTrace.label(): String = "ch=$chapterId/i=$pageIndex@$stage"

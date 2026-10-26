@@ -16,129 +16,140 @@ import kotlin.time.Duration.Companion.milliseconds
 // is a self-contained loop whose failure mode is worth reasoning about on its own.
 
 /**
- * The single decode worker. Processes [WebGpuViewer.decodeQueue] one page at a time on the
- * viewer's dedicated thread.
+ * The decode worker pool. Processes [WebGpuViewer.decodeQueue] on the viewer's dedicated threads.
+ *
+ * KMK --> More than one worker now: [WebGpuViewer.decodeParallelism] of them run the same loop on
+ * the shared [WebGpuViewer.decodeDispatcher], each owning the page it popped. The page state
+ * machine's invariant is unchanged by this - "a page in [PageState.DECODING] has a worker on it"
+ * - because the pop is under the viewer's lock, so a page is never handed to two workers, and
+ * every worker's exit path resets its own page's state. The LIFO queue order is preserved too:
+ * with the prioritized current page at the tail, one worker pops it while the other takes the
+ * next-most-recent demand, so the page on screen never queues behind a slow decode again.
  *
  * Hardened: respects scope cancellation, handles spurious wakeups, avoids tight-loop on evicted
  * pages, and surfaces OOM as a retryable error page instead of killing the worker.
  */
 internal fun WebGpuViewer.startDecodeWorker() {
     val viewer = this
-    scope.launch(decodeDispatcher) {
-        try {
-            while (!isDestroyed) {
-                val page: ViewerReaderPage? = synchronized(lock) {
-                    while (decodeQueue.isEmpty() && !isDestroyed) {
-                        try {
-                            lock.wait(1000)
-                        } catch (_: InterruptedException) {
-                            Thread.currentThread().interrupt()
-                            return@launch
-                        }
-                    }
-                    if (decodeQueue.isEmpty()) return@synchronized null
-                    decodeQueue.removeLast().apply { state = PageState.DECODING }
-                }
-                if (page == null) continue
-
-                val shouldProcess = synchronized(lock) {
-                    pageInCache(page) && page.state == PageState.DECODING && !page.isDecoded
-                }
-
-                if (!shouldProcess) {
-                    synchronized(lock) {
-                        if (pageInCache(page) && page.state == PageState.DECODING) {
-                            page.state = PageState.IDLE
-                        }
-                    }
-                    // All three reasons share one outcome and cannot be told apart from the state.
-                    logcat(LogPriority.DEBUG) {
-                        "Decode skipped ch=${page.page.chapter.chapter.id}/i=${page.page.index} " +
-                            "cached=${pageInCache(page)} state=${page.state} " +
-                            "decoded=${page.isDecoded} last=${lastDecodeOutcome(page) ?: "none"}"
-                    }
-                    continue
-                }
-
-                // Published before the decode so the watchdog can see a page that never returns.
-                // decodeReaderPage reads this back as its trace.
-                val trace = DecodeTrace(
-                    chapterId = page.page.chapter.chapter.id ?: -1L,
-                    pageIndex = page.page.index,
-                    startedAtMs = System.currentTimeMillis(),
-                )
-                activeDecode = trace
-                logQueueDepth("dequeue")
-
-                try {
-                    decodeReaderPage(page)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: OutOfMemoryError) {
-                    logcat(LogPriority.ERROR) { "decodeReaderPage OOM: ${e.message}" }
-                    System.gc()
-                    synchronized(lock) {
-                        if (pageInCache(page) && !page.isDecoded && !page.imagePage.destroyed) {
-                            val oldImagePage = page.imagePage
-                            page.imagePage = ErrorPage(viewer, "Out of memory", page.spreadPosition)
-                            page.state = PageState.IDLE
-                            oldImagePage.cleanup()
-                            page.imagePage.invalidate()
-                        } else if (pageInCache(page)) {
-                            page.state = PageState.IDLE
-                        }
-                    }
-                } catch (e: Throwable) {
-                    if (e is CancellationException) throw e
-                    val isLinkage = e is LinkageError || e is NoClassDefFoundError || e is UnsatisfiedLinkError
-                    logcat(LogPriority.ERROR, e) { "decodeReaderPage${if (isLinkage) " linkage" else ""}: ${e.message}" }
-                    synchronized(lock) {
-                        if (pageInCache(page) && !page.isDecoded && !page.imagePage.destroyed) {
-                            val oldImagePage = page.imagePage
-                            val errorMessage = when {
-                                isLinkage -> "Decoder not available on this device"
-                                e.message?.isNotBlank() == true -> e.message!!
-                                else -> "Failed to decode image"
+    val workers = decodeParallelism()
+    logcat(LogPriority.DEBUG) { "Starting $workers decode worker(s)" }
+    repeat(workers) {
+        scope.launch(decodeDispatcher) {
+            try {
+                while (!isDestroyed) {
+                    val page: ViewerReaderPage? = synchronized(lock) {
+                        while (decodeQueue.isEmpty() && !isDestroyed) {
+                            try {
+                                lock.wait(1000)
+                            } catch (_: InterruptedException) {
+                                Thread.currentThread().interrupt()
+                                return@launch
                             }
-                            page.imagePage = ErrorPage(viewer, errorMessage, page.spreadPosition)
-                            page.state = PageState.IDLE
-                            oldImagePage.cleanup()
-                            page.imagePage.invalidate()
-                        } else if (pageInCache(page)) {
-                            page.state = PageState.IDLE
                         }
+                        if (decodeQueue.isEmpty()) return@synchronized null
+                        decodeQueue.removeLast().apply { state = PageState.DECODING }
                     }
-                } finally {
-                    // KMK --> DECODING must never outlive the attempt. The catch arms above all
-                    // end in an ErrorPage or an IDLE reset, but decodeReaderPage also returns
-                    // normally on several paths (destroyed viewer, stream unavailable, already
-                    // decoded, evicted mid-flight) - and a plain return skips every catch, so
-                    // the page kept DECODING with nothing left to move it. queueForDecode treats
-                    // DECODING as in-flight and ignores it, so the shell then spun forever.
-                    // Resetting here makes "the worker is not on this page anymore" the single
-                    // invariant every exit path agrees on.
-                    // KMK <--
-                    if (!trace.finished) trace.complete("threw")
-                    // Before the sweep is signalled: the reason this page is about to be looked
-                    // at is the one thing it cannot work out for itself.
-                    recordDecodeOutcome(page, trace.outcome ?: "unfinished")
-                    activeDecode = null
-                    synchronized(lock) {
-                        if (pageInCache(page) && page.state == PageState.DECODING) {
-                            page.state = PageState.IDLE
+                    if (page == null) continue
+
+                    val shouldProcess = synchronized(lock) {
+                        pageInCache(page) && page.state == PageState.DECODING && !page.isDecoded
+                    }
+
+                    if (!shouldProcess) {
+                        synchronized(lock) {
+                            if (pageInCache(page) && page.state == PageState.DECODING) {
+                                page.state = PageState.IDLE
+                            }
                         }
+                        // All three reasons share one outcome and cannot be told apart from the state.
+                        logcat(LogPriority.DEBUG) {
+                            "Decode skipped ch=${page.page.chapter.chapter.id}/i=${page.page.index} " +
+                                "cached=${pageInCache(page)} state=${page.state} " +
+                                "decoded=${page.isDecoded} last=${lastDecodeOutcome(page) ?: "none"}"
+                        }
+                        continue
                     }
-                    // The worker leaving a page is what makes any leftover in-flight state
-                    // detectable, so this is the natural point to look.
-                    stuckSignal.trySend(Unit)
+
+                    // Published before the decode so the watchdog can see a page that never returns.
+                    // decodeReaderPage receives this as its trace rather than reading it back.
+                    val trace = DecodeTrace(
+                        chapterId = page.page.chapter.chapter.id ?: -1L,
+                        pageIndex = page.page.index,
+                        startedAtMs = System.currentTimeMillis(),
+                    )
+                    registerActiveDecode(trace)
+                    logQueueDepth("dequeue")
+
+                    try {
+                        decodeReaderPage(page, trace)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: OutOfMemoryError) {
+                        logcat(LogPriority.ERROR) { "decodeReaderPage OOM: ${e.message}" }
+                        System.gc()
+                        synchronized(lock) {
+                            if (pageInCache(page) && !page.isDecoded && !page.imagePage.destroyed) {
+                                val oldImagePage = page.imagePage
+                                page.imagePage = ErrorPage(viewer, "Out of memory", page.spreadPosition)
+                                page.state = PageState.IDLE
+                                oldImagePage.cleanup()
+                                page.imagePage.invalidate()
+                            } else if (pageInCache(page)) {
+                                page.state = PageState.IDLE
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        if (e is CancellationException) throw e
+                        val isLinkage = e is LinkageError || e is NoClassDefFoundError || e is UnsatisfiedLinkError
+                        logcat(LogPriority.ERROR, e) { "decodeReaderPage${if (isLinkage) " linkage" else ""}: ${e.message}" }
+                        synchronized(lock) {
+                            if (pageInCache(page) && !page.isDecoded && !page.imagePage.destroyed) {
+                                val oldImagePage = page.imagePage
+                                val errorMessage = when {
+                                    isLinkage -> "Decoder not available on this device"
+                                    e.message?.isNotBlank() == true -> e.message!!
+                                    else -> "Failed to decode image"
+                                }
+                                page.imagePage = ErrorPage(viewer, errorMessage, page.spreadPosition)
+                                page.state = PageState.IDLE
+                                oldImagePage.cleanup()
+                                page.imagePage.invalidate()
+                            } else if (pageInCache(page)) {
+                                page.state = PageState.IDLE
+                            }
+                        }
+                    } finally {
+                        // KMK --> DECODING must never outlive the attempt. The catch arms above all
+                        // end in an ErrorPage or an IDLE reset, but decodeReaderPage also returns
+                        // normally on several paths (destroyed viewer, stream unavailable, already
+                        // decoded, evicted mid-flight) - and a plain return skips every catch, so
+                        // the page kept DECODING with nothing left to move it. queueForDecode treats
+                        // DECODING as in-flight and ignores it, so the shell then spun forever.
+                        // Resetting here makes "the worker is not on this page anymore" the single
+                        // invariant every exit path agrees on.
+                        // KMK <--
+                        if (!trace.finished) trace.complete("threw")
+                        // Before the sweep is signalled: the reason this page is about to be looked
+                        // at is the one thing it cannot work out for itself.
+                        recordDecodeOutcome(page, trace.outcome ?: "unfinished")
+                        unregisterActiveDecode(trace)
+                        synchronized(lock) {
+                            if (pageInCache(page) && page.state == PageState.DECODING) {
+                                page.state = PageState.IDLE
+                            }
+                        }
+                        // The worker leaving a page is what makes any leftover in-flight state
+                        // detectable, so this is the natural point to look.
+                        stuckSignal.trySend(Unit)
+                    }
                 }
+            } catch (e: CancellationException) {
+                // Scope cancelled — normal shutdown
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e) { "Decode worker died" }
             }
-        } catch (e: CancellationException) {
-            // Scope cancelled — normal shutdown
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-        } catch (e: Exception) {
-            logcat(LogPriority.ERROR, e) { "Decode worker died" }
         }
     }
 }

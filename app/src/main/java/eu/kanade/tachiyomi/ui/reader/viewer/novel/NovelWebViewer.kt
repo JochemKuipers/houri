@@ -34,11 +34,13 @@ import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerProvider
 import eu.kanade.tachiyomi.util.system.readerBackgroundColor
 import exh.log.xLogE
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import mihon.core.archive.EpubArchiveUrls
@@ -296,8 +298,11 @@ internal class NovelWebViewer(
             ): Boolean = size > READER_FONT_CACHE_FACES
         }
 
-    /** Cancelled in [destroy]: the typography subscription outlives the viewer otherwise. */
+    /** Cancelled in [destroy]: the settings subscriptions outlive the viewer otherwise. */
     private var typographyJob: Job? = null
+
+    /** Cancelled in [destroy]: the page-mode subscription is [typographyJob]'s sibling. */
+    private var pageModeJob: Job? = null
 
     /**
      * Typography, republished from settings. Changing it re-applies in place, no reload.
@@ -309,6 +314,44 @@ internal class NovelWebViewer(
      * unreadable combination the merge exists to prevent.
      */
     var typography by mutableStateOf(withReaderThemeBackground(currentTypography()))
+
+    // ---------------------------------------------------------------- page mode
+
+    /**
+     * How the reader is moving through the book: a continuous scroll, or discrete pages (single or
+     * double column).
+     *
+     * A mode change re-renders the document on screen - pagination is a different *layout*, not a
+     * property the live stylesheet can swap - keeping the reader's place through the fraction that
+     * survives the reflow. See [onPageModeChanged].
+     */
+    var pageMode by mutableStateOf(novelPrefs.pageMode)
+        private set
+
+    /** True while the current mode paginates the document into turned pages. */
+    private val isPagedMode: Boolean get() = pageMode.isPaged
+
+    /**
+     * Whether the document on screen lays its flow out horizontally - vertical writing or
+     * right-to-left - so "forward" is a leftward scroll rather than a downward one.
+     *
+     * Probed from the laid-out document after each load ([NovelScrollBridge.FLOW]): the answer
+     * follows the publisher's stylesheet as much as the reader's tri-state, and only the document
+     * itself knows which won. A vertical-writing book scrolled only vertically never moves -
+     * every forward tap used to be read as "nowhere left" and turned a whole document at a time.
+     */
+    private var documentFlowsHorizontally = false
+
+    /**
+     * A paged document's forward direction, as its layout declared it at setup: true when the next
+     * page sits to the left (vertical writing, right-to-left). Continuous mode keeps the same fact
+     * in [documentFlowsHorizontally]; the paged bridge reports its own because the host needs it
+     * before the first turn, to map the tap zones the right way round.
+     */
+    private var pagedForwardIsLeft = false
+
+    /** The read-ahead warm of the next document's markup, one in flight at most. */
+    private var readAheadJob: Job? = null
 
     /**
      * The typography the settings hold, with the general reader theme's background standing in when
@@ -528,9 +571,14 @@ internal class NovelWebViewer(
         // Prefer the stored document over the chapter's resume index: this viewer can restore the
         // position *within* a document, which is strictly better information than "page 3 of 12".
         // Both are coerced, because a chapter can have grown shorter since it was saved — a deleted
-        // file, a re-import.
-        val stored = novelPrefs.position(chapters.currChapter.chapter.url)?.documentIndex
-        val target = (stored ?: chapters.currChapter.requestedPage).coerceIn(0, pages.lastIndex)
+        // file, a re-import — and resolved by URL when the stored entry carries one, because the
+        // list may have been renumbered since (a cover page toggled on shifts every document).
+        val stored = novelPrefs.position(chapters.currChapter.chapter.url)
+        val target = if (stored != null) {
+            resolveStoredDocument(pages, stored)
+        } else {
+            chapters.currChapter.requestedPage.coerceIn(0, pages.lastIndex)
+        }
         showDocument(pages[target])
     }
 
@@ -546,6 +594,12 @@ internal class NovelWebViewer(
     override fun destroy() {
         typographyJob?.cancel()
         typographyJob = null
+        // KMK -->
+        pageModeJob?.cancel()
+        pageModeJob = null
+        readAheadJob?.cancel()
+        readAheadJob = null
+        // KMK <--
         // A read in flight must not outlive the viewer: it would finish against a destroyed WebView.
         documentLoadJob?.cancel()
         documentLoadJob = null
@@ -597,11 +651,16 @@ internal class NovelWebViewer(
      * Re-applies typography to the document already on screen.
      *
      * Reloading would throw the scroll position away on every slider drag, so this swaps the stylesheet
-     * in the live DOM instead of calling [moveToPage] again.
+     * in the live DOM instead of calling [moveToPage] again. In a paged document the reflow moves every
+     * column, so the bridge re-measures and re-lands on the same fraction of the book - one script
+     * queued after the swap, which the engine runs in order.
      */
     private fun applyTypography() {
         webView.setBackgroundColor(backgroundColor)
         webView.evaluateJavascript(liveTypographyJs(), null)
+        if (isPagedMode) {
+            webView.evaluateJavascript(NovelPageLayout.resettleScript(), null)
+        }
         webView.invalidate()
     }
 
@@ -619,6 +678,12 @@ internal class NovelWebViewer(
      * document can be read, so without it a slow read for the document they passed finishes last and
      * puts them back where they left — the one failure mode a reading position cannot recover from,
      * because the position was saved for where they were, not where they went.
+     *
+     * // KMK --> The read and the build run on [Dispatchers.Default], not main. The inliner
+     * base64-encodes every plate and stylesheet a document reads - megabytes of string surgery on
+     * an illustrated book - and doing it on the main thread cost a visible frame hitch on every
+     * turn. Only the `loadDataWithBaseURL` hop (and the state the reader sees) stays on main.
+     * // KMK <--
      *
      * [anchor] and [fraction] are the *destination* this request was asked for — a contents entry or
      * a search hit. They travel with the request rather than being set after it returns, because for
@@ -640,41 +705,58 @@ internal class NovelWebViewer(
             pendingFraction = fraction
         }
 
-        if (textPage.text.isNotEmpty()) {
-            renderDocument(page)
-            return
-        }
-
-        val loader = loader ?: return
         documentLoadJob?.cancel()
         documentLoadJob = activity.lifecycleScope.launch {
-            loader.ensureText(page)
-            // A newer turn won while this document was being read; its own request will render.
+            val built = withContext(Dispatchers.Default) {
+                // The loader's read re-assigns page.textPage (it hands back a copy carrying the
+                // markup), so the page is re-read after every suspension rather than trusting the
+                // reference captured at entry.
+                val current = page.textPage ?: return@withContext null
+                if (current.text.isEmpty()) {
+                    val loader = loader ?: return@withContext null
+                    if (!loader.ensureText(page)) return@withContext null
+                }
+                // A newer turn won while this document was being read; its own request will render.
+                if (request != documentRequest) return@withContext null
+                val ready = page.textPage ?: return@withContext null
+                val baseUrl = baseUrlFor(ready)
+                val inlined = NovelInline.inline(ready.text, baseUrl, inlineFetcher)
+                val position = chapters?.currChapter?.positionOf(page) ?: page.index
+                BuiltDocument(inlined, baseUrl, position)
+            }
+            if (built == null) {
+                // A superseded request is the reader pressing on, not a failure; only a read that
+                // is still current has something to explain.
+                if (request == documentRequest) {
+                    xLogE("Could not read document ${textPage.url}; leaving the reader where it is")
+                }
+                return@launch
+            }
             if (request != documentRequest) return@launch
-            renderDocument(page)
+            renderDocument(page, built)
         }
     }
 
+    /**
+     * What [showDocument]'s background pass produced: the fully-inlined markup, the base it
+     * resolved against, and the reader-list position of the document it belongs to.
+     */
+    private class BuiltDocument(val markup: String, val baseUrl: String, val position: Int)
+
     /** Hands a document to the engine. Every measurement the reader asks for happens after this. */
-    private fun renderDocument(page: ReaderPage) {
+    private fun renderDocument(page: ReaderPage, built: BuiltDocument) {
         val textPage = page.textPage ?: return
         currentPage = page
 
         // The base URL decides where every relative reference in this document points, and it is a
         // property of the document, not of the book. EpubArchiveUrls.BASE_URL is the right answer
         // only for a spine item that sits at the archive root.
-        val baseUrl = baseUrlFor(textPage)
+        val baseUrl = built.baseUrl
 
-        // The document's own illustrations and stylesheets travel inside it, as data: URIs — the
-        // one channel that has never failed to reach the engine. Anything over the ceiling stays a
-        // URL and keeps the streaming path.
-        val inlined = NovelInline.inline(textPage.text, baseUrl, inlineFetcher)
-
-        val position = chapters?.currChapter?.positionOf(page) ?: page.index
         // A fresh document is a fresh window: the continuous layer grows it from here.
-        windowFirst = position
-        windowLast = position
-        currentSegment = position
+        windowFirst = built.position
+        windowLast = built.position
+        currentSegment = built.position
         lastSavedFraction = -1f
         scrollFraction = 0f
         stuckForward = 0
@@ -685,6 +767,9 @@ internal class NovelWebViewer(
         // (see the epoch there), and the cancel here retires the read that has not.
         windowJob?.cancel()
         windowJob = null
+        // The document's flow direction is its own fact, re-probed after it lays out (see
+        // onPageFinished); until then the host assumes the ordinary vertical scroll.
+        documentFlowsHorizontally = false
 
         // Set before the load, because onPageFinished for it can arrive before this function returns
         // on a warm engine, and a null here would make the finish look like somebody else's.
@@ -699,12 +784,15 @@ internal class NovelWebViewer(
         // a WebView has one finish in flight, and it is always this load's.
         currentBaseUrl = "$baseUrl#kmk-load-$documentRequest"
         val html = NovelDocument.build(
-            inlined,
+            built.markup,
             typography,
             baseUrl,
-            segment = position to textPage.url,
+            segment = built.position to textPage.url,
             extraHead = readerFontCss(),
             epoch = documentRequest,
+            // KMK -->
+            pageMode = pageMode,
+            // KMK <--
         )
         webView.loadDataWithBaseURL(currentBaseUrl, html, "text/html", "UTF-8", null)
 
@@ -722,8 +810,36 @@ internal class NovelWebViewer(
         val stored = novelPrefs.position(page.chapter.chapter.url) ?: return null
         // Only a position *inside this document* is restorable here. A position elsewhere in the
         // chapter has already been acted on, by setChapters choosing which document to open.
-        if (stored.documentIndex != page.index) return null
+        //
+        // The URL is the identity and the index is the fallback: a stored index is a position in
+        // the list as it stood when it was written, and the list renumbers - a cover page toggled
+        // on shifts every document after it - while the document the position actually names keeps
+        // its path.
+        if (!positionNames(page, stored)) return null
         return stored.fractionInDocument
+    }
+
+    /**
+     * Whether [stored] is a position inside [page]: by URL when the entry carries one, by list
+     * index otherwise (an entry written before URLs were recorded).
+     */
+    private fun positionNames(page: ReaderPage, stored: NovelProgress.Position): Boolean {
+        stored.documentUrl?.let { url -> return url == page.textPage?.url }
+        return stored.documentIndex == page.index
+    }
+
+    /**
+     * The page-list position a stored position names, resolved against the list as it stands now.
+     *
+     * URL first for the same reason [restoreFractionFor] does; the index is both the legacy answer
+     * and the fallback, coerced because a chapter can have grown shorter since the position was
+     * saved.
+     */
+    private fun resolveStoredDocument(pages: List<ReaderPage>, stored: NovelProgress.Position): Int {
+        stored.documentUrl?.let { url ->
+            pages.indexOfFirst { it.textPage?.url == url }.takeIf { it >= 0 }?.let { return it }
+        }
+        return stored.documentIndex.coerceIn(0, pages.lastIndex)
     }
 
     /**
@@ -796,19 +912,30 @@ internal class NovelWebViewer(
     }
 
     /**
-     * A tap that was not a figure: menu in the middle, scroll at either edge.
+     * A tap that was not a figure: menu in the middle, page/scroll at either edge.
      *
      * Split out of [handleTap] so the figure check can sit in front of it without either half
      * having to know the other exists.
+     *
+     * The edge zones mean *direction*, not screen halves: on a book whose forward is leftward -
+     * vertical writing, right-to-left, or a paged book the bridge reported as such - the forward
+     * zone is the left edge, because that is where the next page physically is. A Latin reader's
+     * reflexes and a Japanese reader's reflexes both have to be right.
      */
     private fun scrollTap(x: Float) {
         val width = webView.width
         if (width <= 0) return
 
         val zone = (if (readerPrefs.smallerTapZone().get()) SMALL_TAP_ZONE else TAP_ZONE) * width
+        // Forward sits on the right in an ordinary horizontal book, on the left in a vertical or
+        // right-to-left one, and always downward in the ordinary vertical scroll.
+        val forwardOnRight = when {
+            isPagedMode -> !pagedForwardIsLeft
+            else -> !documentFlowsHorizontally
+        }
         val forward = when {
-            x >= width - zone -> true
-            x <= zone -> false
+            x >= width - zone -> forwardOnRight
+            x <= zone -> !forwardOnRight
             else -> {
                 activity.toggleMenu()
                 return
@@ -821,8 +948,9 @@ internal class NovelWebViewer(
     // ---------------------------------------------------------------- turning
 
     /**
-     * One unit of forward or backward reading: scroll a screen, or turn the document when there is no
-     * screen left to scroll.
+     * One unit of forward or backward reading. In continuous mode: scroll a screen, or grow the
+     * window / turn the document when there is no screen left to scroll. In a paged mode: turn one
+     * page, or turn the document at its last page.
      *
      * ### Why the scroll and the verdict are the host's, not the document's
      *
@@ -850,16 +978,39 @@ internal class NovelWebViewer(
      * "Not laid out yet" is guarded rather than inferred: a WebView with no content answers every
      * scroll with "did not move", and reading that as an edge turned the document on the first tap of
      * a freshly-opened book — which is how a book got skipped before its first screen was ever seen.
+     *
+     * ### Which axis, and which way is forward // KMK
+     *
+     * A vertical-writing (縦書き) or right-to-left book lays its flow out **horizontally**: the
+     * document grows leftward and only [WebView.scrollX] moves. The axis and the forward sign come
+     * from the document itself ([documentFlowsHorizontally], probed after layout) — a step that
+     * scrolled only vertically on such a book never moved, so every tap read as the document's edge
+     * and skipped a section at a time. The paged mode asks its bridge the same question at setup
+     * ([pagedForwardIsLeft]) for the same reason: the tap zones must mean the same thing the pages
+     * do.
      */
     private fun step(volumeForward: Boolean) {
+        if (isPagedMode) {
+            stepPaged(volumeForward)
+            return
+        }
         if (webView.height <= 0 || webView.contentHeight <= 0) return
 
-        val before = webView.scrollY
-        val by = (webView.height * 0.9f).toInt() * if (volumeForward) 1 else -1
-        webView.scrollBy(0, by)
+        val horizontal = documentFlowsHorizontally
+        val before = if (horizontal) webView.scrollX else webView.scrollY
+        // A horizontal flow grows leftward, so forward is the negative axis; the step keeps the
+        // 90%-of-a-screen size either way.
+        val by = (if (horizontal) webView.width else webView.height) * 0.9f *
+            if (volumeForward xor horizontal) 1 else -1
+        if (horizontal) {
+            webView.scrollBy(by.toInt(), 0)
+        } else {
+            webView.scrollBy(0, by.toInt())
+        }
 
         webView.post {
-            if (abs(webView.scrollY - before) < MIN_MOVEMENT_PX) {
+            val after = if (horizontal) webView.scrollX else webView.scrollY
+            if (abs(after - before) < MIN_MOVEMENT_PX) {
                 // The tap ran out of room. Inside the book that room is one append away — a tap
                 // grows the window rather than jumping the reader out of the chapter — and only
                 // the book's own edges fall through to a volume turn.
@@ -872,6 +1023,40 @@ internal class NovelWebViewer(
                 }
             }
         }
+    }
+
+    /**
+     * One page turn in a paged mode, through the document's own bridge.
+     *
+     * The bridge answers whether the turn moved; a turn that did not means the document has run out
+     * of pages in that direction, and the tap becomes a document turn - the same verdict the
+     * continuous step takes from an unmoved scroll. The bridge also carries the new position, which
+     * updates the progress slider and the saved reading position without a probe (there is nothing
+     * scrolling for a probe to watch in a paged document).
+     */
+    private fun stepPaged(volumeForward: Boolean) {
+        webView.evaluateJavascript(
+            NovelPageLayout.turnScript(if (volumeForward) 1 else -1),
+        ) { raw ->
+            val turn = NovelPageLayout.parseTurn(raw) ?: return@evaluateJavascript
+            if (turn.moved) {
+                onPagedPosition(turn)
+                // Warm the next document's markup as the last page nears, so the document turn
+                // lands on a document that is already read. One ahead, cancelled by the next.
+                if (volumeForward && turn.screen >= turn.screens - 2) {
+                    readAhead(neighbour(1))
+                }
+            } else {
+                if (volumeForward) advanceDocument() else retreatDocument()
+            }
+        }
+    }
+
+    /** A paged turn's outcome: the slider follows it and so does the stored position. */
+    private fun onPagedPosition(turn: NovelPageLayout.PagedTurn) {
+        scrollFraction = turn.fraction
+        val page = currentPage ?: return
+        persistPosition(page, turn.fraction)
     }
 
     /** Next document, or next chapter. */
@@ -985,8 +1170,12 @@ internal class NovelWebViewer(
      * Asks the document where the reader is, at most once per [PROBE_INTERVAL_MS]: a fling fires
      * the scroll listener on every frame, and the answer cannot change faster than the document
      * can reflow.
+     *
+     * A paged document never answers it - nothing scrolls, so there is nothing to watch; the
+     * position arrives from the turns themselves ([onPagedPosition]) instead.
      */
     private fun scheduleContinuousProbe() {
+        if (isPagedMode) return
         if (fractionDragActive) return
         val now = System.currentTimeMillis()
         if (now - lastProbeAt < PROBE_INTERVAL_MS) return
@@ -1047,11 +1236,17 @@ internal class NovelWebViewer(
             // the window this append was grown into, so the fragment must not land in it.
             if (epoch != documentRequest) return@launch
             val textPage = page.textPage ?: return@launch
-            val fragment = NovelInline.inline(
-                NovelContinuous.bodyFragment(textPage.text),
-                baseUrlFor(textPage),
-                inlineFetcher,
-            )
+            // KMK --> The fragment build is the same megabyte-of-base64 surgery a full document
+            // is, and it runs while the reader is mid-scroll: off the main thread, like the
+            // document build in [showDocument].
+            val fragment = withContext(Dispatchers.Default) {
+                NovelInline.inline(
+                    NovelContinuous.bodyFragment(textPage.text),
+                    baseUrlFor(textPage),
+                    inlineFetcher,
+                )
+            }
+            // KMK <--
             webView.evaluateJavascript(
                 NovelContinuous.appendScript(fragment, position, textPage.url, epoch),
             ) { answer ->
@@ -1060,6 +1255,11 @@ internal class NovelWebViewer(
                 if (NovelContinuous.isStale(answer)) return@evaluateJavascript
                 windowLast = position
                 trimToWindow()
+                // KMK --> One section further is already being asked for by the probe's
+                // near-bottom pass; warm the one *after* it, so a fast fling through a short
+                // section still arrives pre-read.
+                readAhead(chapters?.currChapter?.pages?.getOrNull(position + 1))
+                // KMK <--
             }
         }
     }
@@ -1085,11 +1285,15 @@ internal class NovelWebViewer(
             // compensation instead of only adding content below.
             if (epoch != documentRequest) return@launch
             val textPage = page.textPage ?: return@launch
-            val fragment = NovelInline.inline(
-                NovelContinuous.bodyFragment(textPage.text),
-                baseUrlFor(textPage),
-                inlineFetcher,
-            )
+            // KMK --> Off the main thread for the same reason as [appendAhead]'s build.
+            val fragment = withContext(Dispatchers.Default) {
+                NovelInline.inline(
+                    NovelContinuous.bodyFragment(textPage.text),
+                    baseUrlFor(textPage),
+                    inlineFetcher,
+                )
+            }
+            // KMK <--
             webView.evaluateJavascript(
                 NovelContinuous.prependScript(fragment, position, textPage.url, epoch),
             ) { answer ->
@@ -1160,22 +1364,39 @@ internal class NovelWebViewer(
     }
 
     /**
-     * The bottom navigator's slider moved: seek to [fraction] of the section under the viewport.
+     * The bottom navigator's slider moved: seek to [fraction] of the document on screen.
      *
-     * The slider state follows the thumb immediately, and the document's own scroll reports are
-     * muted until the drag ends — a seek that scrolled the document underneath a live drag would
-     * fight the thumb for the position.
+     * The slider state follows the thumb immediately, and the document's own reports are muted
+     * until the drag ends — a seek that scrolled the document underneath a live drag would fight
+     * the thumb for the position. In a paged document the seek lands on the nearest page; the
+     * probe cannot watch a paged document (nothing scrolls), so the muted write-back matters only
+     * in continuous mode, where the scroll listener would otherwise drag the thumb back.
      */
     fun seekFraction(fraction: Float) {
         val target = fraction.coerceIn(0f, 1f)
         scrollFraction = target
         fractionDragActive = true
-        webView.evaluateJavascript(NovelContinuous.seekScript(target), null)
+        if (isPagedMode) {
+            webView.evaluateJavascript(NovelPageLayout.setFractionScript(target), null)
+        } else {
+            webView.evaluateJavascript(NovelContinuous.seekScript(target), null)
+        }
     }
 
     /** The drag ended: the document's scroll takes the thumb back over. */
     fun seekFractionEnd() {
         fractionDragActive = false
+        // KMK --> A paged document has no scroll for a probe to report, so the thumb's truth is
+        // read back directly: the seek snapped to the nearest page, and the slider should say
+        // which one the reader actually landed on rather than the fraction they dragged to.
+        if (isPagedMode) {
+            webView.evaluateJavascript(NovelPageLayout.fractionScript()) { raw ->
+                NovelPageLayout.parseFraction(raw)?.let { fraction ->
+                    if (!fractionDragActive) scrollFraction = fraction
+                }
+            }
+        }
+        // KMK <--
     }
 
     /**
@@ -1186,17 +1407,52 @@ internal class NovelWebViewer(
      */
     private fun savePosition(probe: Probe) {
         val page = chapters?.currChapter?.pages?.getOrNull(probe.position) ?: return
+        persistPosition(page, probe.fraction)
+    }
+
+    /**
+     * The one write behind every save: [fraction] of [page]'s document, as a character offset
+     * against the document's measured length, stamped with the document's own URL so a restore
+     * survives any later renumbering of the list (a cover page toggled on, a re-import).
+     */
+    private fun persistPosition(page: ReaderPage, fraction: Float) {
         val length = documentLengths().getOrNull(page.index) ?: return
-        if (abs(probe.fraction - lastSavedFraction) < SAVE_THRESHOLD) return
-        lastSavedFraction = probe.fraction
+        if (abs(fraction - lastSavedFraction) < SAVE_THRESHOLD) return
+        lastSavedFraction = fraction
         novelPrefs.setPosition(
             page.chapter.chapter.url,
             NovelProgress.Position(
                 documentIndex = page.index,
-                characterOffset = NovelProgress.characterOffsetFor(probe.fraction, length),
+                characterOffset = NovelProgress.characterOffsetFor(fraction, length),
                 characterLength = length,
+                documentUrl = page.textPage?.url,
             ),
         )
+    }
+
+    /**
+     * Warms the markup of [page] - the next section in continuous mode, the next document near a
+     * paged document's last page - so the turn that needs it is not the turn that waits on a read.
+     *
+     * One in flight at most: a later warm cancels the earlier one, because whichever document the
+     * reader is about to reach is the only one worth reading ahead of. Failures are swallowed -
+     * a warm is a head start, and the real read still happens through [showDocument] when the
+     * turn comes.
+     */
+    private fun readAhead(page: ReaderPage?) {
+        if (page == null) return
+        val loader = loader ?: return
+        val target = page.textPage ?: return
+        if (target.text.isNotEmpty()) return
+        readAheadJob?.cancel()
+        readAheadJob = activity.lifecycleScope.launch(Dispatchers.Default) {
+            try {
+                loader.ensureText(page)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+        }
     }
 
     /** The probe's reply: which section, how far in, and whether the edges of the window are near. */
@@ -1385,6 +1641,24 @@ internal class NovelWebViewer(
             ) {
                 return
             }
+            // KMK --> A paged document is paginated before anything else can act on it: the turn,
+            // seek and anchor scripts all live behind the bridge this boots. Its reply carries the
+            // layout the host needs (which way forward runs), and the pending position is applied
+            // from inside the callback so the bridge is guaranteed ready for it.
+            if (isPagedMode) {
+                webView.evaluateJavascript(NovelPageLayout.setupScript(pageMode.columns)) { raw ->
+                    onPagedSetup(NovelPageLayout.parseLayout(raw))
+                    applyPendingPosition()
+                }
+                return
+            }
+            // Which axis the flow runs along is the *document's* answer, probed once per load: the
+            // publisher's stylesheet has as much say over it as the reader's tri-state does, and
+            // every step and tap zone below depends on it.
+            webView.evaluateJavascript(NovelScrollBridge.FLOW) { raw ->
+                documentFlowsHorizontally = raw?.trim() == "\"h\""
+            }
+            // KMK <--
             applyPendingPosition()
             // Re-assert typography in the live DOM too, so the injected stylesheet and the running
             // document cannot drift apart after a self-navigation.
@@ -1438,7 +1712,7 @@ internal class NovelWebViewer(
      *
      * Runs from `onPageFinished`, because every one of these measures the document: the engine has
      * laid nothing out before then, so an anchor resolves to the top of an empty page and a fraction
-     * to zero.
+     * to zero. In a paged document the bridge has to be booted first - [onPageFinished] orders that.
      */
     private fun applyPendingPosition() {
         val anchor = pendingAnchor
@@ -1448,10 +1722,14 @@ internal class NovelWebViewer(
             // A jump is "take me here", not "put me back": the anchor's scroll stands, and a
             // restore left standing would scroll it away on whatever finish came next.
             pendingRestoreFraction = null
-            webView.evaluateJavascript(
-                NovelScrollBridge.scrollToAnchor(anchor, anchorInsetPx),
-                null,
-            )
+            if (isPagedMode) {
+                webView.evaluateJavascript(NovelPageLayout.goToAnchorScript(anchor), null)
+            } else {
+                webView.evaluateJavascript(
+                    NovelScrollBridge.scrollToAnchor(anchor, anchorInsetPx),
+                    null,
+                )
+            }
             return
         }
 
@@ -1459,10 +1737,27 @@ internal class NovelWebViewer(
         pendingFraction = null
         pendingRestoreFraction = null
         lastSavedFraction = fraction
-        webView.evaluateJavascript(
-            NovelScrollBridge.SET_FRACTION.replace("%f", fraction.toString()),
-            null,
-        )
+        scrollFraction = fraction
+        if (isPagedMode) {
+            webView.evaluateJavascript(NovelPageLayout.setFractionScript(fraction), null)
+        } else {
+            webView.evaluateJavascript(
+                NovelScrollBridge.SET_FRACTION.replace("%f", fraction.toString()),
+                null,
+            )
+        }
+    }
+
+    /**
+     * A freshly paginated document's answer: which way forward runs, and (with the position the
+     * bridge reports) the slider's baseline. A null layout is the bridge being absent or the
+     * document refusing - the reader keeps its defaults and every turn still works, only the tap
+     * zones keep the Latin assumption.
+     */
+    private fun onPagedSetup(layout: NovelPageLayout.PagedLayout?) {
+        if (layout != null) {
+            pagedForwardIsLeft = layout.forwardIsLeft
+        }
     }
 
     init {
@@ -1490,6 +1785,31 @@ internal class NovelWebViewer(
                 applyTypography()
             }
         }
+        // KMK --> The page mode is a layout, not a typography: it cannot ride the live stylesheet
+        // swap above, so it gets its own subscription and its own response - a fresh document,
+        // keeping the reader's place by the fraction that survives the reflow. `drop(1)` like the
+        // typography's own sources: the seed was read at construction.
+        pageModeJob = activity.lifecycleScope.launch {
+            novelPrefs.pageModePref.changes().drop(1).collect { onPageModeChanged() }
+        }
+        // KMK <--
+    }
+
+    /**
+     * The reader changed how the book is paginated: re-render the document on screen under the new
+     * mode, keeping their place.
+     *
+     * The position is carried as the *fraction of the document* - the one quantity that means the
+     * same thing in a continuous scroll and in any column count, and the same one a restore
+     * stores. A document that was being read at 40% scrolls to 40% again, whatever the new layout
+     * makes of that.
+     */
+    private fun onPageModeChanged() {
+        val mode = novelPrefs.pageMode
+        if (mode == pageMode) return
+        pageMode = mode
+        val page = pendingPage ?: currentPage ?: return
+        showDocument(page, fraction = scrollFraction)
     }
 
     private companion object {
@@ -1547,9 +1867,10 @@ internal class NovelWebViewer(
         /** One stuck-edge turn per push: a continuing drag must not machine-gun volume turns. */
         const val STUCK_TURN_COOLDOWN_MS = 750L
 
-        /** The probe's fields, read out of its JSON encoding. */
+        /** The probe's fields, read out of its JSON encoding. Exponents accepted: JSON.stringify
+         *  spells a small fraction as `1e-7`, and a probe that cannot be parsed is dropped. */
         val PROBE_POSITION = Regex(""""i":(-?\d+)""")
-        val PROBE_FRACTION = Regex(""""f":([0-9.]+)""")
+        val PROBE_FRACTION = Regex(""""f":([0-9.eE+-]+)""")
         val PROBE_NEAR_BOTTOM = Regex(""""nb":(\d+)""")
         val PROBE_NEAR_TOP = Regex(""""nt":(\d+)""")
     }

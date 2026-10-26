@@ -13,15 +13,17 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.takeWhile
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 
 // The two halves of turning one `ViewerReaderPage` into a decoded `ImagePage.ImageSingle`:
 // getting the bytes (`startPageLoad`) and building the GPU image (`decodeReaderPage`).
 //
-// Both are reached only from the viewer's single decode worker, one page at a time. Anything that
-// decides *which* pages get here lives in `WebGpuDecodeQueue`; anything about keeping the working
-// set bounded lives in `WebGpuPageCache`.
+// Reached from the viewer's decode worker pool, each worker owning the page it popped - see
+// [WebGpuViewer.startDecodeWorker] for why the pool preserves the queue's invariants. Anything
+// that decides *which* pages get here lives in `WebGpuDecodeQueue`; anything about keeping the
+// working set bounded lives in `WebGpuPageCache`.
 
 /**
  * Hands a page whose bytes can no longer be read back to its loader.
@@ -204,9 +206,18 @@ internal fun WebGpuViewer.startPageLoad(page: ViewerReaderPage) {
     }
 }
 
-internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
+/**
+ * Builds [page]'s GPU image.
+ *
+ * KMK --> [trace] is handed in by the worker rather than read back from a viewer field: the
+ * worker pool means more than one decode is in flight, so a single "the active decode" slot
+ * would name whichever worker published last. Each worker owns its page's trace for exactly
+ * the lifetime of this call.
+ * KMK <--
+ */
+internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace: DecodeTrace) {
     if (isDestroyed) {
-        activeDecode?.complete("abandoned")
+        trace.complete("abandoned")
         return
     }
     if (page.page.status != Page.State.Ready) {
@@ -214,11 +225,9 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
         // Not a decode at all: the page left for the loader. Completing the trace here gives the
         // worker's finally an outcome that is not `threw` - a plain return skips every catch, so
         // without this the sweep logged a page that never threw as if one had.
-        activeDecode?.complete("loading")
+        trace.complete("loading")
         return
     }
-
-    val trace = activeDecode
 
     traceStage(trace, "stream")
     val stream = try {
@@ -339,15 +348,22 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage) {
         // KMK -->
         // Display-time only: translation, EXIF and spread matching below all read decodeBytes, so
         // the chain's output never becomes the page's canonical bytes.
-        val displayBytes = applyByteTransforms(
-            WebGpuExtensions.active(),
-            WebGpuPageRef(
-                chapterId = page.page.chapter.chapter.id ?: -1L,
-                pageIndex = page.page.index,
-                mangaId = page.page.chapter.chapter.manga_id ?: -1L,
-            ),
-            decodeBytes,
-        )
+        //
+        // KMK --> Under the transform mutex: the upscale hook's native sessions are shared
+        // viewer-wide and were only ever exercised by one thread, so the worker pool serializes
+        // just this stage rather than the whole decode - everything either side of it stays
+        // parallel, and content that is not upscaled never contends at all.
+        val displayBytes = byteTransformMutex.withLock {
+            applyByteTransforms(
+                WebGpuExtensions.active(),
+                WebGpuPageRef(
+                    chapterId = page.page.chapter.chapter.id ?: -1L,
+                    pageIndex = page.page.index,
+                    mangaId = page.page.chapter.chapter.manga_id ?: -1L,
+                ),
+                decodeBytes,
+            )
+        }
         trace?.transformed = (displayBytes !== decodeBytes)
         // KMK <--
         // KMK <--

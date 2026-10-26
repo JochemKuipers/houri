@@ -139,6 +139,16 @@ object NovelTypographyCss {
                 "${NovelScrollBridge.ZOOMED_CLASS.let { "img.$it" }} " +
                     "{ position: relative !important; z-index: 2 !important; cursor: zoom-out !important; }",
             )
+
+            // The synthesized cover page (EpubTextSource prepends one when the book declares a
+            // cover its spine never shows). The reader's own rules above would otherwise restyle
+            // it like prose - body margins doubled into the column, the plate squeezed under
+            // `max-width: 100% / height: auto` - so the cover gets its own sentence, emitted
+            // after every other rule for the same reason the whole stylesheet is last: `!important`
+            // against `!important` is decided by source order. Inert in every document that is not
+            // the cover.
+            appendLine("body.kmk-cover { display: flex !important; align-items: center !important; justify-content: center !important; margin: 0 !important; height: 100vh !important; overflow: hidden !important; }")
+            appendLine("img#kmk-cover-img { max-width: 100% !important; max-height: 100% !important; width: auto !important; height: auto !important; object-fit: contain !important; }")
             appendLine("/* end komikku typography */")
         }
     }

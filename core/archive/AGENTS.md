@@ -93,6 +93,26 @@ document converts into wrong output with no error anywhere.
 - `getImagesFromPages()` — every `<img>` in every spine document. The manga local source treats an
   EPUB as an art book and uses this. Do not confuse them.
 
+### The cover page (`EpubTextSource`, KMK)
+
+Most EPUBs keep the cover out of the spine — it lives in the package metadata
+(`EpubBook.coverHref`, from `cover-image` or the legacy `<meta name="cover">`) — so a spine-walking
+reader never shows it. `EpubTextSource` prepends a **synthesized cover page at index 0** when its
+`wantsCoverPage` lambda says so (the app combines the cover toggle with "show illustrations"), the
+archive actually contains the declared cover, and the spine's first document does not already
+embed it (a real cover page shown twice is worse than none; the verdict is read once and cached per
+chapter, bounded). The page is a complete document naming the image by archive path, resolved
+against the archive-root base (`baseHref = ""`), and it arrives with its `text` **already filled** —
+which is the contract that keeps it out of every code path that resolves a page back into a spine
+item (`getTextPageText` returns it as-is; `textPages` and `plainTextFor` skip re-reading it; search
+has no use for an image anyway).
+
+Every document after a cover shifts up by one. That is paid consistently — search hits, reading
+positions and the page list all speak the shifted coordinates — and `NovelProgress.Position` (app
+side) additionally carries the document's **URL**, so a stored position resolves after any future
+renumbering (the toggle changing, a skipped document, a re-import) instead of landing one document
+off.
+
 ### Series metadata, the two spellings
 
 `EpubBook.metadata` carries optional `series` and `seriesIndex`, read from whichever convention the

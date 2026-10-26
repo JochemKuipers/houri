@@ -10,6 +10,16 @@ files moved. See .github/scripts/release_notes.py.
 
 ### New
 
+- **Book reader: paged and two-page modes**: books (EPUB) can now be read like a real paper book —
+  open the reader settings while a book is open and pick **Paged** (one page per screen, turned
+  with a tap, the volume keys or a flick of the slider) or **Two pages** (the classic open spread,
+  two columns with a proper gutter) beside the original continuous scroll. Page turns respect the
+  book's own writing direction, so a Japanese vertical-writing novel turns the way a Japanese book
+  does, and changing the mode keeps your place in the book.
+- **Book reader: cover as first page**: most EPUBs keep the cover in their metadata rather than in
+  the book's spine, so it was never shown once you started reading. The reader now opens on the
+  book's declared cover when there is one (on by default, with a setting to turn it off), and never
+  shows it twice for books that already carry a cover page. Applies to the next chapter you open.
 - **Navigation 3**: the app's entire UI now runs on Jetpack Navigation 3 (androidx.navigation3),
   replacing the retired Voyager navigator — every screen is a serializable route on one back
   stack, tabs keep their own per-tab stacks on tablets and phones alike, and the two-pane
@@ -18,13 +28,34 @@ files moved. See .github/scripts/release_notes.py.
   animations and state restoration (upstream mihonapp/mihon#3984). All screens now use AndroidX
   ViewModels with Metro DI instead of Voyager ScreenModels, and the Llamatik demo app submodule
   also no longer depends on Voyager.
-
 - **Subcategory types**: when creating a subcategory (Edit Categories or from library
   selection) you can label it Author, Artist, Illustrator or Designer, so two same-named
   subcategories under one parent are tellable apart; the label shows as a colored tag in
   Edit Categories and in the Set Categories dialog.
 
 ### Improve
+- **WebGPU reader: the between-pages black line, fixed at the root**: the thin dark line that
+  could appear between pages in long-strip mode was two layout paths disagreeing by up to half a
+  pixel about where one page ends and the next begins — the one that drew sharp tiles rounded the
+  boundary to a whole pixel, and everything else (backgrounds, freshly-decoded pages, loading
+  placeholders) did not, so the boundary row could be claimed by neither and showed the background
+  instead. Every page's boundary is now derived from the same whole-pixel position, so the line
+  has nothing left to feed on. It previously appeared rarely, mostly while a neighbouring page was
+  still loading — which is exactly when the two disagreeing paths met.
+- **WebGPU reader: pages decode in parallel**: the reader now decodes two pages at once instead of
+  one, so the page you are looking at no longer queues behind whatever slow page the reader was
+  already deep into (a long strip, a large JXL, a slow network read). Small devices stay
+  single-threaded on purpose, where two parallel decodes would cost the memory the reader is
+  budgeting to protect.
+- **Book reader: smoother page turns**: building a book page's markup (which inlines its
+  illustrations) now happens off the main thread, so turning the page in an illustrated book no
+  longer hitches, and the reader warms the next document's text ahead of you — both in paged mode
+  and while scrolling continuously.
+- **Book reader: vertical-writing books scroll correctly**: a Japanese or Chinese novel set in
+  vertical writing flows sideways, and the reader's page-step used to scroll it down — never
+  moving, so every tap skipped a whole section. The step now scrolls the axis the book actually
+  uses, and the tap zones follow the writing direction.
+
 - **Database (under the hood)**: the library database now uses Mihon's reworked schema, so the
   fork stays mergeable with upstream. Updating merges duplicate entries — the same series twice
   under one source — into the copy in your library, carrying read state, history, categories and

@@ -79,11 +79,18 @@ object NovelDocument {
          * building documents whose scripts simply find agreement and run.
          */
         epoch: Int = 0,
+        /**
+         * How the reader is paginating this document - a continuous scroll, or discrete pages
+         * (single or double column). Paged documents carry an extra stylesheet (the column box)
+         * and the `KmkPaged` bridge beside the scroll bridge; continuous documents are exactly
+         * what they were before the setting existed.
+         */
+        pageMode: NovelPageLayout.PageMode = NovelPageLayout.PageMode.CONTINUOUS,
         // KMK <--
     ): String {
         val document = wrapBody(normalize(source), segment)
         val prologue = prologue(baseUrl) + styleTag(extraHead)
-        val epilogue = epilogue(typography, epoch)
+        val epilogue = epilogue(typography, epoch, pageMode)
 
         val headOpen = HEAD_OPEN.find(document)
         if (headOpen != null) {
@@ -186,13 +193,32 @@ object NovelDocument {
     private fun styleTag(css: String): String =
         if (css.isBlank()) "" else """<style id="kmk-reader-font">${css.replace("</", "<\\/")}</style>"""
 
-    /** Goes at the very end of the head, so it outranks the publisher's rules on source order. */
-    private fun epilogue(typography: NovelTypography, epoch: Int): String = buildString {
+    /**
+     * Goes at the very end of the head, so it outranks the publisher's rules on source order.
+     *
+     * A paged document carries more than the scroll bridge: the column stylesheet lands after the
+     * reader's typography (its `html`/`body` overrides must win by source order), and the `KmkPaged`
+     * bridge is installed in the same script element so it exists before the layout's `load` event
+     * can fire anything the host queued against it. Continuous documents build exactly as they did
+     * before pagination existed.
+     */
+    private fun epilogue(
+        typography: NovelTypography,
+        epoch: Int,
+        pageMode: NovelPageLayout.PageMode = NovelPageLayout.PageMode.CONTINUOUS,
+    ): String = buildString {
         appendLine(NovelTypographyCss.styleTag(typography))
+        if (pageMode.isPaged) {
+            appendLine(NovelPageLayout.styleTag(NovelPageLayout.PAGED_STATIC_CSS))
+        }
         // Wrapped, obviously. Script text emitted bare is not script: it is the first thing on the
         // page, printed in the reader's own font, and it is not the last thing anyone notices.
         append("<script>")
         append(NovelScrollBridge.BRIDGE_SCRIPT.replace("</script", """<\/script"""))
+        if (pageMode.isPaged) {
+            append(";")
+            append(NovelPageLayout.PAGED_BRIDGE_SCRIPT.replace("</script", """<\/script"""))
+        }
         // The stamp the growth scripts compare themselves against, in the same script element so it
         // is declared before any of them can run rather than beside it. `var` — this must land on
         // `window` itself, and the value is the reader's own request number: no book counts here.

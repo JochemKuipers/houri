@@ -46,6 +46,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.NovelTypographyPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelBuiltinFonts
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelFonts
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelFonts.ImportResult
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelPageLayout
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
 import eu.kanade.tachiyomi.util.system.toast
 import mihon.app.di.globalAppGraph
@@ -60,6 +61,7 @@ import tachiyomi.presentation.core.components.SliderItem
 import tachiyomi.presentation.core.components.TriStateItem
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.presentation.core.util.collectAsState
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -103,8 +105,28 @@ internal fun NovelTypographyPage(
     // leading value this screen opens on the defaults and only corrects itself once a preference is
     // touched - which reads as "my settings did not save" rather than as a display bug.
     val typography by novelPrefs.values().collectAsState(NovelTypography.DEFAULT)
+    // KMK --> The page mode is not typography (it survives every slider drag unchanged), so it is
+    // collected on its own - from its own preference, through the same `collectAsState` that hands
+    // the page a value the moment it opens.
+    val pageMode by novelPrefs.pageModePref.collectAsState()
+    // KMK <--
 
     HeadingItem(stringResource(KMR.strings.novel_reader_typography))
+
+    // ---------------------------------------------------------------- how the book moves
+
+    // First, because it is the most consequential choice on the page: it decides what a tap does.
+    // A change re-renders the open document straight away - the reader sees the book turn into
+    // pages behind the settings sheet, which is the only honest preview a mode can have.
+    SettingsChipRow(KMR.strings.novel_page_mode) {
+        NovelPageLayout.PageMode.entries.forEach { mode ->
+            FilterChip(
+                selected = pageMode == mode.ordinal,
+                onClick = { novelPrefs.setPageMode(mode) },
+                label = { Text(stringResource(pageModeLabel(mode))) },
+            )
+        }
+    }
 
     // ---------------------------------------------------------------- legibility
 
@@ -212,6 +234,13 @@ internal fun NovelTypographyPage(
     CheckboxItem(
         label = stringResource(KMR.strings.novel_show_images),
         pref = novelPrefs.showImages,
+    )
+
+    // The cover as a first page: applies to the next chapter opened - the spine of the book on
+    // screen was already built - which is also when every other source-level preference applies.
+    CheckboxItem(
+        label = stringResource(KMR.strings.novel_cover_first),
+        pref = novelPrefs.coverFirst,
     )
 
     // ---------------------------------------------------------------- shape
@@ -804,6 +833,15 @@ private fun Boolean?.toTriState(): TriState = when (this) {
     false -> TriState.ENABLED_NOT
     null -> TriState.DISABLED
 }
+
+// KMK -->
+/** The chip label for one page mode. */
+private fun pageModeLabel(mode: NovelPageLayout.PageMode): StringResource = when (mode) {
+    NovelPageLayout.PageMode.CONTINUOUS -> KMR.strings.novel_page_mode_continuous
+    NovelPageLayout.PageMode.PAGED -> KMR.strings.novel_page_mode_paged
+    NovelPageLayout.PageMode.DOUBLE -> KMR.strings.novel_page_mode_double
+}
+// KMK <--
 
 /** The next value round the three-state cycle, ending back at "follow the book". */
 private fun Boolean?.next(): Boolean? = when (this) {

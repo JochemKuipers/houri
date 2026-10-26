@@ -34,6 +34,17 @@ import tachiyomi.core.common.util.system.logcat
  */
 class EpubTextSource(
     private val readerFor: (SChapter) -> EpubReader?,
+    // KMK -->
+    /**
+     * Whether the reader wants a book's declared cover prepended as the first page.
+     *
+     * A lambda rather than a boolean because the answer is two live preferences (show the cover
+     * at all, and show illustrations at all - a text-only reading has no use for a cover image),
+     * and the source must not know either of them. Evaluated on every enumeration so a settings
+     * change applies to the next chapter opened.
+     */
+    private val wantsCoverPage: () -> Boolean = { true },
+    // KMK <--
 ) : TextTocSource, TextSearchSource, TextIncrementalSource {
 
     /** What a book reader can rely on. An EPUB chapter almost always has a TOC, search and inline images. */
@@ -58,9 +69,19 @@ class EpubTextSource(
      * map through it rather than indexing positionally.
      */
     fun textPages(chapter: SChapter): List<TextPage> {
+        val indexed = indexedSpine(chapter)
         var totalChars = 0
         return buildList {
-            for (page in spineIndex(chapter)) {
+            for (page in indexed.pages) {
+                // KMK --> The cover page arrives with its markup already in hand; "reading" it
+                // would resolve its *image* path through the spine-item fallback and hand back the
+                // first real document's markup as the cover's.
+                if (page.url == indexed.coverUrl) {
+                    totalChars += page.text.length
+                    add(page)
+                    continue
+                }
+                // KMK <--
                 val markup = documentText(chapter, page) ?: run {
                     // Every skipped document is logged by name: a chapter that reads as empty is
                     // otherwise indistinguishable from a broken one, and this is the only line that
@@ -111,8 +132,23 @@ class EpubTextSource(
      */
     override suspend fun getTextPageIndex(chapter: SChapter): List<TextPage> = spineIndex(chapter)
 
-    /** The same enumeration, blocking. See [getTextPageIndex]. */
-    private fun spineIndex(chapter: SChapter): List<TextPage> {
+    // KMK -->
+    /**
+     * The chapter's documents in reading order, **including a synthesized cover page at index 0**
+     * when the reader wants one and the book declares a cover the spine does not already show.
+     *
+     * Every spine document after a cover shifts up by one. That is the whole cost of the feature
+     * and it is paid consistently: search hits, reading positions and the page list all speak the
+     * same shifted coordinates, and positions additionally record the document's URL (see
+     * `NovelProgress.Position`) so an index written before the shift still resolves.
+     */
+    private class IndexedSpine(
+        val pages: List<TextPage>,
+        /** Archive path of the synthesized cover page, or null when there is none. */
+        val coverUrl: String?,
+    )
+
+    private fun indexedSpine(chapter: SChapter): IndexedSpine {
         val epub = readerFor(chapter)
             ?: throw IllegalStateException("Chapter not found: ${chapter.url}")
 
@@ -125,9 +161,10 @@ class EpubTextSource(
                     "exposing the first $MAX_DOCUMENTS"
             }
         }
-        return documents.take(MAX_DOCUMENTS).mapIndexed { index, item ->
+        val cover = coverPageFor(chapter, epub, documents)
+        val pages = documents.take(MAX_DOCUMENTS).mapIndexed { index, item ->
             TextPage(
-                index = index,
+                index = index + if (cover != null) 1 else 0,
                 url = item.href,
                 text = "",
                 kind = TextPage.Kind.HTML,
@@ -135,7 +172,112 @@ class EpubTextSource(
                 name = item.title,
             )
         }
+        return IndexedSpine(
+            pages = if (cover != null) listOf(cover) + pages else pages,
+            coverUrl = cover?.url,
+        )
     }
+
+    /**
+     * The synthesized cover page, or null when there is nothing to synthesize.
+     *
+     * Three gates, in the order that keeps them cheap:
+     *
+     * 1. the reader's preference ([wantsCoverPage]);
+     * 2. the book declares a cover at all, and the archive actually contains it - a manifest
+     *    that names a file the zip does not hold would otherwise add a page that renders as a
+     *    broken image;
+     * 3. the spine's own first document does not already embed the cover - calibre-built books
+     *    usually *do* carry a cover page in the spine, and showing theirs twice is worse than
+     *    not showing it at all.
+     *
+     * The third gate reads the first spine document, which is a real cost, so its verdict is
+     * cached per chapter: the spine is enumerated on every open and again for every search, and
+     * the answer depends only on the file.
+     */
+    private fun coverPageFor(
+        chapter: SChapter,
+        epub: EpubReader,
+        documents: List<EpubSpineItem>,
+    ): TextPage? {
+        if (!wantsCoverPage()) return null
+        val coverHref = epub.coverHref ?: return null
+        if (!epub.contains(coverHref)) {
+            logcat {
+                "EpubTextSource: ${chapter.url} declares cover $coverHref but the archive does not contain it"
+            }
+            return null
+        }
+        if (coverEmbeddedInSpine(chapter, epub, documents, coverHref)) return null
+        return TextPage(
+            index = 0,
+            url = coverHref,
+            // A complete document, self-contained per the TextPage contract. The base href is the
+            // archive root (an empty path), so the plain archive path of the src resolves - the
+            // same channel every other plate travels: inlined when it fits the ceilings, streamed
+            // by the reader's resource server when it does not.
+            text = coverMarkup(coverHref),
+            kind = TextPage.Kind.HTML,
+            baseHref = "",
+            name = null,
+        )
+    }
+
+    /**
+     * The cover document: the book's own cover image, on the reader's page.
+     *
+     * The `kmk-cover` class and the `kmk-cover-img` id are matched by the reader's injected
+     * stylesheet (see `NovelTypographyCss`), which sizes and centres the image - inline styles
+     * would lose the cascade fight against the `!important` rules the reader layers on top, so
+     * the cover's presentation belongs to the stylesheet the reader controls.
+     */
+    private fun coverMarkup(coverHref: String): String = buildString {
+        append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>Cover</title></head>")
+        append("<body class=\"kmk-cover\">")
+        append("<img id=\"kmk-cover-img\" src=\"")
+        append(coverHref.replace("\"", "%22"))
+        append("\" alt=\"\">")
+        append("</body></html>")
+    }
+
+    /**
+     * Whether the spine's own first document already shows the cover, by reading it and looking
+     * for the cover's reference.
+     *
+     * Compared by both spellings a producer could have written - the archive path as the manifest
+     * declares it, and its percent-decoded form - plus the bare file name, because a relative
+     * `src="cover.jpg"` from the same directory names the same file without either. All compared
+     * case-insensitively: a producer that renamed `Cover.jpg` to `cover.jpg` between the OPF and
+     * the page is not a book that deserves a double cover.
+     */
+    private fun coverEmbeddedInSpine(
+        chapter: SChapter,
+        epub: EpubReader,
+        documents: List<EpubSpineItem>,
+        coverHref: String,
+    ): Boolean {
+        coverVerdicts[chapter.url]?.let { return it }
+        val first = documents.firstOrNull()
+        val embedded = first?.let { epub.readText(it.href) }?.let { markup ->
+            val file = coverHref.substringAfterLast('/')
+            val lower = markup.lowercase()
+            lower.contains(coverHref.lowercase()) ||
+                lower.contains(EpubPaths.percentDecode(coverHref).lowercase()) ||
+                (file.isNotBlank() && lower.contains(file.lowercase()))
+        } ?: false
+        // Bounded: a long session opens many chapters and this is a verdict about a file, not a
+        // reader choice - old chapters do not come back with a different answer.
+        if (coverVerdicts.size >= COVER_VERDICT_CACHE) coverVerdicts.remove(coverVerdicts.keys.first())
+        coverVerdicts[chapter.url] = embedded
+        return embedded
+    }
+
+    /** Per-chapter cache of [coverEmbeddedInSpine]'s verdict. See its comment for the bound. */
+    private val coverVerdicts = LinkedHashMap<String, Boolean>()
+    // KMK <--
+
+    /** The same enumeration, blocking. See [getTextPageIndex]. */
+    private fun spineIndex(chapter: SChapter): List<TextPage> = indexedSpine(chapter).pages
 
     /**
      * The markup of one spine document, or null when it cannot be read or is over the size ceiling.
@@ -145,6 +287,11 @@ class EpubTextSource(
      * never has to hold all of them at once.
      */
     override suspend fun getTextPageText(chapter: SChapter, page: TextPage): String? {
+        // KMK --> A page that arrives with its markup already in hand - the synthesized cover - is
+        // its own document and never a spine item: resolving it by the fallback in [spineItemOf]
+        // would read the first *real* document's markup as the cover's.
+        if (page.text.isNotEmpty()) return page.text
+        // KMK <--
         val markup = documentText(chapter, page)
         if (markup == null) {
             logcat {
@@ -239,10 +386,16 @@ class EpubTextSource(
      * two by the tags the strip removed. It is still a whole book, which is why the source that owns
      * the archive caches it rather than recomputing it per keystroke.
      */
-    fun plainTextFor(chapter: SChapter): List<IndexedText> =
-        spineIndex(chapter).mapNotNull { page ->
+    fun plainTextFor(chapter: SChapter): List<IndexedText> {
+        // KMK --> The cover page is an image; it has no text to search and no document behind it to
+        // read, so it is skipped rather than searched as its neighbours' first document.
+        val indexed = indexedSpine(chapter)
+        return indexed.pages.mapNotNull { page ->
+            if (page.url == indexed.coverUrl) return@mapNotNull null
             documentText(chapter, page)?.let { IndexedText(page.index, plainTextOf(it)) }
         }
+        // KMK <--
+    }
 
     /** Stripped text for one document, paired with the spine index it belongs to. */
     data class IndexedText(val index: Int, val plain: String)
@@ -308,5 +461,14 @@ class EpubTextSource(
          * the page. Only ever a fallback; see [spineItemOf].
          */
         private const val XHTML_MEDIA_TYPE = "application/xhtml+xml"
+
+        // KMK -->
+        /**
+         * Chapters whose cover-embedded verdict is remembered. Small on purpose: the verdict is a
+         * fact about a file, so the cache only exists to keep the search index build from paying
+         * the first document's read again after every open.
+         */
+        private const val COVER_VERDICT_CACHE = 8
+        // KMK <--
     }
 }

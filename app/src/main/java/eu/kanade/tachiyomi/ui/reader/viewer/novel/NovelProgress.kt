@@ -31,15 +31,23 @@ object NovelProgress {
     /**
      * A position in a chapter.
      *
-     * @property documentIndex which document (spine item / chapter) the position is in.
+     * @property documentIndex which document (spine item / chapter) the position is in, in the
+     *   coordinates of the reader's page list as it stood when the position was written.
      * @property characterOffset how far through that document, in characters of its plain text.
      *   0 means the start; a value at or beyond the document's length means its end.
      * @property characterLength length of that document's plain text.
+     * @property documentUrl the document's own archive path, the stable identity behind
+     *   [documentIndex]. The index is a *position*, and positions move - a cover page prepended
+     *   to the spine, a skipped document, a re-imported book all renumber the list under a stored
+     *   index, while the document a position actually names keeps its path. A restore resolves by
+     *   URL first and falls back to the index, so a renumbering costs at most one lost
+     *   within-document offset rather than landing in the wrong document.
      */
     data class Position(
         val documentIndex: Int,
         val characterOffset: Int,
         val characterLength: Int,
+        val documentUrl: String? = null,
     ) {
         /** Fraction of this document, clamped to 0..1. */
         val fractionInDocument: Float
@@ -48,20 +56,32 @@ object NovelProgress {
                 return (characterOffset.toFloat() / characterLength).coerceIn(0f, 1f)
             }
 
-        /** Stable string for persistence. */
-        fun encode(): String = "$documentIndex:$characterOffset:$characterLength"
+        /**
+         * Stable string for persistence.
+         *
+         * The URL rides as an optional fourth field so an entry written before it existed still
+         * decodes - positions are private preferences, but they outlive any one APK.
+         */
+        fun encode(): String {
+            val url = documentUrl ?: return "$documentIndex:$characterOffset:$characterLength"
+            // Colons inside the URL are preserved by taking the tail as one field: a path may
+            // legally contain one and the reader's split must not eat the rest.
+            return "$documentIndex:$characterOffset:$characterLength:$url"
+        }
 
         companion object {
             /** Parses [encode] output, returning null on anything malformed rather than throwing. */
             fun decode(raw: String?): Position? {
                 if (raw.isNullOrBlank()) return null
-                val parts = raw.split(':')
-                if (parts.size != 3) return null
+                val parts = raw.split(':', limit = 4)
+                if (parts.size < 3) return null
                 val index = parts[0].toIntOrNull() ?: return null
                 val offset = parts[1].toIntOrNull() ?: return null
                 val length = parts[2].toIntOrNull() ?: return null
                 if (index < 0 || offset < 0 || length < 0) return null
-                return Position(index, offset, length)
+                // The fourth field is the whole remainder, so a URL containing ':' survives.
+                val url = parts.getOrNull(3)?.takeIf { it.isNotEmpty() }
+                return Position(index, offset, length, url)
             }
         }
     }

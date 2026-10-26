@@ -79,6 +79,29 @@ object NovelTypographySettingKeys {
     val MARGIN_BOTTOM = SettingKey("pref_novel_margin_bottom", 0.03f)
 
     /**
+     * How the book is laid out on screen: continuous scroll, discrete pages, or a two-column
+     * spread. Stored as [eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelPageLayout.PageMode]'s
+     * ordinal.
+     *
+     * Not part of [NovelTypography]: a page mode is how the reader *moves through* the flow, not
+     * a property of the type, and it cannot ride the live-stylesheet re-apply - a mode change
+     * is a fresh layout, so the viewer re-renders the document rather than swapping CSS in place.
+     */
+    val PAGE_MODE = SettingKey("pref_novel_page_mode", 0)
+
+    /**
+     * Whether a book that declares a cover image shows it as its first page.
+     *
+     * Most EPUBs keep the cover out of the spine - it lives in the package metadata, pointed at
+     * by `cover-image` or the legacy `<meta name="cover">` - so a reader that only walks the
+     * spine opens on the title page and the cover is never seen again after the library list.
+     * On by default: it is what a physical book does, and what readers expect a "book" to open
+     * with. The source skips it when the spine's own first document already embeds the cover, so
+     * a book that ships a real cover page is not shown it twice.
+     */
+    val COVER_FIRST = SettingKey("pref_novel_cover_first", true)
+
+    /**
      * Every key above, for the [tachiyomi.core.common.preference.SettingsRegistry].
      *
      * Registration asserts global uniqueness at startup, so a key added here that is already
@@ -105,6 +128,8 @@ object NovelTypographySettingKeys {
         MARGIN_RIGHT,
         MARGIN_TOP,
         MARGIN_BOTTOM,
+        PAGE_MODE,
+        COVER_FIRST,
     )
 }
 // KMK <--
