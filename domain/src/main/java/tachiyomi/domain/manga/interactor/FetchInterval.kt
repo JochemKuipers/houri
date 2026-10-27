@@ -21,9 +21,32 @@ class FetchInterval(
         manga: Manga,
         dateTime: ZonedDateTime,
         window: Pair<Long, Long>,
+    ): MangaUpdate = toMangaUpdate(
+        manga = manga,
+        dateTime = dateTime,
+        window = window,
+        chapters = getChaptersByMangaId.await(manga.id, applyFilter = true),
+    )
+
+    /**
+     * [chapters]-taking variant for callers that already hold the chapter list in hand.
+     *
+     * The restore is the one caller: a backup that carries no update schedule of its own
+     * (every entry of a Mihon-format backup, or one written before the schedule existed)
+     * must have the schedule computed per entry, and reading it back from the table
+     * re-fetched every chapter row the restore had just written - a third full chapter
+     * read per entry. Unlike the single-argument path this does not apply the bookmark
+     * filter: the restore is making these rows authoritative, so the cadence comes from
+     * all of them.
+     */
+    suspend fun toMangaUpdate(
+        manga: Manga,
+        dateTime: ZonedDateTime,
+        window: Pair<Long, Long>,
+        chapters: List<Chapter>,
     ): MangaUpdate {
         val interval = manga.fetchInterval.takeIf { it < 0 } ?: calculateInterval(
-            chapters = getChaptersByMangaId.await(manga.id, applyFilter = true),
+            chapters = chapters,
             zone = dateTime.zone,
         )
         val currentWindow = if (window.first == 0L && window.second == 0L) {

@@ -70,6 +70,9 @@ Code in `eu.kanade.tachiyomi.data.backup.{create,restore}`:
 - `MangaRestorer.restore` takes a **list** and opens **one transaction for the chunk**, falling
   back to entry-by-entry in `BackupRestorer` if the batch throws. One transaction per entry was
   ~15 000 commits on a large library; see `restore`'s own comment.
+- The per-entry fetch-interval recompute (schedule-less backups: every Mihon-format one) reads the
+  **backup's own chapter list**, not the table — `FetchInterval.toMangaUpdate` takes the chapters
+  as a parameter for exactly this caller; reading them back re-fetched every row just written.
 - `PreferenceBackupCreator` snapshots `preferenceStore.getAll()` → typed `BackupPreference`
   list; always drops `__APP_STATE_`, drops `__PRIVATE_` unless user opts in.
 - `PreferenceRestorer` type-switches values back; remaps category IDs; special-cases

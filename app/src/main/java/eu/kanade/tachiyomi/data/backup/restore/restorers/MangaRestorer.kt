@@ -48,7 +48,10 @@ class MangaRestorer(
     private val updateManga: UpdateManga = globalAppGraph.updateManga,
     private val getTracks: GetTracks = globalAppGraph.getTracks,
     private val insertTrack: InsertTrack = globalAppGraph.insertTrack,
-    fetchInterval: FetchInterval = globalAppGraph.fetchInterval,
+    // KMK --> Kept as a val: the restore computes fetch intervals from the backup's own
+    // chapter list (see restoreMangaDetails), which needs the interactor, not just its window.
+    private val fetchInterval: FetchInterval = globalAppGraph.fetchInterval,
+    // KMK <--
     // SY -->
     private val setCustomMangaInfo: SetCustomMangaInfo = globalAppGraph.setCustomMangaInfo,
     private val insertFlatMetadata: InsertFlatMetadata = globalAppGraph.insertFlatMetadata,
@@ -507,7 +510,18 @@ class MangaRestorer(
         // Trust the backup's update schedule when it carries one. Recalculating here
         // collapses every title's predicted date to today + interval (issue #12).
         if (manga.nextUpdate == 0L || manga.fetchInterval == 0) {
-            updateManga.awaitUpdateFetchInterval(manga, now, currentFetchWindow)
+            // The chapters parameter is the backup's own list, which is already in hand:
+            // reading the schedule back from the table re-fetched every chapter row this
+            // restore had just written - a third full chapter read per entry, paid by every
+            // entry of a backup that carries no schedule (i.e. a Mihon-format backup).
+            updateManga.await(
+                fetchInterval.toMangaUpdate(
+                    manga = manga,
+                    dateTime = now,
+                    window = currentFetchWindow,
+                    chapters = chapters.map { it.toChapterImpl() },
+                ),
+            )
         }
         // KMK <--
         // SY -->

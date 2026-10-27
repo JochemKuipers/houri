@@ -92,6 +92,28 @@ files moved. See .github/scripts/release_notes.py.
   appear empty — instead of every file on the device.
 
 ### Fix
+- **Cold start: splash screen finally lets go**: opening the app the ordinary way — tapping its
+  icon — kept the pineapple splash pinned on screen for a full five seconds plus its exit
+  animation on every cold start, no matter how quickly the app had actually finished loading
+  underneath. (A plain launcher tap carries no deep link, and the splash was waiting for one.)
+  The splash now clears as soon as the start screen is ready, so a cold start takes about as
+  long as the app genuinely needs — several seconds faster on most devices.
+- **Faster backup restore for Mihon and older backups**: restoring a backup that carries no
+  update schedule — every backup written by Mihon itself, and Houri backups from before the
+  schedule existed — made the restore re-read every chapter row it had just written, once per
+  library entry, to work out each title's refresh interval. It now computes the interval from
+  the chapter list the backup already carries, cutting one full chapter-table read per entry
+  from the restore.
+- **Book reader: custom CSS colours text now**: with your own stylesheet active, a rule written on
+  `body` — the most common way to restyle the whole page, e.g. `body { color: #000000; … }` —
+  coloured the page canvas but left the text itself in the reader's own derived colour, because
+  the reader re-asserts its text colour directly on paragraphs. When custom CSS is on, the
+  reader's palette now yields the flow to your stylesheet (force dark keeps its overrides), so
+  hand-typed colours and headings land everywhere they should.
+- **Manga details loading skeleton**: the placeholder now starts where the real details will land
+  — below the app bar — instead of at the screen's very top edge, so the content no longer jumps
+  downward the moment the details arrive, and it no longer paints chapter rows into the
+  gesture-navigation area at the bottom edge.
 - **Crash right after onboarding**: finishing onboarding — or tapping the finish button a touch
   too eagerly, twice in the same moment — could crash the app with "NavDisplay backstack
   cannot be empty", because the second tap popped the home screen itself off the navigation
