@@ -47,6 +47,21 @@ class WebtoonFrame(context: Context) : FrameLayout(context) {
             recycler?.zoomOutDisabled = value
         }
 
+    // KMK -->
+    /**
+     * Pointer count of the event most recently handed to [scaleDetector].
+     *
+     * Every scale callback arrives synchronously from inside `scaleDetector.onTouchEvent(ev)`,
+     * so at callback time this names the event that produced it. A genuine quick scale runs on
+     * one finger - the second tap is held and the same finger drags - while a pinch runs on two
+     * or more. That is the only fact that tells the two apart at [ScaleListener.onScaleBegin],
+     * and the difference is load-bearing: quick scale belongs to the double-tap-zoom setting,
+     * a pinch to the pinch-to-zoom one, so classifying a pinch as a quick scale lets it zoom
+     * with pinch zoom disabled.
+     */
+    private var scalePointerCount = 0
+    // KMK <--
+
     /**
      * Recycler view added in this frame.
      */
@@ -57,6 +72,9 @@ class WebtoonFrame(context: Context) : FrameLayout(context) {
      * Dispatches a touch event to the detectors.
      */
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        // KMK -->
+        scalePointerCount = ev.pointerCount
+        // KMK <--
         scaleDetector.onTouchEvent(ev)
         flingDetector.onTouchEvent(ev)
 
@@ -83,12 +101,18 @@ class WebtoonFrame(context: Context) : FrameLayout(context) {
      */
     inner class ScaleListener : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-            recycler?.onScaleBegin()
+            // KMK --> fromQuickScale, not a guess from "a double tap happened recently": a
+            // pinch started while the second tap's finger was still down used to arm quick
+            // scaling and then rode its exemption past the pinch gate.
+            recycler?.onScaleBegin(fromQuickScale = scalePointerCount == 1)
+            // KMK <--
             return true
         }
 
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            recycler?.onScale(detector.scaleFactor)
+            // KMK -->
+            recycler?.onScale(detector.scaleFactor, fromQuickScale = scalePointerCount == 1)
+            // KMK <--
             return true
         }
 

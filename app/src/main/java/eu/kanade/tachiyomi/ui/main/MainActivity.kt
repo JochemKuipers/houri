@@ -402,6 +402,19 @@ class MainActivity : BaseActivity() {
                         // runs as a graphicsLayer translation, where the old pair re-drew both
                         // screens every frame and dropped frames on low-end devices.
                         val slideDistance = rememberSlideDistance()
+                        // KMK --> The root is the floor of this stack, and the onBack guard below
+                        // cannot see the ~100 in-app buttons that pop it directly. Any of them
+                        // double-fired within a single frame (a double-tapped onboarding finish,
+                        // settings back, or navigate-up) removes HomeRoute itself, and this
+                        // NavDisplay recompose then crashed with "backstack cannot be empty".
+                        // Repaired here rather than recovered later: NavDisplay has not read the
+                        // stack yet at this point, so the frame renders the restored root instead
+                        // of throwing, and the write is conditional and self-stabilising - it
+                        // makes the very condition it guards on false again, so it cannot loop.
+                        if (backStack.isEmpty()) {
+                            backStack.add(HomeRoute)
+                        }
+                        // KMK <--
                         NavDisplay(
                             backStack = backStack,
                             // KMK --> nav3 dispatches onBack from a callback whose enabled state can

@@ -10,6 +10,7 @@ import eu.kanade.presentation.more.settings.screen.SearchableSettings
 import eu.kanade.presentation.more.settings.screen.SettingsDataRoute
 import eu.kanade.tachiyomi.ui.setting.addSettingsRoute
 import mihon.app.di.globalAppGraph
+import mihon.core.navigation.OnboardingRoute
 import mihon.core.navigation.SettingsRoute
 import mihon.core.navigation.domain.SettingsDestination
 import mihon.core.navigation.util.LocalBackStack
@@ -31,8 +32,16 @@ fun OnboardingScreen() {
         // a completed onboarding, so it is the reader's choice and not a default that happened
         // to be true. See AchievementPreferences.unlocksHeldForOnboarding.
         runCatching { globalAppGraph.achievementPreferences.unlocksHeldForOnboarding = false }
+        // Pop only what onboarding owns. The finish button - and the last step's restore-backup
+        // row, which routes through here too - can double-fire inside one frame, before
+        // recomposition takes this screen down; the second unconditional pop then removed
+        // HomeRoute and the reader crashed with "NavDisplay backstack cannot be empty"
+        // immediately after onboarding. HomeRoute is the floor; MainActivity reseeds it for
+        // the whole class, but the pop stays honest at the source too.
+        if (backStack.lastOrNull() is OnboardingRoute) {
+            backStack.removeLastOrNull()
+        }
         // KMK <--
-        backStack.removeLastOrNull()
     }
 
     val restoreSettingKey = stringResource(SettingsDataRoute.restorePreferenceKeyString)

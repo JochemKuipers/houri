@@ -297,15 +297,20 @@ open class ReaderPageImageView @JvmOverloads constructor(
         // 5x zoom
         maxScale = scale * MAX_ZOOM_SCALE
         // KMK -->
-        if (config?.disableZoomIn == true) {
-            isZoomEnabled = false
+        // Written both ways on purpose: this view survives a rebind (a holder is reused, not
+        // recreated), so a config that once disabled zoom has to be able to re-enable it too.
+        isZoomEnabled = config?.disableZoomIn != true
+        // Quick scale (double tap and drag) is a double-tap-zoom gesture, not a pinch: it goes
+        // with the double-tap-zoom setting. The WebGPU reader already gates both behind one
+        // flag (WebGpuConfig.resolveDoubleTapZoom ties doubleTapGesturesEnabled to it), so a
+        // disabled double-tap zoom still zoomed in the pager whenever the second tap was
+        // dragged - the same setting answering differently in the two readers.
+        setQuickScaleEnabled(config?.doubleTapZoom != false)
+        if (config?.doubleTapZoom == false) {
+            setDoubleTapZoomScale(scale)
         } else {
-            if (config?.doubleTapZoom == false) {
-                setDoubleTapZoomScale(scale)
-            } else {
-                // KMK <--
-                setDoubleTapZoomScale(scale * 2)
-            }
+            // KMK <--
+            setDoubleTapZoomScale(scale * 2)
         }
 
         when (config?.zoomStartPosition) {
@@ -394,24 +399,6 @@ open class ReaderPageImageView @JvmOverloads constructor(
 
             if (this is PhotoView) {
                 setScaleLevels(1F, 2F, MAX_ZOOM_SCALE)
-                // Force 2 scale levels on double tap
-                setOnDoubleTapListener(
-                    object : GestureDetector.SimpleOnGestureListener() {
-                        override fun onDoubleTap(e: MotionEvent): Boolean {
-                            if (scale > 1F) {
-                                setScale(1F, e.x, e.y, true)
-                            } else {
-                                setScale(2F, e.x, e.y, true)
-                            }
-                            return true
-                        }
-
-                        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                            this@ReaderPageImageView.onViewClicked()
-                            return super.onSingleTapConfirmed(e)
-                        }
-                    },
-                )
                 setOnScaleChangeListener { _, _, _ ->
                     this@ReaderPageImageView.onScaleChanged(scale)
                 }
@@ -426,6 +413,34 @@ open class ReaderPageImageView @JvmOverloads constructor(
     ) = (pageView as? AppCompatImageView)?.apply {
         if (this is PhotoView) {
             setZoomTransitionDuration(config.zoomDuration.getSystemScaledDuration())
+            // KMK -->
+            // PhotoView owns its own gestures, so the zoom opt-outs have to be applied here or
+            // an animated page ignores them: "disable zoom in" left pinch zoom alive, and a
+            // disabled double-tap zoom still zoomed on the second tap. Per bind rather than
+            // per view for the same reason as setupZoom - this view survives a rebind, so a
+            // config change has to be able to take either setting either way.
+            setZoomable(!config.disableZoomIn)
+            // Force 2 scale levels on double tap
+            setOnDoubleTapListener(
+                object : GestureDetector.SimpleOnGestureListener() {
+                    override fun onDoubleTap(e: MotionEvent): Boolean {
+                        if (config.doubleTapZoom) {
+                            if (scale > 1F) {
+                                setScale(1F, e.x, e.y, true)
+                            } else {
+                                setScale(2F, e.x, e.y, true)
+                            }
+                        }
+                        return true
+                    }
+
+                    override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                        this@ReaderPageImageView.onViewClicked()
+                        return super.onSingleTapConfirmed(e)
+                    }
+                },
+            )
+            // KMK <--
         }
 
         val request = ImageRequest.Builder(context)

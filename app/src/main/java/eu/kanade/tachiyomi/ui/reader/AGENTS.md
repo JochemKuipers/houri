@@ -480,6 +480,34 @@ Strip and continuous reading use separate image processors (split 2026-08-31):
 `PagerPageImageProcessor.kt`, `PagerJoinedItemsBuilder.kt`, `WebtoonPageImageProcessor.kt`.
 `WebtoonBaseHolder.viewer` is public for cross-holder access. Keep the two paths separate.
 
+## Zoom gating — which setting owns which gesture
+
+The legacy viewers have two zoom opt-outs (pinch-to-zoom, double-tap zoom) plus "disable zoom
+in", and **the gesture that a setting does not govern must never ride in through the back of
+one it does**:
+
+- **A quick scale is a double-tap-zoom gesture; a pinch is a pinch-to-zoom gesture.** In the
+  webtoon viewer (`WebtoonFrame` → `WebtoonRecyclerView`) the two are told apart by the
+  pointer count of the event the scale detector is currently processing, which the frame
+  captures in `dispatchTouchEvent` and passes down as `fromQuickScale`. Quick scale is armed
+  in `onScaleBegin` only when that count is 1 *and* the second tap's finger is still down —
+  the old check read only `isDoubleTapping`, which stays set until the pointer lifts, so a
+  pinch begun on the held second tap was classified as a quick scale and then bypassed the
+  pinch gate in `onScale` with pinch-to-zoom disabled. A pinch that follows a double tap must
+  not zoom with the setting off.
+- **"Double tap to zoom" off covers the whole double-tap gesture in both readers.** The
+  WebGPU viewer resolves one flag (`WebGpuConfig.resolveDoubleTapZoom` ties
+  `doubleTapGesturesEnabled` to it, upstream `34fb12b`); the pager matches it by switching
+  SSIV's quick scale off with the setting (`ReaderPageImageView.setupZoom` →
+  `setQuickScaleEnabled`). Left alone, a disabled double-tap zoom still zoomed whenever the
+  second tap was dragged.
+- **`ReaderPageImageView` is rebound, not recreated** (RecyclerView rebinds; the pager's
+  translation swap calls `setImage` twice on one view), so every config write there is made
+  both ways — `isZoomEnabled`, the PhotoView `setZoomable`, and the double-tap listener are
+  applied per bind. A one-way `isZoomEnabled = false` was how a reused view could stay
+  zoom-locked (and an animated GIF page ignored the zoom settings entirely, because PhotoView
+  owns its own gestures).
+
 ## EPUB as comic (`loader/EpubPageLoader.kt`)
 
 The local source can also offer an EPUB as an image chapter: `getImagesFromPages` walks every `<img>`

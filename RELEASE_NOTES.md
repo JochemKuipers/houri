@@ -92,6 +92,21 @@ files moved. See .github/scripts/release_notes.py.
   appear empty — instead of every file on the device.
 
 ### Fix
+- **Crash right after onboarding**: finishing onboarding — or tapping the finish button a touch
+  too eagerly, twice in the same moment — could crash the app with "NavDisplay backstack
+  cannot be empty", because the second tap popped the home screen itself off the navigation
+  stack. The finish action now only removes the screen it owns, and the home screen is
+  re-seeded as the bottom of the stack before it is ever rendered empty, so no double-tap
+  anywhere in the app can leave it rootless (the same class of fix as the back-press one
+  below).
+- **Legacy reader: zoom settings are honoured**: in the classic pager and long-strip readers,
+  a **double tap followed by a pinch zoomed in even with pinch-to-zoom disabled** — the
+  pinch was misread as a double-tap-and-drag gesture, which the setting does not govern. The
+  two are now told apart for real. Also, with **double tap to zoom** turned off, dragging
+  after the double tap still zoomed (the WebGPU reader already treated that setting as
+  covering the whole double-tap gesture); and on animated (GIF) pages in the pager,
+  **disable zoom in** and the double-tap setting previously had no effect at all. All three
+  now answer the same setting the same way in both readers.
 - **Crash on back at the home screen**: pressing back — or double-pressing it quickly — could
   crash the app with "NavDisplay backstack cannot be empty". Navigation 3 can deliver a back
   press whose handler is one frame out of date, and the app's own back handlers took that press

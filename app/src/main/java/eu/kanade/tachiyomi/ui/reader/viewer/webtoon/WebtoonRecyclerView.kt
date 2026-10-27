@@ -188,9 +188,14 @@ class WebtoonRecyclerView @JvmOverloads constructor(
         scaleY = rate
     }
 
-    fun onScale(scaleFactor: Float) {
+    fun onScale(scaleFactor: Float, fromQuickScale: Boolean) {
         // KMK ->
-        if (!detector.isQuickScaling && !pinchToZoom) return
+        // A pinch zooms only when pinch-to-zoom is on. A quick scale (double tap and drag) is
+        // governed by the double-tap-zoom setting instead, so it may keep working with pinch
+        // zoom disabled - but only when it is the real thing: begun on one finger, after a
+        // double tap, and armed by onScaleBegin. Without the armed check, a pinch that
+        // happened to follow a double tap zoomed right past this gate with the setting off.
+        if (!pinchToZoom && !(fromQuickScale && detector.isQuickScaling)) return
 
         scaleTo(currentScale * scaleFactor)
     }
@@ -223,10 +228,17 @@ class WebtoonRecyclerView @JvmOverloads constructor(
         requestLayout()
     }
 
-    fun onScaleBegin() {
-        if (detector.isDoubleTapping) {
+    fun onScaleBegin(fromQuickScale: Boolean) {
+        // KMK -->
+        // Quick scale is a one-finger gesture: the second tap is held and the same finger
+        // drags. A scale begun on two or more fingers is a pinch however closely it followed
+        // a double tap - the old check looked only at isDoubleTapping, which stays set until
+        // the pointer lifts, so a pinch started on the held second tap armed quick scaling
+        // and then bypassed the pinch gate in onScale with the setting disabled.
+        if (fromQuickScale && detector.isDoubleTapping) {
             detector.isQuickScaling = true
         }
+        // KMK <--
     }
 
     fun onScaleEnd() {
