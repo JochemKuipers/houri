@@ -1731,8 +1731,12 @@ internal class NovelWebViewer(
      * rules beat the reader's generated ones.
      */
     private fun liveTypographyJs(): String {
-        val css = readerFontCss() + NovelTypographyCss.stylesheet(typography)
+        // The custom sheet's own presence decides the ladder's prompt: with it active, the
+        // typography yields the palette colour on the text-bearing set — see the same condition
+        // in [NovelDocument.build], which must match or the swapped rules would drift from the
+        // built document's.
         val custom = customCssForInjection()
+        val css = readerFontCss() + NovelTypographyCss.stylesheet(typography, custom.isNotBlank())
         val customInstall = if (custom.isBlank()) {
             ""
         } else {

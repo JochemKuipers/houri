@@ -288,7 +288,15 @@ and re-creates `#kmk-custom-css` (or removes it when the toggle went off — a b
 standing would keep applying the old rules). JS has no live swap — re-running code per change would
 double-register everything it listens for — so a JS edit or toggle lands on the next page turned,
 which the editor's hint states. The custom-CSS preference signals therefore ride
-`NovelTypographyPreferences.changes()` and the JS ones deliberately do not.
+`NovelTypographyPreferences.changes()` and the JS ones deliberately do not. And while the sheet is
+active, the typography's palette *yields the colour on the element ladder* (`NovelTypographyCss`
+takes the sheet's own presence as a flag): a `body { color: … }` in the last stylesheet only ever
+colours the `body` element — text inside a `p` keeps the paragraph's own matched colour and never
+inherits from the body — so the ladder's re-assertion used to win the text while the user's rule
+won only the canvas. With the sheet active the ladder drops its colour (sizing and spacing stay),
+the palette stays on `html, body` where a custom rule overrides it by source order, and force dark
+keeps its ladder because its neutral already made classed flow backgrounds transparent — a
+publisher colour there then needs re-asserting or the book goes dark-on-dark.
 
 **Progress is a character offset, not a page index.** A page index in a reflowable document means
 something different on every device and at every font size; `NovelProgress.Position`

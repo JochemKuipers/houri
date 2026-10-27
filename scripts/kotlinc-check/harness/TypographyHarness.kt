@@ -275,6 +275,52 @@ fun main() {
         "#f5f2e8",
     )
 
+    // ---------------- custom CSS yields the palette colour on the flow ----------------
+    // The custom sheet is the document's LAST stylesheet, but a rule on `body` only ever colours
+    // the body element itself: text inside a `p` keeps the paragraph's own matched colour and
+    // never inherits from the body. While the ladder kept re-asserting the derived colour,
+    // `body { color: … }` in the reader's hand-typed CSS repainted the canvas and nothing else —
+    // the reported "custom CSS colours the page but not the text". With the sheet active, the
+    // ladder drops its colour re-assertion (sizing and spacing stay) and headings follow the
+    // body's colour; the html/body rule remains so a reader who types nothing of their own still
+    // gets the palette, and the hand-typed rule overrides it there by source order.
+    val yielded = NovelTypographyCss.stylesheet(darkBg, customCssActive = true)
+    checkTrue(
+        "palette colour still emitted on html/body",
+        yielded.contains("color: #ffffff !important;\n  background-color: #000000 !important;"),
+    )
+    checkTrue(
+        "custom css active yields the ladder colour",
+        // darkBg carries no letter-spacing, so this is the ladder block exactly as emitted.
+        yielded.contains(
+            "section, article, h1, h2, h3, h4, h5, h6 " +
+                "{ font-size: var(--kmk-font-size) !important; line-height: var(--kmk-line) !important; }",
+        ),
+    )
+    check(
+        "no heading colour under custom css",
+        yielded.contains("h1, h2, h3, h4, h5, h6 { color: #ffffff !important; }"),
+        false,
+    )
+    // With the sheet inactive the ladder is intact — the reason it exists, a publisher rule on
+    // `p`, is unchanged.
+    checkTrue(
+        "ladder colour intact without custom css",
+        darkBgCss.contains("blockquote, dd, dt, section, article") &&
+            darkBgCss.contains("color: #ffffff !important; }"),
+    )
+    // Force dark keeps its ladder even under custom CSS: its neutral has already made classed flow
+    // backgrounds transparent, and a publisher colour left on one of those elements then needs
+    // the re-assertion or the book goes dark-on-dark.
+    val forcedYield = NovelTypographyCss.stylesheet(NovelTypography(forceDark = true), customCssActive = true)
+    contains("force dark keeps the ladder colour under custom css", forcedYield, "color: #ffffff !important; }")
+    contains(
+        "force dark still neutralises flow backgrounds under custom css",
+        forcedYield,
+        "*:not(html):not(body):not(img):not(svg):not(video):not(picture):not(source) " +
+            "{ background-color: transparent !important; }",
+    )
+
     // ---------------- bundled font table ----------------
     // The picker stores and loads through these values; one wrong suffix and a family silently
     // stops existing. Asserted off-device because the file is pure.

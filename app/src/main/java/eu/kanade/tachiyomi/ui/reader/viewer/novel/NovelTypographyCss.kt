@@ -44,14 +44,30 @@ object NovelTypographyCss {
      * Properties that default to "follow the publisher" ([NovelTypography.justified],
      * [hyphenation], [verticalWriting]) are omitted entirely when null, so the book keeps its own
      * choice unless the reader made one.
+     *
+     * @param customCssActive true when the reader's own custom CSS is enabled and not blank — the
+     *   same condition [NovelDocument] and [NovelWebViewer] use to emit the stylesheet it appends
+     *   after this one, so the two answers cannot disagree.
      */
-    fun stylesheet(type: NovelTypography): String {
+    fun stylesheet(type: NovelTypography, customCssActive: Boolean = false): String {
         val t = resolvePalette(type.sanitized())
         // Not `t.fontColor`: a background the reader chose forces a text colour even when they did
         // not choose one, or the page is the publisher's black text on the reader's black plate.
         // With force dark on, resolvePalette has already made that derivation explicit.
         val textColor = t.effectiveFontColor
         val forDark = t.forceDark == true
+
+        // The colour the ladder below re-asserts on text-bearing elements and headings. With custom
+        // CSS on, the palette *yields* it: a rule on `body` in that last stylesheet only ever
+        // colours the body element itself — text inside a `p` keeps the paragraph's own matched
+        // colour and never inherits from the body, so `body { color: … }` in the reader's
+        // hand-typed CSS could not colour the flow while the ladder kept re-asserting (the
+        // reported "custom CSS colours the page but not the text" report). The palette stays on
+        // `html, body` — a custom rule overrides it there by source order, and a reader who typed
+        // nothing of their own still inherits it into the flow. Force dark keeps the ladder: its
+        // neutral has already made classed flow backgrounds transparent, and a publisher colour
+        // on one of those elements then *needs* the re-assertion, or the book goes dark-on-dark.
+        val reassertedColour = if (customCssActive && !forDark) null else textColor
 
         return buildString {
             appendLine("/* komikku reader typography */")
@@ -85,8 +101,10 @@ object NovelTypographyCss {
             appendLine("}")
 
             // Re-asserted on the text-bearing elements because a publisher rule on `p` or a class
-            // outranks a rule on `body` regardless of where it appears in the document.
-            appendLine(elementsRule(t, textColor))
+            // outranks a rule on `body` regardless of where it appears in the document. The colour
+            // re-assertion yields to active custom CSS (see [reassertedColour]); the sizing and
+            // spacing stay, because nobody restyles those page-wide through a `body` rule.
+            appendLine(elementsRule(t, reassertedColour))
 
             appendLine("p, div, blockquote, li, dd, section, article {")
             appendLine("  margin-top: 0 !important;")
@@ -124,8 +142,10 @@ object NovelTypographyCss {
             // becomes unreadable negatives.
             if (forDark) appendLine(FORCE_DARK_NEUTRAL)
 
-            // Headings keep the publisher's scale but inherit the colour choice.
-            textColor?.let { appendLine("h1, h2, h3, h4, h5, h6 { color: $it !important; }") }
+            // Headings keep the publisher's scale but inherit the colour choice — or, under
+            // custom CSS, whatever the last stylesheet computes on the body (same yielding as the
+            // ladder above).
+            reassertedColour?.let { appendLine("h1, h2, h3, h4, h5, h6 { color: $it !important; }") }
 
             // An image must never bleed into the margin box. Unconditional rather than margin-gated:
             // a book without reader margins can still carry a full-bleed `<img>` wider than the
@@ -162,8 +182,8 @@ object NovelTypographyCss {
      * certain to emit. `<\/style>` is not a closing tag to the parser and is the same string to a CSS
      * parser, where `\/` is an escaped solidus.
      */
-    fun styleTag(type: NovelTypography): String =
-        "<style id=\"kmk-typography\">${stylesheet(type).replace("</", "<\\/")}</style>"
+    fun styleTag(type: NovelTypography, customCssActive: Boolean = false): String =
+        "<style id=\"kmk-typography\">${stylesheet(type, customCssActive).replace("</", "<\\/")}</style>"
 
     /**
      * Resolves [style]'s palette in place when force dark is on, so every rule below the palette can

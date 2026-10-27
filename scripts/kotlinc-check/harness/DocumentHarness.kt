@@ -193,6 +193,40 @@ fun main() {
             epochDoc.indexOf("window.KmkEpoch = 3;") < epochDoc.indexOf("</script>"),
     )
 
+    // ---------------- the reader's custom CSS ----------------
+    // The reader's hand-typed sheet rides the document in its own element (stable id, so the live
+    // swap can replace it) as the document's LAST stylesheet — `!important` against `!important`
+    // is decided by source order, and the promise custom CSS is built on is beating the reader's
+    // own rules.
+    val customed = NovelDocument.build(REAL_SPINE_ITEM, t, BASE, customCss = "p { margin: 0; }")
+    contains("custom css injected", customed, """<style id="kmk-custom-css">p { margin: 0; }""")
+    checkTrue(
+        "custom css is the last stylesheet",
+        customed.indexOf("kmk-custom-css") > customed.indexOf("kmk-typography"),
+    )
+    checkTrue(
+        "custom css inside the head",
+        customed.indexOf("kmk-custom-css") > customed.indexOf("<head>") &&
+            customed.indexOf("kmk-custom-css") < customed.indexOf("</head>"),
+    )
+    // A build-time copy left standing would keep applying whatever the CSS was — the live swap
+    // removes this element when the toggle goes off, and there is nothing to remove if none exist.
+    absent(
+        "blank custom css emits nothing",
+        NovelDocument.build(REAL_SPINE_ITEM, t, BASE, customCss = ""),
+        "kmk-custom-css",
+    )
+    // Reader-typed text is arbitrary. A closing tag inside the sheet would end the element in the
+    // parser before the rule is read, silently dropping everything after it.
+    val breakOutCustom = NovelDocument.build(
+        REAL_SPINE_ITEM,
+        t,
+        BASE,
+        customCss = """p</style><script>1</script><style>""",
+    )
+    absent("custom css cannot close its element", breakOutCustom, "</style><script>")
+    checkTrue("custom css kept after escaping", breakOutCustom.contains("""<\/style>"""))
+
     check("fragment extracted", NovelContinuous.bodyFragment("<html><body>HELLO</body></html>"), "HELLO")
     check("fragment without a body is itself", NovelContinuous.bodyFragment("just text"), "just text")
 

@@ -251,7 +251,11 @@ object NovelDocument {
         customCss: String = "",
         customJs: String = "",
     ): String = buildString {
-        appendLine(NovelTypographyCss.styleTag(typography))
+        // The custom CSS's own presence decides the cascade: a non-blank sheet makes the
+        // typography yield the palette colour on the element ladder, so a `body { color: … }` in
+        // the hand-typed rules actually reaches the text. The blank/disabled default keeps the
+        // ladder as it has always been.
+        appendLine(NovelTypographyCss.styleTag(typography, customCss.isNotBlank()))
         if (pageMode.isPaged) {
             appendLine(NovelPageLayout.styleTag(NovelPageLayout.PAGED_STATIC_CSS))
         }
