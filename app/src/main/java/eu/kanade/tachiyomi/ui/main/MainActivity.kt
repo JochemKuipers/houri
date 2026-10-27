@@ -860,6 +860,15 @@ class MainActivity : BaseActivity() {
         resultEventBus: ResultEventBus,
         isTabletUi: Boolean,
     ): Boolean {
+        // KMK --> Release the splash as soon as launch-intent routing runs. Every exit
+        // from this function - a deep link, a shortcut, or the plain launcher MAIN
+        // intent that matches no branch below - has decided the start destination, so
+        // the splash has nothing left to wait for. Without this, the unmatched action
+        // left `ready` false and the keepOnScreen condition pinned the splash for the
+        // full SPLASH_MAX_DURATION (+ the 900ms exit animation) on every ordinary
+        // cold start - ~6s of splash before the app became visible.
+        ready = true
+        // KMK <--
         val notificationId = intent.getIntExtra("notificationId", -1)
         if (notificationId > -1) {
             NotificationReceiver.dismissNotification(
@@ -938,7 +947,6 @@ class MainActivity : BaseActivity() {
             resultEventBus.sendResult(tabToOpen)
         }
 
-        ready = true
         return true
     }
 
