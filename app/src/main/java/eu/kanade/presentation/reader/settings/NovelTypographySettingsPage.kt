@@ -17,8 +17,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -337,6 +339,74 @@ internal fun NovelTypographyPage(
         state = typography.forceDark.toTriState(),
         onClick = { novelPrefs.forceDark = typography.forceDark.next() },
     )
+
+    // ---------------------------------------------------------------- custom injection
+    //
+    // Reader-supplied code, in the FontRow's visual grammar: a checkbox row carrying a supporting
+    // line — the JS row's is the security note the feature owes the reader — and an edit row
+    // beneath each toggle, shown only while the toggle is on, so a control that edits a value the
+    // toggle silences never reads as broken. CSS rides the live stylesheet swap, so an edit
+    // applies to the open book the moment OK is pressed; JS is a build-time injection, so a
+    // change lands on the next page turned — the editors' hints say which is which.
+
+    HeadingItem(stringResource(KMR.strings.novel_custom_code))
+
+    val customCssEnabled by novelPrefs.customCssEnabled.collectAsState()
+    val customJsEnabled by novelPrefs.customJsEnabled.collectAsState()
+    var editingCustomCss by remember { mutableStateOf(false) }
+    var editingCustomJs by remember { mutableStateOf(false) }
+
+    ToggleRow(
+        label = stringResource(KMR.strings.pref_novel_custom_css),
+        support = stringResource(KMR.strings.pref_novel_custom_css_support),
+        checked = customCssEnabled,
+        onChange = { novelPrefs.customCssEnabled.set(it) },
+    )
+    if (customCssEnabled) {
+        EditCodeRow(
+            label = stringResource(KMR.strings.novel_custom_css_edit),
+            onClick = { editingCustomCss = true },
+        )
+    }
+
+    ToggleRow(
+        label = stringResource(KMR.strings.pref_novel_custom_js),
+        support = stringResource(KMR.strings.pref_novel_custom_js_support),
+        checked = customJsEnabled,
+        onChange = { novelPrefs.customJsEnabled.set(it) },
+    )
+    if (customJsEnabled) {
+        EditCodeRow(
+            label = stringResource(KMR.strings.novel_custom_js_edit),
+            onClick = { editingCustomJs = true },
+        )
+    }
+
+    if (editingCustomCss) {
+        CustomCodeDialog(
+            title = stringResource(KMR.strings.novel_custom_css_edit),
+            hint = stringResource(KMR.strings.novel_custom_css_hint),
+            initial = novelPrefs.customCss.get(),
+            onConfirm = { value ->
+                novelPrefs.customCss.set(value)
+                editingCustomCss = false
+            },
+            onDismiss = { editingCustomCss = false },
+        )
+    }
+
+    if (editingCustomJs) {
+        CustomCodeDialog(
+            title = stringResource(KMR.strings.novel_custom_js_edit),
+            hint = stringResource(KMR.strings.novel_custom_js_hint),
+            initial = novelPrefs.customJs.get(),
+            onConfirm = { value ->
+                novelPrefs.customJs.set(value)
+                editingCustomJs = false
+            },
+            onDismiss = { editingCustomJs = false },
+        )
+    }
 }
 
 /**
@@ -776,6 +846,116 @@ private fun HexColorDialog(
                 enabled = NovelTypography.normalizedColor(text) != null,
                 onClick = { NovelTypography.normalizedColor(text)?.let(onConfirm) },
             ) { Text(stringResource(MR.strings.action_ok)) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(MR.strings.action_cancel)) }
+        },
+    )
+}
+
+/**
+ * A checkbox row carrying a supporting line under the label.
+ *
+ * Hand-built beside [CheckboxItem] for one reason: the custom-JavaScript toggle has to carry its
+ * security note where the reader cannot miss it, and `CheckboxItem` has no second line. The
+ * whole row toggles, like every switch row in the framework; the checkbox itself answers nothing
+ * because the row already did.
+ */
+@Composable
+private fun ToggleRow(label: String, support: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .clickable { onChange(!checked) }
+            .fillMaxWidth()
+            .padding(
+                horizontal = SettingsItemsPaddings.Horizontal,
+                vertical = SettingsItemsPaddings.Vertical,
+            ),
+        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.large),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = support,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Checkbox(checked = checked, onCheckedChange = null)
+    }
+}
+
+/**
+ * The row that opens one of the code editors, in [FontRow]'s grammar: a weight-one label and an
+ * affordance at the end, so the row reads as a button rather than as a label.
+ */
+@Composable
+private fun EditCodeRow(label: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .fillMaxWidth()
+            .padding(
+                horizontal = SettingsItemsPaddings.Horizontal,
+                vertical = SettingsItemsPaddings.Vertical,
+            ),
+        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.large),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            imageVector = Icons.Outlined.Edit,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * The editor for reader-supplied CSS or JavaScript: one field, no validation, the OK button always
+ * armed.
+ *
+ * Code cannot be validated — half the point of the feature is that the reader knows something the
+ * reader does not — so unlike [HexColorDialog] there is no grammar to gate OK on. What the field
+ * *can* do is be honest about what it holds: monospaced, multiline, and wide, because it is code.
+ * [hint] is where the semantics live: when the code runs, and against what.
+ *
+ * The value is stored verbatim, including empty — clearing the field and confirming is how a
+ * reader removes their code, and it is a better answer than a disabled OK refusing to let them.
+ */
+@Composable
+private fun CustomCodeDialog(
+    title: String,
+    hint: String,
+    initial: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var text by rememberSaveable { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 200.dp),
+                textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                supportingText = { Text(hint) },
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(text) }) { Text(stringResource(MR.strings.action_ok)) }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(MR.strings.action_cancel)) }

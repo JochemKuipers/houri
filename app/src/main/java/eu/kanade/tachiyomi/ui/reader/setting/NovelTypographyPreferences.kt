@@ -132,6 +132,51 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
     val coverFirst: Preference<Boolean>
         get() = store.getBoolean(NovelTypographySettingKeys.COVER_FIRST.key, NovelTypographySettingKeys.COVER_FIRST.default)
 
+    // ------------------------------------------------------------ custom injection
+
+    /**
+     * Whether the reader's custom CSS is injected into text documents.
+     *
+     * See [NovelTypographySettingKeys.CUSTOM_CSS_ENABLED] for why this defaults to on.
+     */
+    val customCssEnabled: Preference<Boolean>
+        get() = store.getBoolean(
+            NovelTypographySettingKeys.CUSTOM_CSS_ENABLED.key,
+            NovelTypographySettingKeys.CUSTOM_CSS_ENABLED.default,
+        )
+
+    /**
+     * The reader's own CSS, emitted as the document's last stylesheet — after the reader's own
+     * rules, so `!important` ties fall the reader's way.
+     *
+     * Kept as raw text rather than folded into [NovelTypography] for the same reason
+     * [showImages] is not: it is reader-authored content, not a value the stylesheet derives
+     * rules from, and routing it through `setTypography` would let a disabled-toggle read as an
+     * empty value and wipe the code the reader wrote.
+     */
+    val customCss: Preference<String>
+        get() = store.getString(NovelTypographySettingKeys.CUSTOM_CSS.key, NovelTypographySettingKeys.CUSTOM_CSS.default)
+
+    /**
+     * Whether the reader's custom JavaScript is injected into text documents.
+     *
+     * Off by default — see [NovelTypographySettingKeys.CUSTOM_JS_ENABLED].
+     */
+    val customJsEnabled: Preference<Boolean>
+        get() = store.getBoolean(
+            NovelTypographySettingKeys.CUSTOM_JS_ENABLED.key,
+            NovelTypographySettingKeys.CUSTOM_JS_ENABLED.default,
+        )
+
+    /**
+     * The reader's own JavaScript, injected after the scroll bridge in every text document.
+     *
+     * A change cannot apply to the document already on screen — code cannot be swapped the way a
+     * stylesheet can — so it lands on the next page the reader turns. The editor's hint says so.
+     */
+    val customJs: Preference<String>
+        get() = store.getString(NovelTypographySettingKeys.CUSTOM_JS.key, NovelTypographySettingKeys.CUSTOM_JS.default)
+
     // ------------------------------------------------------------ tri-state
 
     private val justifiedPref: Preference<String>
@@ -249,6 +294,13 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
      * `Flow<Unit>`s instead of a different type each, so `merge` has one type argument to infer
      * rather than a wide common supertype to compute — and it leaves the payload read as one
      * call to [typography] after the merge, so a value read cannot be torn across two settings.
+     *
+     * The custom-CSS pair is here even though it is not part of [NovelTypography]: the reader's
+     * live swap re-reads the custom CSS from its own preference on every emission, so an edit or
+     * a toggle in the settings sheet re-applies to the open book — and the re-emitted typography
+     * being unchanged costs nothing, since Compose drops equal values. The custom-JS pair is
+     * deliberately absent: code cannot be swapped into a running document, so a JS change has
+     * nothing to re-apply and takes effect on the next page turned.
      */
     fun changes(): Flow<NovelTypography> {
         val signals: Array<Flow<Unit>> = arrayOf(
@@ -271,6 +323,8 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
             paragraphIndentPref.changes().asSignal(),
             boldTextPref.changes().asSignal(),
             forceDarkPref.changes().asSignal(),
+            customCssEnabled.changes().asSignal(),
+            customCss.changes().asSignal(),
         )
         // Spread rather than passed as a List: `merge`'s overload set has no `Iterable` + transform
         // form, so a List argument silently binds to the single-argument Iterable overload instead and

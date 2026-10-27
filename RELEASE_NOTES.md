@@ -32,6 +32,14 @@ files moved. See .github/scripts/release_notes.py.
   selection) you can label it Author, Artist, Illustrator or Designer, so two same-named
   subcategories under one parent are tellable apart; the label shows as a colored tag in
   Edit Categories and in the Set Categories dialog.
+- **Book reader: custom CSS & JavaScript injection**: the reader's appearance tab has a new
+  **Custom CSS & JS** section — write your own stylesheet or JavaScript and the reader injects it
+  into every book. Custom CSS is on by default (it starts empty and can only restyle) and your
+  rules are applied after the reader's own, so they win ties; edits apply to the open book the
+  moment you confirm them. Custom JavaScript is **off by default** and its toggle carries the
+  warning: injected scripts run inside every book you open, so only enable it for code you trust.
+  Scripts run in each document right after the reader's own bridge, so a change takes effect from
+  the next page you turn.
 
 ### Improve
 - **WebGPU reader: the between-pages black line, fixed at the root**: the thin dark line that

@@ -277,6 +277,30 @@ internal class NovelWebViewer(
         return NovelFonts.faceCss(family, face).also { readerFontCache[family] = it }
     }
 
+    // ---------------------------------------------------------------- custom injection
+
+    /**
+     * The reader's custom CSS to inject, or "" when the toggle is off (or nothing is written).
+     *
+     * Read per render and per live swap rather than cached, because two surfaces move it — the
+     * toggle and the editor, both in the settings sheet, neither of which this viewer sees
+     * happen. The preference read is an in-memory map lookup; it is not work worth caching.
+     */
+    private fun customCssForInjection(): String =
+        if (novelPrefs.customCssEnabled.get()) novelPrefs.customCss.get() else ""
+
+    /**
+     * The reader's custom JavaScript to inject, or "" when the toggle is off (or nothing is
+     * written).
+     *
+     * Applied at the **next render** on purpose. Unlike CSS there is no live swap for code —
+     * re-running a script on every change would double-register everything it listens for — so
+     * a toggle or an edit mid-document lands when the reader next turns the page, and the
+     * editor's hint says so.
+     */
+    private fun customJsForInjection(): String =
+        if (novelPrefs.customJsEnabled.get()) novelPrefs.customJs.get() else ""
+
     /**
      * The chosen font, built once per family rather than once per document.
      *
@@ -792,6 +816,11 @@ internal class NovelWebViewer(
             epoch = documentRequest,
             // KMK -->
             pageMode = pageMode,
+            // Reader-supplied code. Both are read here rather than snapshotted into
+            // [typography] so a settings change while a book is open is picked up on the very
+            // next turn, and so a disabled toggle can never leave a stale copy in the build.
+            customCss = customCssForInjection(),
+            customJs = customJsForInjection(),
             // KMK <--
         )
         webView.loadDataWithBaseURL(currentBaseUrl, html, "text/html", "UTF-8", null)
@@ -1692,9 +1721,28 @@ internal class NovelWebViewer(
      * A reader-chosen font's `@font-face` rides along, for the same reason it is in the built
      * document's head: a live style swap that changed the family without redeclaring the face
      * would fall back to the publisher's font until the next document.
+     *
+     * The reader's custom CSS rides along too, in its own element and by the same id
+     * `NovelDocument` builds it under — **re-created**, never merely added, and removed outright
+     * when the toggle went off or the code is blank. A build-time copy left standing would keep
+     * applying whatever the CSS was when the page was turned, and "I turned it off but my rules
+     * still apply" is exactly the report a stale element writes. The custom element is appended
+     * after the live typography one, so source order keeps saying the reader's own hand-typed
+     * rules beat the reader's generated ones.
      */
     private fun liveTypographyJs(): String {
         val css = readerFontCss() + NovelTypographyCss.stylesheet(typography)
+        val custom = customCssForInjection()
+        val customInstall = if (custom.isBlank()) {
+            ""
+        } else {
+            """
+                  var custom = document.createElement('style');
+                  custom.id = 'kmk-custom-css';
+                  custom.textContent = ${NovelScrollBridge.quoteForJs(custom)};
+                  if (document.head) document.head.appendChild(custom);
+            """.trimIndent()
+        }
         return """
             (function(){
               var old = document.getElementById('kmk-typography-live');
@@ -1703,6 +1751,9 @@ internal class NovelWebViewer(
               s.id = 'kmk-typography-live';
               s.textContent = ${NovelScrollBridge.quoteForJs(css)};
               if (document.head) document.head.appendChild(s);
+              var previous = document.getElementById('kmk-custom-css');
+              if (previous && previous.parentNode) previous.parentNode.removeChild(previous);
+              $customInstall
             })();
         """.trimIndent()
     }

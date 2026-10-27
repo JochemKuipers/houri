@@ -102,6 +102,31 @@ object NovelTypographySettingKeys {
     val COVER_FIRST = SettingKey("pref_novel_cover_first", true)
 
     /**
+     * Whether the reader injects a reader-supplied stylesheet into every text document.
+     *
+     * On by default because the value starts empty: CSS can only restyle what the reader already
+     * shows, so "on with nothing written" is the inert state — the toggle is the reader's way of
+     * saying "not even that", not a gate they have to find before the feature exists.
+     */
+    val CUSTOM_CSS_ENABLED = SettingKey("pref_novel_custom_css_enabled", true)
+
+    /** The reader's own CSS, injected as the document's last stylesheet. Blank injects nothing. */
+    val CUSTOM_CSS = SettingKey("pref_novel_custom_css", "")
+
+    /**
+     * Whether the reader injects reader-supplied JavaScript into every text document.
+     *
+     * Off by default, and the default is a security decision: CSS can only restyle, but
+     * JavaScript *acts* — an injected script runs with the reader's trust inside every book the
+     * reader opens, and a book is a file the reader downloaded. The settings row carries the
+     * warning for the same reason.
+     */
+    val CUSTOM_JS_ENABLED = SettingKey("pref_novel_custom_js_enabled", false)
+
+    /** The reader's own JavaScript, injected after the reader's scroll bridge. Blank injects nothing. */
+    val CUSTOM_JS = SettingKey("pref_novel_custom_js", "")
+
+    /**
      * Every key above, for the [tachiyomi.core.common.preference.SettingsRegistry].
      *
      * Registration asserts global uniqueness at startup, so a key added here that is already
@@ -130,6 +155,10 @@ object NovelTypographySettingKeys {
         MARGIN_BOTTOM,
         PAGE_MODE,
         COVER_FIRST,
+        CUSTOM_CSS_ENABLED,
+        CUSTOM_CSS,
+        CUSTOM_JS_ENABLED,
+        CUSTOM_JS,
     )
 }
 // KMK <--

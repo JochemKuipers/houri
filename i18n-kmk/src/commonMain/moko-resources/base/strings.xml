@@ -796,4 +796,17 @@
     <string name="pref_book_show_vert_seekbar_landscape">Show vertical seekbar in landscape for books</string>
     <string name="pref_book_left_handed_vertical_seekbar">Left-handed vertical seekbar for books</string>
     <string name="pref_book_vertical_navigator_height">Book vertical navigator height</string>
+    <!-- KMK: reader-supplied code, injected into every text document. CSS is on by default
+         because it can only restyle what is already shown; JS is off by default because
+         injected scripts run with the reader's trust inside every downloaded book — the
+         toggle row carries the security note. -->
+    <string name="novel_custom_code">Custom CSS &amp; JS</string>
+    <string name="pref_novel_custom_css">Inject custom CSS</string>
+    <string name="pref_novel_custom_css_support">Applies your stylesheet to every book, after the reader\'s own rules</string>
+    <string name="novel_custom_css_edit">Edit custom CSS</string>
+    <string name="novel_custom_css_hint">Injected as the last stylesheet, so your rules win ties. Changes apply to the open book at once</string>
+    <string name="pref_novel_custom_js">Inject custom JavaScript</string>
+    <string name="pref_novel_custom_js_support">Runs inside every book you open. Injected JavaScript can have security risks — only enable it for code you trust</string>
+    <string name="novel_custom_js_edit">Edit custom JavaScript</string>
+    <string name="novel_custom_js_hint">Runs in each document\'s head, after the reader\'s bridge — takes effect when the next page is loaded</string>
 </resources>

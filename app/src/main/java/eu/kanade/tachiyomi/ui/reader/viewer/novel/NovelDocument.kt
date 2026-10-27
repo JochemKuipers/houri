@@ -86,11 +86,27 @@ object NovelDocument {
          * what they were before the setting existed.
          */
         pageMode: NovelPageLayout.PageMode = NovelPageLayout.PageMode.CONTINUOUS,
+        /**
+         * The reader's own CSS, emitted as this document's **last** stylesheet - after the
+         * reader's typography rules and the paged column CSS, for the same source-order reason
+         * those follow the publisher's: `!important` against `!important` is decided by order,
+         * and the reader's own rules are the one thing custom CSS must be able to beat. Blank
+         * (the default, and a disabled toggle upstream) emits nothing.
+         */
+        customCss: String = "",
+        /**
+         * The reader's own JavaScript, emitted verbatim after the scroll bridge, so
+         * `window.KmkReader` (and, in a paged document, the paged bridge) already exist when it
+         * runs. It runs in the head, before the body is parsed - exactly as injected, with no
+         * wrapper - so a script that needs the content wraps itself in its own
+         * `DOMContentLoaded` listener. Blank emits nothing.
+         */
+        customJs: String = "",
         // KMK <--
     ): String {
         val document = wrapBody(normalize(source), segment)
         val prologue = prologue(baseUrl) + styleTag(extraHead)
-        val epilogue = epilogue(typography, epoch, pageMode)
+        val epilogue = epilogue(typography, epoch, pageMode, customCss, customJs)
 
         val headOpen = HEAD_OPEN.find(document)
         if (headOpen != null) {
@@ -194,6 +210,27 @@ object NovelDocument {
         if (css.isBlank()) "" else """<style id="kmk-reader-font">${css.replace("</", "<\\/")}</style>"""
 
     /**
+     * Wraps reader-supplied CSS in its own `<style>`, escaped exactly the way [styleTag] escapes
+     * the font rule and for the same reason: `</` ends a style element in the parser before any
+     * of the CSS is read, and `<\/` is not a closing tag to the parser while being the same
+     * string to a CSS parser, where `\/` is an escaped solidus.
+     *
+     * Its own element (and a stable id) rather than a fold into the typography stylesheet,
+     * because the live swap replaces it by id — see [NovelWebViewer.liveTypographyJs].
+     */
+    private fun customStyleTag(css: String): String =
+        """<style id="kmk-custom-css">${css.replace("</", "<\\/")}</style>"""
+
+    /**
+     * Wraps reader-supplied JavaScript in its own `<script>`, escaped the way the bridge script
+     * above is: `</script` is the one sequence that ends script data, and `<\/script` means the
+     * same thing to a JavaScript parser inside a string or regex literal — so a script cannot
+     * break out of its element, and one that *tries to* merely stops parsing.
+     */
+    private fun customScriptTag(js: String): String =
+        "<script>${js.replace("</script", """<\/script""")}</script>"
+
+    /**
      * Goes at the very end of the head, so it outranks the publisher's rules on source order.
      *
      * A paged document carries more than the scroll bridge: the column stylesheet lands after the
@@ -201,16 +238,24 @@ object NovelDocument {
      * bridge is installed in the same script element so it exists before the layout's `load` event
      * can fire anything the host queued against it. Continuous documents build exactly as they did
      * before pagination existed.
+     *
+     * Reader-supplied code rides the same channel, in the order the reader would predict: the
+     * custom stylesheet goes after every style the reader itself emits, and the custom script goes
+     * after the bridge - in its **own** script element, so a syntax error in the reader's code
+     * cannot take the bridge down with it.
      */
     private fun epilogue(
         typography: NovelTypography,
         epoch: Int,
         pageMode: NovelPageLayout.PageMode = NovelPageLayout.PageMode.CONTINUOUS,
+        customCss: String = "",
+        customJs: String = "",
     ): String = buildString {
         appendLine(NovelTypographyCss.styleTag(typography))
         if (pageMode.isPaged) {
             appendLine(NovelPageLayout.styleTag(NovelPageLayout.PAGED_STATIC_CSS))
         }
+        if (customCss.isNotBlank()) appendLine(customStyleTag(customCss))
         // Wrapped, obviously. Script text emitted bare is not script: it is the first thing on the
         // page, printed in the reader's own font, and it is not the last thing anyone notices.
         append("<script>")
@@ -224,6 +269,7 @@ object NovelDocument {
         // `window` itself, and the value is the reader's own request number: no book counts here.
         append(""";window.KmkEpoch = $epoch;""")
         appendLine("</script>")
+        if (customJs.isNotBlank()) appendLine(customScriptTag(customJs))
     }
 
     /** Neutralises the markup-significant characters in an attribute value. */

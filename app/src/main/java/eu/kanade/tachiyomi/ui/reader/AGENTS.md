@@ -274,6 +274,22 @@ tag. `NovelDocument.styleTag` wraps it (and escapes `</`, since the family is a 
 and can carry a closing tag); `DocumentHarness` asserts the rule is inside a `<style>`, inside the
 head, and cannot break out of one.
 
+**Reader-supplied CSS and JS ride the same channel (custom injection).** The Reading appearance tab
+holds two toggles and two editors: custom CSS (on by default — the value starts empty and can only
+restyle) and custom JavaScript (**off by default**, with the security note on its toggle row, because
+an injected script runs with the reader's trust inside every downloaded book). `NovelDocument` emits
+the CSS as the document's **last** `<style>` (`id="kmk-custom-css"`, `</` escaped the way every
+reader style is) so `!important` ties fall the reader's way, and the JS in its **own** `<script>`
+after the bridge — reader code cannot take the bridge down with it, and `window.KmkReader` exists
+when it runs. Reader-authored code is trusted, so it is injected verbatim — the element-sequence
+escaping (`</`→`<\/` for style, `</script`→`<\/script` for script) is the only rewriting, and it is
+meaning-preserving in both languages. CSS changes ride the live swap: `liveTypographyJs` removes
+and re-creates `#kmk-custom-css` (or removes it when the toggle went off — a build-time copy left
+standing would keep applying the old rules). JS has no live swap — re-running code per change would
+double-register everything it listens for — so a JS edit or toggle lands on the next page turned,
+which the editor's hint states. The custom-CSS preference signals therefore ride
+`NovelTypographyPreferences.changes()` and the JS ones deliberately do not.
+
 **Progress is a character offset, not a page index.** A page index in a reflowable document means
 something different on every device and at every font size; `NovelProgress.Position`
 (`documentIndex:characterOffset:characterLength`) is stable across all of them. Chapters are weighted
