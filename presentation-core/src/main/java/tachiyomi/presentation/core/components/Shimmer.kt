@@ -11,10 +11,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -77,6 +81,33 @@ fun ShimmerBox(
     )
 }
 
+/**
+ * The insets the detail skeletons need to sit where the loaded details screen will put its own
+ * first row.
+ *
+ * The real screen's Scaffold opens the info block below the collapsed app bar: status bar plus
+ * the M3 `TopAppBar` height, handed to `MangaAndSourceTitles*` as `appBarPadding + 16.dp`. A
+ * skeleton that skipped that started its first row at the display's absolute top edge — roughly
+ * 80dp higher than where the real content lands — and the content visibly jumped downward when
+ * the details arrived. The bottom had the mirror-image problem: the last chapter row rendered
+ * straight into the gesture-navigation area, where a clipped row with the running shimmer over
+ * it read as a stray gray bar pinned to the bottom edge, with nothing drawn below it.
+ */
+// The M3 `TopAppBar` container height. The detail screen's Scaffold hands its content
+// `status bar inset + this height` as top padding, and the skeleton insets mirror that
+// arithmetic. Spelled as a literal because the Material constant keeps renaming between
+// versions (`SmallTopAppBarHeight` before 1.3, `TopAppBarHeight` after), while the height
+// itself has been the 64dp M3 spec since the beginning.
+private val DetailSkeletonAppBarHeight = 64.dp
+
+private fun Modifier.detailSkeletonInsets(): Modifier = composed {
+    padding(
+        top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() +
+            DetailSkeletonAppBarHeight,
+        bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding(),
+    )
+}
+
 @Composable
 fun MangaListShimmer(modifier: Modifier = Modifier) {
     Row(modifier = modifier.padding(8.dp)) {
@@ -132,7 +163,7 @@ fun MangaDetailTabletShimmer(modifier: Modifier = Modifier) {
         modifier = modifier,
         startContent = {
             Column(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.detailSkeletonInsets().padding(16.dp),
                 verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
             ) {
                 Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
@@ -161,7 +192,9 @@ fun MangaDetailTabletShimmer(modifier: Modifier = Modifier) {
             }
         },
         endContent = {
-            Column(modifier = Modifier.padding(vertical = 16.dp)) {
+            Column(
+                modifier = Modifier.detailSkeletonInsets().padding(vertical = 16.dp),
+            ) {
                 ShimmerBox(height = 24.dp, width = 180.dp, modifier = Modifier.padding(horizontal = 16.dp))
                 Spacer(modifier = Modifier.height(8.dp))
                 ChapterListShimmer()
@@ -172,7 +205,13 @@ fun MangaDetailTabletShimmer(modifier: Modifier = Modifier) {
 
 @Composable
 fun MangaDetailShimmer(modifier: Modifier = Modifier) {
-    Column(modifier = modifier.fillMaxWidth().padding(16.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .detailSkeletonInsets()
+            .padding(16.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+    ) {
         Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(16.dp)) {
             Box(
                 modifier = Modifier
