@@ -102,6 +102,17 @@ files moved. See .github/scripts/release_notes.py.
   open, so broken extensions used to stack their report popups over the screen you were
   scrolling. Feed failures are now recorded quietly on the Extensions page, exactly like global
   search — using a source directly still speaks up.
+- **Extensions page holds its frame rate**: every download, error or repository tick used to
+  rebuild the whole extensions list and re-measure every visible row — including rows whose data
+  had not changed — so switching to the extensions tab (or idling on it right after opening the
+  app, while extension lists were still fetching in the background) could hold the frame rate
+  at half speed until the fetches finished; it only *looked* like switching away and back fixed
+  it, because that is when the fetch finished. Unchanged rows are now skipped during those
+  rebuilds, so both the tab switch and the settling refresh stay smooth.
+- **Debug overlay**: the fps/build-info overlay no longer sits on top of the bottom navigation
+  bar (or the side rail on tablets), counts a steady 60 Hz as 60 instead of 59, shows the
+  average frame time next to the frame rate, and colour-codes itself green/amber/red so a bad
+  frame rate is legible at a glance.
 
 ### Fix
 - **Cold start: splash screen finally lets go**: opening the app the ordinary way — tapping its
@@ -193,3 +204,8 @@ files moved. See .github/scripts/release_notes.py.
   unreadable underneath.
 - **Achievements**: unlocked cards' animated gradient now follows the card's rounded corners
   instead of painting sharp square corners that stuck out past every other card in the grid.
+- **Extension error popup**: the report popup now scrolls when its content is taller than the
+  dialog — on small screens and in landscape the actions at the bottom were cut off entirely,
+  with no way to reach them. The padded band around its buttons is also gone: the actions sit
+  as compact rows, and the "Don't show again for this version" opt-out no longer renders as a
+  full-width, centre-aligned button carrying its own 48dp of padding.

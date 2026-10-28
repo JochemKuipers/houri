@@ -328,7 +328,7 @@ class ExtensionsViewModel(
     data class State(
         val isLoading: Boolean = true,
         val isRefreshing: Boolean = false,
-        val items: ItemGroups = mutableMapOf(),
+        val items: ItemGroups = emptyMap(),
         val updates: Int = 0,
         val installer: BasePreferences.ExtensionInstaller? = null,
         val searchQuery: String? = null,
@@ -348,12 +348,26 @@ object ExtensionUiModel {
         data class Text(val text: String) : Header
     }
 
+    // KMK -->
+    /**
+     * One row's worth of state, marked immutable so rows can skip recomposition.
+     *
+     * The whole list is rebuilt on every download/error/search/repository emission - during a
+     * repository refresh that is dozens of emissions over the fetch window - and without this
+     * contract every row re-composed each time (FlowRow measurement, icon, text layout), which
+     * was the bulk of the extensions tab's frame cost and showed up as a sustained FPS drop
+     * whenever the tab was open while a refresh was running.
+     *
+     * Safe because items are always replaced wholesale: the mapper builds new [Item]s around
+     * [Extension]s that are swapped out, never mutated in place, so value equality is a sound
+     * test of "this row's inputs did not change".
+     */
+    @Immutable
     data class Item(
         val extension: Extension,
         val installStep: InstallStep,
-        // KMK -->
         /** Reason this extension last failed, shown as subtext under the name. */
         val errorReason: String? = null,
-        // KMK <--
     )
+    // KMK <--
 }

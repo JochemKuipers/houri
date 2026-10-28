@@ -235,51 +235,79 @@ private fun ExtensionContent(
             items(
                 items = items,
                 contentType = { "item" },
+                // KMK --> Package + signature identify a row across list rebuilds and cost
+                // nothing to build; the previous data-class hashCode keys walked every source
+                // of every item for ~a thousand rows on each rebuild. Available rows are
+                // flatMapped to unique "pkg-sourceId" names, and the same package shipped
+                // under a different signature still gets its own row and key.
                 key = { item ->
-                    when (item.extension) {
-                        is Extension.Untrusted -> "extension-untrusted-${item.hashCode()}"
-                        is Extension.Installed -> "extension-installed-${item.hashCode()}"
-                        is Extension.Available -> "extension-available-${item.hashCode()}"
+                    val extension = item.extension
+                    val prefix = when (extension) {
+                        is Extension.Untrusted -> "extension-untrusted-"
+                        is Extension.Installed -> "extension-installed-"
+                        is Extension.Available -> "extension-available-"
                     }
+                    prefix + extension.pkgName + "-" + extension.signatureHash
                 },
+                // KMK <--
             ) { item ->
-                ExtensionItem(
-                    modifier = Modifier.animateItemFastScroll(),
-                    item = item,
-                    onClickItem = {
-                        when (it) {
-                            is Extension.Available -> onInstallExtension(it)
-                            is Extension.Installed -> onOpenExtension(it)
+                // KMK --> The click handlers and the animateItem modifier are remembered per
+                // slot so every parameter of [ExtensionItem] is stable across the list rebuilds
+                // that follow every download/error/search emission; together with the
+                // @Immutable [ExtensionUiModel.Item], a rebuild that produces a value-equal row
+                // then skips it instead of re-composing and re-measuring it. Freezing the
+                // first instances is behaviour-preserving because everything they capture is
+                // stable for the composition's lifetime - the ViewModel, the back stack, the
+                // activity context, and snapshot State objects read at click time.
+                val itemModifier = remember { Modifier.animateItemFastScroll() }
+                val clickItemHandler = remember {
+                    { clicked: Extension ->
+                        when (clicked) {
+                            is Extension.Available -> onInstallExtension(clicked)
+                            is Extension.Installed -> onOpenExtension(clicked)
                             is Extension.Untrusted -> {
-                                trustState = it
+                                trustState = clicked
                             }
                         }
-                    },
-                    onLongClickItem = onLongClickItem,
-                    onClickItemSecondaryAction = {
-                        when (it) {
-                            is Extension.Available -> onOpenWebView(it)
-                            is Extension.Installed -> onOpenExtension(it)
+                    }
+                }
+                val longClickItemHandler = remember { onLongClickItem }
+                val secondaryActionHandler = remember {
+                    { clicked: Extension ->
+                        when (clicked) {
+                            is Extension.Available -> onOpenWebView(clicked)
+                            is Extension.Installed -> onOpenExtension(clicked)
                             else -> {}
                         }
-                    },
-                    onClickItemCancel = onClickItemCancel,
-                    onClickItemAction = {
-                        when (it) {
-                            is Extension.Available -> onInstallExtension(it)
+                    }
+                }
+                val actionHandler = remember {
+                    { clicked: Extension ->
+                        when (clicked) {
+                            is Extension.Available -> onInstallExtension(clicked)
                             is Extension.Installed -> {
-                                if (it.hasUpdate) {
-                                    onUpdateExtension(it)
+                                if (clicked.hasUpdate) {
+                                    onUpdateExtension(clicked)
                                 } else {
-                                    onOpenExtension(it)
+                                    onOpenExtension(clicked)
                                 }
                             }
                             is Extension.Untrusted -> {
-                                trustState = it
+                                trustState = clicked
                             }
                         }
-                    },
+                    }
+                }
+                ExtensionItem(
+                    modifier = itemModifier,
+                    item = item,
+                    onClickItem = clickItemHandler,
+                    onLongClickItem = longClickItemHandler,
+                    onClickItemSecondaryAction = secondaryActionHandler,
+                    onClickItemCancel = remember { onClickItemCancel },
+                    onClickItemAction = actionHandler,
                 )
+                // KMK <--
             }
         }
     }

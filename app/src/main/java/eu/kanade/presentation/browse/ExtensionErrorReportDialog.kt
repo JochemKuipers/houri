@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -86,7 +88,14 @@ fun ExtensionErrorReportDialog(
             )
         },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            // The reason text plus facts, two actions and the opt-out is taller than the dialog
+            // on small screens and in landscape, and AlertDialog clips its text slot rather
+            // than growing past the window - without the scroll the tail was unreachable.
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+            ) {
                 Text(
                     text = if (repoName.isNullOrBlank()) {
                         stringResource(
@@ -128,15 +137,14 @@ fun ExtensionErrorReportDialog(
                 Spacer(Modifier.size(4.dp))
                 HorizontalDivider()
 
-                TextButton(
+                // A start-aligned row like the two above it, not a full-width centered
+                // TextButton: the button's 48dp minimum height plus its content padding read
+                // as a wide band of dead space around one line of text, and its centered
+                // label sat off-axis from every other action in the dialog.
+                ExtensionErrorAction(
+                    label = stringResource(KMR.strings.ext_error_version_confirm_dont_show),
                     onClick = onDontShowAgain,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        text = stringResource(KMR.strings.ext_error_version_confirm_dont_show),
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                }
+                )
             }
         },
         confirmButton = {
@@ -177,7 +185,7 @@ private fun ExtensionErrorFacts(report: ExtensionErrorReport) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 12.dp, bottom = 8.dp),
+            .padding(top = 8.dp, bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         if (report.versionName.isNotBlank()) {
@@ -210,7 +218,7 @@ private fun ExtensionErrorAction(
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 10.dp, horizontal = 4.dp),
+            .padding(vertical = 6.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Spacer(Modifier.width(4.dp))

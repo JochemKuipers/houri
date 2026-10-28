@@ -12,14 +12,15 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.RememberObserver
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -37,6 +38,7 @@ import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.util.system.isDebugBuildType
 import mihon.app.di.globalAppGraph
+import mihon.presentation.core.util.isTabletUi
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.i18n.MR
 import java.text.DecimalFormat
@@ -46,16 +48,24 @@ import kotlin.time.Duration.Companion.nanoseconds
 
 @Composable
 fun DebugModeOverlay() {
+    val tabletUi = isTabletUi()
     Box(Modifier.fillMaxSize()) {
         Column(
             Modifier
                 .windowInsetsPadding(
                     WindowInsets.navigationBars
-                        .only(WindowInsetsSides.Bottom.plus(WindowInsetsSides.Start)),
+                        .only(if (tabletUi) WindowInsetsSides.Start else WindowInsetsSides.Bottom),
+                )
+                // Clear the app's own navigation chrome, not just the system gesture area: the
+                // bottom bar on phones and the rail on tablets are both 80dp, and without this
+                // the overlay sat directly on top of the Library tab / first rail item.
+                .padding(
+                    bottom = if (tabletUi) 0.dp else 80.dp,
+                    start = if (tabletUi) 80.dp else 0.dp,
                 )
                 .align(Alignment.BottomStart)
-                .background(Color(0x7F000000))
-                .padding(4.dp),
+                .background(Color(0x7F000000), RoundedCornerShape(8.dp))
+                .padding(8.dp),
         ) {
             FpsDebugModeOverlay()
             EHDebugModeOverlay()
@@ -65,21 +75,38 @@ fun DebugModeOverlay() {
 
 @Composable
 private fun FpsDebugModeOverlay() {
-    val fps by remember { FpsState(FpsState.DEFAULT_INTERVAL) }
+    val state = remember { FpsState(FpsState.DEFAULT_INTERVAL) }
     val format = remember {
         DecimalFormat(
-            "'fps:' 0.0",
+            "0.0",
             DecimalFormatSymbols.getInstance(Locale.ENGLISH),
         )
     }
 
+    val fps = state.fps
+    val frameTime = state.frameTimeMillis
+    val text = remember(fps, frameTime) {
+        if (fps <= 0.0) {
+            "measuring…"
+        } else {
+            "${format.format(fps)} fps · ${format.format(frameTime)} ms"
+        }
+    }
+    // Colour-coded so a bad frame rate is legible at a glance instead of being one more
+    // number to parse while scrolling: green is healthy, amber is a real hitch, red is
+    // the "something is re-composing under me" band.
+    val color = when {
+        fps >= 50.0 -> Color(0xFF81C784)
+        fps >= 30.0 -> Color(0xFFFFD54F)
+        fps > 0.0 -> Color(0xFFE57373)
+        else -> Color.White
+    }
     Text(
-        text = remember(fps) {
-            format.format(fps)
-        },
-        color = Color.White,
+        text = text,
+        color = color,
         fontSize = 12.sp,
         fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
     )
 }
 
@@ -111,7 +138,9 @@ private fun buildInfo(context: Context, sourceBlacklist: Boolean) = buildAnnotat
     appendItem("Build type:", BuildConfig.BUILD_TYPE)
     appendItem("Debug mode:", isDebugBuildType.asEnabledString())
     appendItem("Version code:", BuildConfig.VERSION_CODE.toString())
-    appendItem("Commit SHA:", BuildConfig.COMMIT_SHA)
+    // Short SHA: the full hash wraps the overlay block onto an extra line for no
+    // diagnostic value - anything that needs the full one is a build artifact away.
+    appendItem("Commit SHA:", BuildConfig.COMMIT_SHA.take(8))
     appendItem("Log level:", EHLogLevel.currentLogLevel.name.lowercase(Locale.getDefault()))
     appendItem("Source blacklist:", sourceBlacklist.asEnabledString(), newLine = false)
 }
@@ -131,11 +160,18 @@ private fun Boolean.asEnabledString() = if (this) "enabled" else "disabled"
 
 private class FpsState(private val interval: Int) :
     Choreographer.FrameCallback,
-    RememberObserver,
-    MutableState<Double> by mutableDoubleStateOf(0.0) {
+    RememberObserver {
+
     private val choreographer = Choreographer.getInstance()
     private var startFrameTimeMillis: Long = 0
     private var numFramesRendered = 0
+
+    var fps by mutableDoubleStateOf(0.0)
+        private set
+
+    /** Average time per rendered frame over the same window [fps] is measured over. */
+    var frameTimeMillis by mutableDoubleStateOf(0.0)
+        private set
 
     override fun onRemembered() {
         choreographer.postFrameCallback(this)
@@ -155,9 +191,13 @@ private class FpsState(private val interval: Int) :
             val duration = currentFrameTimeMillis - startFrameTimeMillis
             numFramesRendered++
             if (duration > interval) {
-                value = (numFramesRendered * 1000f / duration).toDouble()
+                fps = numFramesRendered * 1000.0 / duration
+                frameTimeMillis = duration.toDouble() / numFramesRendered
                 startFrameTimeMillis = currentFrameTimeMillis
-                numFramesRendered = 0
+                // The frame that closed this window has already been rendered, so it is also
+                // the next window's first frame. Seeding the count with it stops the counter
+                // from losing one frame every window - a steady 60 Hz read as a permanent 59.
+                numFramesRendered = 1
             }
         } else {
             startFrameTimeMillis = currentFrameTimeMillis
