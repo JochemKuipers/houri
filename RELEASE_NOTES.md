@@ -90,6 +90,18 @@ files moved. See .github/scripts/release_notes.py.
 - **Import books**: the file picker now offers only EPUBs — plus the generic
   `application/octet-stream` spelling most file managers give an `.epub`, so folders do not
   appear empty — instead of every file on the device.
+- **Broken extensions are flagged where you actually hit them**: the extension error reporter —
+  the popup that names the repository a broken extension came from, so you can report it there —
+  now hears about failures while browsing a source's listings and while refreshing a manga's
+  details or chapter list. These were the two most common ways a site change showed up, and
+  until now they stopped at the screen's own error state and told the Extensions page nothing.
+  A manual refresh of a manga can raise the report popup (once per distinct failure, as before);
+  failures that happen in the background — opening a screen, favoriting a title — are only
+  recorded, and appear as the quiet explanation under the extension on the Extensions page.
+- **Source feed: no more report popups**: the feed queries every pinned source at once on each
+  open, so broken extensions used to stack their report popups over the screen you were
+  scrolling. Feed failures are now recorded quietly on the Extensions page, exactly like global
+  search — using a source directly still speaks up.
 
 ### Fix
 - **Cold start: splash screen finally lets go**: opening the app the ordinary way — tapping its

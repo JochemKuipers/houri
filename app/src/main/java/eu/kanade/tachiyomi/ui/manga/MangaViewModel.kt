@@ -61,6 +61,7 @@ import eu.kanade.tachiyomi.data.track.BaseTracker
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.data.track.mdlist.MdList
+import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.source.PagePreviewSource
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.getNameForMangaInfo
@@ -265,6 +266,9 @@ class MangaViewModel(
     private val insertLibraryUpdateErrors: InsertLibraryUpdateErrors,
     private val insertLibraryUpdateErrorMessages: InsertLibraryUpdateErrorMessages,
     private val deleteChaptersFromDb: DeleteChapters,
+    // KMK --> Feeds the extension watchdog from this screen's source fetches; see
+    // fetchAllFromSource.
+    private val extensionManager: ExtensionManager,
     // KMK <--
 ) : StateViewModel<MangaViewModel.State>(State.Loading) {
 
@@ -709,6 +713,10 @@ class MangaViewModel(
                     .getOrThrow()
 
                 // KMK -->
+                // A fetch that answered is evidence the extension works now, so whatever the
+                // extensions page was holding against it is dropped.
+                extensionManager.clearSourceError(state.source)
+
                 clearErrorFromDB(state.manga.id)
                 // KMK <--
 
@@ -719,6 +727,15 @@ class MangaViewModel(
         } catch (_: CancellationException) {
             // ignore
         } catch (e: Exception) {
+            // KMK --> Fed to the extension watchdog so the failure is attributable on the
+            // extensions page. Only a manual refresh may interrupt: the automatic refreshes fire
+            // whenever the screen opens with stale data, without the user pointing at this
+            // source, so those are recorded without a popup. An empty chapter list
+            // ([NoChaptersException]) is reported too - a source that stops listing chapters is
+            // usually a site change under the scraper, which is exactly what the report flow
+            // exists to attribute, and it is suppressible like any other failure.
+            extensionManager.reportSourceError(state.source, e, prompt = manualFetch)
+            // KMK <--
             val message = if (e is NoChaptersException) {
                 context.stringResource(MR.strings.no_chapters_error)
             } else {

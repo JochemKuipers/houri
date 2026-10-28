@@ -265,8 +265,12 @@ open class SourceFeedViewModel(
                         // KMK <--
                         fetched.mangas
                     } catch (e: Exception) {
-                        // KMK -->
-                        globalAppGraph.extensionManager.reportSourceError(source, e)
+                        // KMK --> Recorded but never prompted, like the global search: the feed
+                        // queries every pinned source in parallel on each open, so broken sources
+                        // would stack their popups over a screen the user is scrolling through.
+                        // The failure still lands on the extensions page, and using a source
+                        // directly still reports it.
+                        globalAppGraph.extensionManager.reportSourceError(source, e, prompt = false)
                         // KMK <--
                         emptyList()
                     }

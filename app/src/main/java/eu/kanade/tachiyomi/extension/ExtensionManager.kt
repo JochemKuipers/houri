@@ -604,8 +604,9 @@ class ExtensionManager(
         override fun onPackageUninstalled(pkgName: String) {
             logcat(LogPriority.INFO) { "[ExtInstall] onPackageUninstalled: $pkgName" }
             iconMap.remove(pkgName)
-            // KMK -->
-            errorReporter.clear(pkgName)
+            // KMK --> forget rather than clear: the persisted prompt answers for this package
+            // are dead along with it, and are dropped so they cannot outlive the extension.
+            errorReporter.forget(pkgName)
             // KMK <--
             ExtensionLoader.uninstallPrivateExtension(context, pkgName)
             unregisterExtension(pkgName)

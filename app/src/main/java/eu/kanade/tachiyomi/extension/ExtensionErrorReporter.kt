@@ -41,26 +41,35 @@ class ExtensionErrorReporter(
      * extensions list keeps explaining why a source returns nothing. Turning the watchdog off, or
      * [prompt] being false, is about interrupting the user - not about hiding the evidence.
      *
-     * @param prompt false to record the failure without interrupting. For the global search, which
-     * hits every source at once and would otherwise raise a burst of popups over the results.
+     * @param prompt false to record the failure without interrupting. For the multi-source
+     * fan-outs - the global search and the source feed - which hit several sources at once and
+     * would otherwise raise a burst of popups over the results.
      */
     fun report(report: ExtensionErrorReport, prompt: Boolean = true) {
         _errorsByPkg.update { it + (report.pkgName to report) }
 
         if (!prompt) return
         if (!sourcePreferences.extensionWatchdogEnabled().get()) return
-        if (isSuppressed(report) || hasPrompted(report)) return
 
-        // A prompt is already on screen; queuing a second would drop the first silently.
-        if (_pendingPrompt.value != null) return
+        // Checking the shown/suppressed sets and taking the prompt slot must be one step.
+        // report() runs on whatever thread the failure landed on - a paging worker, a download
+        // thread, a reader coroutine - and two failures arriving together could both find the
+        // slot empty, both mark themselves prompted, and one silently overwrite the other's
+        // popup without ever being seen.
+        synchronized(this) {
+            if (isSuppressed(report) || hasPrompted(report)) return
+            if (_pendingPrompt.value != null) return
 
-        _pendingPrompt.value = report
-        markPrompted(report)
+            _pendingPrompt.value = report
+            markPrompted(report)
+        }
     }
 
     /** The user acknowledged. The failure stays visible as subtext and may prompt again later. */
     fun dismissPrompt() {
-        _pendingPrompt.value = null
+        synchronized(this) {
+            _pendingPrompt.value = null
+        }
     }
 
     /**
@@ -70,7 +79,9 @@ class ExtensionErrorReporter(
      * this is dismissed before the confirmation is answered - the report has to survive that.
      */
     fun suppressCurrentVersion(report: ExtensionErrorReport) {
-        if (_pendingPrompt.value?.dedupeKey == report.dedupeKey) _pendingPrompt.value = null
+        synchronized(this) {
+            if (_pendingPrompt.value?.dedupeKey == report.dedupeKey) _pendingPrompt.value = null
+        }
         val suppressed = sourcePreferences.extensionErrorPromptsSuppressed()
         suppressed.set(suppressed.get() + report.versionKey)
     }
@@ -84,18 +95,51 @@ class ExtensionErrorReporter(
      * in settings.
      */
     fun disableSystem() {
-        _pendingPrompt.value = null
+        synchronized(this) {
+            _pendingPrompt.value = null
+        }
         sourcePreferences.extensionWatchdogEnabled().set(false)
     }
 
     fun errorFor(pkgName: String): ExtensionErrorReport? = _errorsByPkg.value[pkgName]
 
-    /** Drops stored failures for an extension that is gone, so they cannot resurface. */
+    /**
+     * Drops the recorded failure for [pkgName], and any prompt still waiting for it.
+     *
+     * Called both when a source call succeeds - whatever was recorded no longer holds - and when
+     * the extension is gone. The user's own answers are kept either way: [dismissPrompt] and
+     * [suppressCurrentVersion] are about being interrupted, and a repeat of a failure the user
+     * acknowledged should not start popping up again just because the source answered once.
+     * [forget] is the one that drops those.
+     */
     fun clear(pkgName: String) {
         _errorsByPkg.update { it - pkgName }
-        if (_pendingPrompt.value?.pkgName == pkgName) {
-            _pendingPrompt.value = null
+        synchronized(this) {
+            if (_pendingPrompt.value?.pkgName == pkgName) {
+                _pendingPrompt.value = null
+            }
         }
+    }
+
+    /**
+     * Forgets an extension entirely: the recorded failure, any prompt still waiting for it, and
+     * the persisted shown/suppressed bookkeeping for it.
+     *
+     * Called on uninstall, the one moment those persisted keys are known dead. They would
+     * otherwise only ever grow - every distinct failure adds one, and nothing else removes any -
+     * and each key outlives the extension that earned it. A reinstall of the same version starts
+     * with a clean sheet, which is the right reading: whatever the user answered before, they
+     * answered about a copy they chose to remove.
+     */
+    fun forget(pkgName: String) {
+        clear(pkgName)
+        // Both key shapes - versionKey and dedupeKey - start with "pkgName:", and the trailing
+        // colon is what keeps one package name from matching another that shares a prefix.
+        val prefix = "$pkgName:"
+        val shown = sourcePreferences.extensionErrorPromptsShown()
+        shown.set(shown.get().filterNot { it.startsWith(prefix) }.toSet())
+        val suppressed = sourcePreferences.extensionErrorPromptsSuppressed()
+        suppressed.set(suppressed.get().filterNot { it.startsWith(prefix) }.toSet())
     }
 
     private fun hasPrompted(report: ExtensionErrorReport): Boolean {

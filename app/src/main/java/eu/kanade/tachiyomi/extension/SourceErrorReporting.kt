@@ -1,8 +1,14 @@
 package eu.kanade.tachiyomi.extension
 
+import androidx.paging.PagingSource
+import androidx.paging.PagingState
 import eu.kanade.tachiyomi.source.Source
+import exh.metadata.metadata.RaisedSearchMetadata
 import kotlinx.coroutines.CancellationException
 import mihon.app.di.globalAppGraph
+import tachiyomi.data.source.NoResultsException
+import tachiyomi.domain.manga.model.Manga
+import tachiyomi.domain.source.repository.SourcePagingSource
 
 /**
  * Runs a source operation, reporting any failure to the extension watchdog.
@@ -43,4 +49,43 @@ suspend inline fun <T : Any> reportingSourceErrorsOrNull(
     if (e is CancellationException) throw e
     globalAppGraph.extensionManager.reportSourceError(source, e)
     null
+}
+
+/**
+ * Wraps a browse listing so a page load that fails reaches the extension watchdog.
+ *
+ * The paging sources live in the data module, which cannot see the watchdog, so this wraps the
+ * instance where the screen creates it - the layer that knows both the source and the reporter.
+ * Browse is the most direct way a user touches one extension, and before this its failures
+ * stopped at the screen's own error state: the extensions page never learned why a source
+ * returned nothing until the user read a chapter or downloaded one.
+ *
+ * [NoResultsException] is passed through without reporting: an empty listing is an answer, not
+ * a fault. Everything else a browse page can throw is attributed to the extension through the
+ * same path the reader and the downloader use; sources that are not extensions (local, merged,
+ * built-in, or stubs for uninstalled ones) resolve to no package there and are dropped.
+ */
+fun SourcePagingSource.reportingSourceLoadErrors(source: Source): SourcePagingSource =
+    ReportingSourcePagingSource(this, source)
+
+private class ReportingSourcePagingSource(
+    private val delegate: SourcePagingSource,
+    private val source: Source,
+) : SourcePagingSource() {
+
+    // The load types are nested in PagingSource; spelled with their outer class so they cannot
+    // be confused with the extension loader's own LoadResult in extension.model, or with
+    // LoadState.Error whose throwable goes by a different name.
+    override suspend fun load(
+        params: PagingSource.LoadParams<Long>,
+    ): PagingSource.LoadResult<Long, Pair<Manga, RaisedSearchMetadata?>> {
+        val result = delegate.load(params)
+        if (result is PagingSource.LoadResult.Error<*, *> && result.throwable !is NoResultsException) {
+            globalAppGraph.extensionManager.reportSourceError(source, result.throwable)
+        }
+        return result
+    }
+
+    override fun getRefreshKey(state: PagingState<Long, Pair<Manga, RaisedSearchMetadata?>>): Long? =
+        delegate.getRefreshKey(state)
 }

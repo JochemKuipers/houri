@@ -32,6 +32,7 @@ import eu.kanade.domain.track.interactor.AddTracks
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.extension.ExtensionManager
+import eu.kanade.tachiyomi.extension.reportingSourceLoadErrors
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.online.MetadataSource
 import eu.kanade.tachiyomi.source.online.all.MangaDex
@@ -306,6 +307,13 @@ open class BrowseSourceViewModel(
             Pager(PagingConfig(pageSize = 25)) {
                 // SY -->
                 createSourcePagingSource(listing.query ?: "", listing.filters)
+                    // KMK --> A browse listing is the most direct use of an extension, and until
+                    // now its failures stopped at this screen's error state: the extensions page
+                    // never learned why a source returned nothing until a chapter was read or
+                    // downloaded. Wrapping here covers every [createSourcePagingSource] override
+                    // too (MangaDex follows, recommendations).
+                    .reportingSourceLoadErrors(source)
+                // KMK <--
                 // SY <--
             }.flow.map { pagingData ->
                 pagingData.map { (manga, metadata) ->
@@ -495,12 +503,23 @@ open class BrowseSourceViewModel(
             if (new.favorite && (fetchMetadataOnAdd || fetchChaptersOnAdd)) {
                 try {
                     // Use `manga` instead of `new` so its title got updated with source's `getMangaDetails`
-                    updateMangaFromRemote(
+                    val fetched = updateMangaFromRemote(
                         source = source,
                         manga = manga,
                         fetchDetails = fetchMetadataOnAdd,
                         fetchChapters = fetchChaptersOnAdd,
                     )
+                    // The interactor folds source failures into its Result instead of throwing,
+                    // so the watchdog is fed from the outcome rather than a catch block that
+                    // never sees them. Recorded without a popup: the favorite itself
+                    // succeeded, and a dialog over the browse grid would read as the tap
+                    // having failed.
+                    val failure = fetched.exceptionOrNull()
+                    if (failure != null) {
+                        extensionManager.reportSourceError(source, failure, prompt = false)
+                    } else {
+                        extensionManager.clearSourceError(source)
+                    }
                 } catch (e: Exception) {
                     logcat(LogPriority.ERROR, e)
                 }
