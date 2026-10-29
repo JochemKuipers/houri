@@ -605,6 +605,8 @@ above — a type mismatch that a compiler will not catch.
 | `Device not available` / blank pages after backgrounding | Device loss; check the recovery path above, not the page. |
 | `F/libc Fatal signal 11 (SIGSEGV), ... fault addr 0x0 ... (WebGPU-Render-T)` with `Java_androidx_webgpu_GPUQueue_submit` above `submitAndRelease` in the tombstone | Device loss landed **mid-frame**: `render()` passed its entry `isAvailable` gate, then the draw suspended (tile generation), and the loss invalidated the native queue before `submitAndRelease`. Submitting on the dead handle is a null-deref inside `libwebgpu_c_bundled` that kills the process — no Kotlin exception can catch it. `render()` re-checks `isAvailable` immediately before the submit and drops the frame; the residual recheck→JNI window cannot be closed from Kotlin (UNVERIFIED how wide). Same rule as `cleanup()`: once the device is lost, nothing drives its objects. |
 | `device lost reason=1: CreateAndroidSurfaceKHR failed with VK_ERROR_NATIVE_WINDOW_IN_USE_KHR`, preceded by `BufferQueueProducer ... connect: already connected` and `vulkan: native_window_api_connect() failed` | A **second** swapchain was created on a window the old one still owned. Dawn can defer `vkDestroySurfaceKHR` past `close()`, so recovery must drop the old `GPUSurface` *and* release the retained `ANativeWindow` (`NativeWindow.release`) **before** it builds the replacement — see `recoverFromDeviceLoss`. The `SurfaceTexture-0-…` name means the TextureView path (API < 34), where the window is a `SurfaceTexture`'s BufferQueue. |
+| `Transition ensureTextures clamped WxH -> W'xH'` | The device's `maxTextureDimension2D` is below 8192 (4096 on PowerVR-class Compatibility-mode adapters) and the transition cache was sized for a larger surface — now clamped so the turn renders. Before the clamp the symptom was `ensureTextures create failed` **every page turn, for the whole session**. |
+| `FilterChain acquire clamped WxH -> W'xH'` | The same device cap reached through the filter pool. Before the clamp, `beginFrame`'s catch silently disabled every filter for the rest of the session. |
 | Blank/garbage page in dual-page mode only | Check `spreadPage` lifecycle — see landmines. |
 | Pages decode then vanish when scrolling back | Eviction. Check `isOnScreen` immunity and `pageDistance` anchoring. |
 | Same page stuck forever, no ErrorPage | `wantedByRender` is still set and `imagePage` is still a `ProgressPage` — the sweep only sees that one shape. |
@@ -803,6 +805,18 @@ line, for instance, does not appear anywhere in the current tree.
   process.
 - **Do not grow `WebGpuViewer.kt` past wiring.** A new state machine belongs in its own file
   as a `WebGpuViewer` extension.
+- **The adapter's `maxTextureDimension2D` can sit below every app-side 8192 constant — tiled
+  upload is the reason tall pages still work.** Compatibility-mode PowerVR adapters report
+  4096, while app constants (`SPREAD_MAX_DIM`, `UpscaleScalingStrategy.MAX_DIM`,
+  `HttpPageLoader.maxSegmentHeight`, the decoder's ~16384) read as if 8192+ textures existed.
+  They are safe only because every page upload flows through the tiled Mipmap path, whose tile
+  size follows `WebGpuRenderer.maxTextureDimension2D` (re-queried from whichever adapter is
+  live, including after device recovery). The library clamps everything it sizes off a surface
+  or page dimension the same way — surface (`surfaceDimensionCap`), transition caches, filter
+  pool, tile atlas, font atlas — and anything new on either side that sizes a texture must do
+  too; anything that would *upload* a texture larger than the limit without going through
+  tiling is the bug class to check. Full rule + degradation semantics:
+  `external/webgpuviewer-houri/library/src/main/java/ca/mpreg/webgpuviewer/renderer/AGENTS.md`.
 
 ## WHERE THINGS ARE
 

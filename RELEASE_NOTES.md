@@ -115,6 +115,14 @@ files moved. See .github/scripts/release_notes.py.
   frame rate is legible at a glance.
 
 ### Fix
+- **WebGPU reader: adapter texture limits honoured on low-capability GPUs**: some GPUs
+  (PowerVR-class, running Graphics API Compatibility mode) cap textures at 4096px, and several
+  textures the renderer sized itself at a hardcoded 8192 — the screen surface, page-turn
+  transition caches, colour-filter buffers, the tile cache and the rendered-text font atlas —
+  could each fail creation per frame or per page turn on such a device. Every texture the
+  renderer sizes itself now clamps to what the adapter reports: oversized content just holds
+  less in the tile cache, an oversized glyph renders its spacing only (like a space), and tall
+  pages are unaffected because uploads were already tiled.
 - **Cold start: splash screen finally lets go**: opening the app the ordinary way — tapping its
   icon — kept the pineapple splash pinned on screen for a full five seconds plus its exit
   animation on every cold start, no matter how quickly the app had actually finished loading
