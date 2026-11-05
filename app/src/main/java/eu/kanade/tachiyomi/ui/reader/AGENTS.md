@@ -111,6 +111,13 @@ The reader's preferences are layered on as an injected stylesheet; the document 
 | `NovelPageLayout.kt` | The book as discrete pages: the column CSS, the `KmkPaged` bridge script, and the pure parsers for its replies. Pure |
 | `NovelContinuous.kt` | The book as one continuous scroll: segment markers, the probe, append/prepend/trim/seek scripts. Pure strings |
 | `NovelInline.kt` | Rewrites a document's images and stylesheets into `data:` URIs. Pure |
+| `NovelPlainText.kt` | The webnovel converter: `Kind.PLAIN` text → paragraph HTML, with Moon+'s cleanup passes; also `chunkForSpeech`, the read-aloud queue's sentence-aware chunker. Pure |
+| `NovelFootnotes.kt` | Footnote popups: the document-side click detector (capture-phase, `epub:type` + id/class conventions) and the `@JavascriptInterface` receiver |
+| `NovelAutoScroll.kt` | The continuous auto-scroll engine script (`window.KmkAutoScroll`): rAF-paced `scrollBy`, self-stops at the document's end, pauses on touch. Pure strings |
+| `NovelPageTurn.kt` | The paged turn animation: `PageTurnAnimation` + the snapshot overlay that animates the old page away over the live document |
+| `NovelStatusLine.kt` | The status line's formatting: fields, order, missing values drop out. Pure |
+| `NovelHighlights.kt` | Highlights & selection actions: the quotation-anchored model, hand-rolled JSON (harness-safe), the re-marking/unwrapping engine script, the `selectionchange` watcher, and the `KmkHighlight` receiver. Store via `NovelTypographyPreferences.highlights` |
+| `NovelTts.kt` | The read-aloud controller over `TextToSpeech`: queues `chunkForSpeech` output, chains across documents through the viewer's advance path; Android-only |
 | `NovelFonts.kt` | Fonts the reader imported, stored and offered beside the built-in families |
 | `NovelBuiltinFonts.kt` | The curated variable fonts bundled in `app/src/main/assets/novel-fonts/`, grouped by kind. No Android imports, so it is unit-testable |
 | `NovelScrollBridge.kt` | `window.KmkReader` — how the host measures and scrolls the document — the `FLOW` direction probe, and `quoteForJs` |
@@ -120,6 +127,31 @@ The reader's preferences are layered on as an injected stylesheet; the document 
 | `NovelReaderTheme.kt` | The general reader theme's background, as the book's stylesheet can use it |
 | `NovelTypographyCss.kt` | Turns that value into a stylesheet; `styleTag` escapes `</`; also styles the synthesized cover page |
 | `NovelProgress.kt` | Reading position and percentage progress. A `Position` carries the document's URL beside its index, so a restore survives the list being renumbered |
+
+### The Moon+ Reader port (2026-11, KMK)
+
+Feature parity work ported from static analysis of Moon+ Reader Pro 10.87
+(`/home/branden/moonreader-decomp/`; design: `docs/superpowers/specs/2026-10-31-novel-reader-moonreader-port-design.md`).
+What landed, and the one rule each lives by:
+
+- **Webnovel plain text** — `Kind.PLAIN` converts at the inline-build seam, so the conversion rides
+  the inline cache; the cache key carries the cleanup token, so a settings change re-builds.
+- **Ignore publisher styles** — stripped in `NovelDocument.normalize` at *build* time, after
+  inlining, so the cache stays valid both ways and the strip can never eat a reader rule (reader
+  styles are emitted later in the head). Inline `style=""` attributes survive on purpose.
+- **Page-turn animation** — one snapshot of the old page, animated away over the live turn. Never
+  capture the *next* page: that races the compositor. A turn that did not move recycles its
+  snapshot; the overlay reads geometry off the parent, because it has no layout of its own yet.
+- **Footnote popups** — the injected script pops only notes the book *labels* (`epub:type`, EPUB's
+  id/class conventions); unlabelled links navigate as before. Cross-document notes are read out of
+  the archive (`EpubFootnotes`, bounded) and rendered at the notes document's base URL; every
+  failure path falls through to `openArchiveLink`, never to nothing.
+- **Auto-scroll** — page-side rAF at px/s (the host converts from dp), riding the document's own
+  scroll events so the probe/append pipeline grows the window under it. It self-stops at the book's
+  true end; the reader taps to turn a chapter, as they always did.
+- **Status line** — a Compose overlay beside the app bars; the device answers (clock, battery) are
+  resolved there, the format is `NovelStatusLine` (pure). Hidden with the menus unless the reader
+  asked to keep it.
 
 The two sheets themselves are in `presentation/reader/NovelReaderDialogs.kt`, beside the rest of the
 reader's dialogs.

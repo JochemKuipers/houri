@@ -4,10 +4,14 @@ package eu.kanade.tachiyomi.ui.reader.setting
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelHighlights
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelPageLayout
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelPageLayout.PageMode
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelPlainText
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelProgress
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelStatusLine
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.PageTurnAnimation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
@@ -82,6 +86,9 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
     val fontSpacing: Preference<Float>
         get() = store.getFloat(NovelTypographySettingKeys.FONT_SPACING.key, NovelTypographySettingKeys.FONT_SPACING.default)
 
+    val wordSpacing: Preference<Float>
+        get() = store.getFloat(NovelTypographySettingKeys.WORD_SPACING.key, NovelTypographySettingKeys.WORD_SPACING.default)
+
     val marginLeft: Preference<Float>
         get() = store.getFloat(NovelTypographySettingKeys.MARGIN_LEFT.key, NovelTypographySettingKeys.MARGIN_LEFT.default)
 
@@ -93,6 +100,13 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
 
     val marginBottom: Preference<Float>
         get() = store.getFloat(NovelTypographySettingKeys.MARGIN_BOTTOM.key, NovelTypographySettingKeys.MARGIN_BOTTOM.default)
+
+    /** Indent depth in em, read only while [paragraphIndent] is on. */
+    val paragraphIndentLength: Preference<Float>
+        get() = store.getFloat(
+            NovelTypographySettingKeys.PARAGRAPH_INDENT_LENGTH.key,
+            NovelTypographySettingKeys.PARAGRAPH_INDENT_LENGTH.default,
+        )
 
     // ------------------------------------------------------------ layout
 
@@ -177,6 +191,164 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
     val customJs: Preference<String>
         get() = store.getString(NovelTypographySettingKeys.CUSTOM_JS.key, NovelTypographySettingKeys.CUSTOM_JS.default)
 
+    // ------------------------------------------------------------ webnovel plain text
+
+    /** The converter itself (intelligent paragraphs); the two cleanup toggles below ride with it. */
+    val plainSmartPref: Preference<Boolean>
+        get() = store.getBoolean(
+            NovelTypographySettingKeys.PLAIN_TEXT_CLEANUP.key,
+            NovelTypographySettingKeys.PLAIN_TEXT_CLEANUP.default,
+        )
+
+    /** Whether runs of blank lines between paragraphs are collapsed. */
+    val plainTrimBlankPref: Preference<Boolean>
+        get() = store.getBoolean(
+            NovelTypographySettingKeys.PLAIN_TEXT_TRIM_BLANK.key,
+            NovelTypographySettingKeys.PLAIN_TEXT_TRIM_BLANK.default,
+        )
+
+    /** Whether stray per-line spaces are trimmed and internal runs collapsed. */
+    val plainTrimSpacesPref: Preference<Boolean>
+        get() = store.getBoolean(
+            NovelTypographySettingKeys.PLAIN_TEXT_TRIM_SPACES.key,
+            NovelTypographySettingKeys.PLAIN_TEXT_TRIM_SPACES.default,
+        )
+
+    /**
+     * The webnovel converter's cleanup passes, as [NovelPlainText.Cleanup] — the projected value
+     * the document builders ask for directly, so no caller re-derives the triple from raw prefs.
+     */
+    fun plainTextCleanup(): NovelPlainText.Cleanup = NovelPlainText.Cleanup(
+        trimBlankLines = plainTrimBlankPref.get(),
+        trimSpaces = plainTrimSpacesPref.get(),
+        smartParagraphs = plainSmartPref.get(),
+    )
+
+    /**
+     * A change to any cleanup pass. The conversion happens at the inline build, whose cache key
+     * carries the cleanup token, so a change re-builds the affected documents on their next look.
+     */
+    fun plainTextCleanupChanges(): Flow<Unit> = merge(
+        plainSmartPref.changes(),
+        plainTrimBlankPref.changes(),
+        plainTrimSpacesPref.changes(),
+    ).drop(1).map { }
+
+    // ------------------------------------------------------------ publisher CSS
+
+    /** Whether the book's own stylesheets are dropped from rendered documents. */
+    val ignorePublisherCss: Preference<Boolean>
+        get() = store.getBoolean(
+            NovelTypographySettingKeys.IGNORE_PUBLISHER_CSS.key,
+            NovelTypographySettingKeys.IGNORE_PUBLISHER_CSS.default,
+        )
+
+    // ------------------------------------------------------------ footnotes
+
+    /** Whether tapping a note reference opens a popup instead of navigating. */
+    val footnotePopups: Preference<Boolean>
+        get() = store.getBoolean(
+            NovelTypographySettingKeys.FOOTNOTE_POPUPS.key,
+            NovelTypographySettingKeys.FOOTNOTE_POPUPS.default,
+        )
+
+    /** Whether selecting text offers the highlight actions. See [NovelHighlights]. */
+    val highlightsEnabled: Preference<Boolean>
+        get() = store.getBoolean(
+            NovelTypographySettingKeys.HIGHLIGHTS_ENABLED.key,
+            NovelTypographySettingKeys.HIGHLIGHTS_ENABLED.default,
+        )
+
+    // ------------------------------------------------------------ read-aloud
+
+    /** Whether read-aloud is offered at all; the speak/stop actions check it as their gate. */
+    val ttsEnabled: Preference<Boolean>
+        get() = store.getBoolean(
+            NovelTypographySettingKeys.TTS_ENABLED.key,
+            NovelTypographySettingKeys.TTS_ENABLED.default,
+        )
+
+    /** The speech rate, 0.5..3.0, engine multiplier. */
+    val ttsRate: Preference<Float>
+        get() = store.getFloat(
+            NovelTypographySettingKeys.TTS_RATE.key,
+            NovelTypographySettingKeys.TTS_RATE.default,
+        )
+
+    // ------------------------------------------------------------ page turn
+    val pageTurnAnimationPref: Preference<Int>
+        get() = store.getInt(
+            NovelTypographySettingKeys.PAGE_TURN_ANIMATION.key,
+            NovelTypographySettingKeys.PAGE_TURN_ANIMATION.default,
+        )
+
+    val pageTurnAnimation: PageTurnAnimation
+        get() = PageTurnAnimation.fromPreference(pageTurnAnimationPref.get())
+
+    /** How long the page-turn animation runs, in milliseconds. */
+    val pageTurnSpeedMs: Preference<Int>
+        get() = store.getInt(
+            NovelTypographySettingKeys.PAGE_TURN_SPEED_MS.key,
+            NovelTypographySettingKeys.PAGE_TURN_SPEED_MS.default,
+        )
+
+    // ------------------------------------------------------------ status line
+
+    /**
+     * The enabled status-line fields, stored as a comma-separated list of ordinals — a set pref
+     * spelled as a string, because the store's atomic types end at strings and this is the least
+     * surprising encoding for one. Blank means none enabled, which is the default.
+     */
+    val statusFieldsPref: Preference<String>
+        get() = store.getString(NovelTypographySettingKeys.STATUS_FIELDS.key, NovelTypographySettingKeys.STATUS_FIELDS.default)
+
+    val statusFields: Set<NovelStatusLine.Field>
+        get() = statusFieldsPref.get().split(',').mapNotNull { it.trim().toIntOrNull() }.toSet()
+            .let { NovelStatusLine.Field.fromOrdinals(it) }
+
+    fun setStatusFields(fields: Set<NovelStatusLine.Field>) {
+        statusFieldsPref.set(fields.joinToString(",") { it.ordinal.toString() })
+    }
+
+    val statusPositionPref: Preference<Int>
+        get() = store.getInt(NovelTypographySettingKeys.STATUS_POSITION.key, NovelTypographySettingKeys.STATUS_POSITION.default)
+
+    val statusPosition: NovelStatusLine.Position
+        get() = NovelStatusLine.Position.entries.getOrElse(statusPositionPref.get()) { NovelStatusLine.Position.TOP }
+
+    val statusTextSizeSp: Preference<Int>
+        get() = store.getInt(
+            NovelTypographySettingKeys.STATUS_TEXT_SIZE_SP.key,
+            NovelTypographySettingKeys.STATUS_TEXT_SIZE_SP.default,
+        )
+
+    /** The line's colour, `#rrggbb`; blank means derive it from the reader theme. */
+    val statusColor: Preference<String>
+        get() = store.getString(NovelTypographySettingKeys.STATUS_COLOR.key, NovelTypographySettingKeys.STATUS_COLOR.default)
+
+    /** Whether the line stays over the text while the reader's menus are hidden. Off by default. */
+    val statusShowWhenHidden: Preference<Boolean>
+        get() = store.getBoolean(
+            NovelTypographySettingKeys.STATUS_SHOW_WHEN_HIDDEN.key,
+            NovelTypographySettingKeys.STATUS_SHOW_WHEN_HIDDEN.default,
+        )
+
+    // ------------------------------------------------------------ auto scroll
+
+    /** Whether the continuous reader scrolls itself. Only continuous mode acts on it. */
+    val autoScrollEnabled: Preference<Boolean>
+        get() = store.getBoolean(
+            NovelTypographySettingKeys.AUTO_SCROLL_ENABLED.key,
+            NovelTypographySettingKeys.AUTO_SCROLL_ENABLED.default,
+        )
+
+    /** Auto-scroll pace, in dp per second. */
+    val autoScrollSpeedDp: Preference<Int>
+        get() = store.getInt(
+            NovelTypographySettingKeys.AUTO_SCROLL_SPEED_DP.key,
+            NovelTypographySettingKeys.AUTO_SCROLL_SPEED_DP.default,
+        )
+
     // ------------------------------------------------------------ tri-state
 
     private val justifiedPref: Preference<String>
@@ -199,6 +371,15 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
 
     private val boldTextPref: Preference<String>
         get() = store.getString(NovelTypographySettingKeys.BOLD_TEXT.key, NovelTypographySettingKeys.BOLD_TEXT.default)
+
+    private val italicTextPref: Preference<String>
+        get() = store.getString(NovelTypographySettingKeys.ITALIC_TEXT.key, NovelTypographySettingKeys.ITALIC_TEXT.default)
+
+    private val textShadowPref: Preference<String>
+        get() = store.getString(NovelTypographySettingKeys.TEXT_SHADOW.key, NovelTypographySettingKeys.TEXT_SHADOW.default)
+
+    private val textOutlinePref: Preference<String>
+        get() = store.getString(NovelTypographySettingKeys.TEXT_OUTLINE.key, NovelTypographySettingKeys.TEXT_OUTLINE.default)
 
     private val forceDarkPref: Preference<String>
         get() = store.getString(
@@ -229,6 +410,21 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
         get() = triState(boldTextPref.get())
         set(value) = boldTextPref.set(encodeTriState(value))
 
+    /** Whether body text is slanted; null to follow the book. See [NovelTypography.italicText]. */
+    var italicText: Boolean?
+        get() = triState(italicTextPref.get())
+        set(value) = italicTextPref.set(encodeTriState(value))
+
+    /** Whether text carries a soft shadow; null to follow the book. See [NovelTypography.textShadow]. */
+    var textShadow: Boolean?
+        get() = triState(textShadowPref.get())
+        set(value) = textShadowPref.set(encodeTriState(value))
+
+    /** Whether glyphs carry a thin outline; null to follow the book. See [NovelTypography.textOutline]. */
+    var textOutline: Boolean?
+        get() = triState(textOutlinePref.get())
+        set(value) = textOutlinePref.set(encodeTriState(value))
+
     /** Whether the reader's own dark palette stands in for the book's; see [NovelTypography.forceDark]. */
     var forceDark: Boolean?
         get() = triState(forceDarkPref.get())
@@ -257,6 +453,11 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
         paragraphIndent = paragraphIndent,
         boldText = boldText,
         forceDark = forceDark,
+        paragraphIndentLengthEm = paragraphIndentLength.get(),
+        italicText = italicText,
+        textShadow = textShadow,
+        textOutline = textOutline,
+        wordSpacing = wordSpacing.get(),
     ).sanitized()
 
     fun setTypography(value: NovelTypography) {
@@ -273,9 +474,14 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
         paragraphIndent = t.paragraphIndent
         boldText = t.boldText
         forceDark = t.forceDark
+        paragraphIndentLength.set(t.paragraphIndentLengthEm)
+        italicText = t.italicText
+        textShadow = t.textShadow
+        textOutline = t.textOutline
         paragraphSpacing.set(t.paragraphSpacing)
         lineSpacing.set(t.lineSpacing)
         fontSpacing.set(t.fontSpacing)
+        wordSpacing.set(t.wordSpacing)
         marginLeft.set(t.marginLeft)
         marginRight.set(t.marginRight)
         marginTop.set(t.marginTop)
@@ -323,6 +529,9 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
             paragraphIndentPref.changes().asSignal(),
             boldTextPref.changes().asSignal(),
             forceDarkPref.changes().asSignal(),
+            italicTextPref.changes().asSignal(),
+            textShadowPref.changes().asSignal(),
+            paragraphIndentLength.changes().asSignal(),
             customCssEnabled.changes().asSignal(),
             customCss.changes().asSignal(),
         )
@@ -390,6 +599,23 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
     private fun positionPreference(chapterUrl: String): Preference<String> =
         store.getString(Preference.privateKey(POSITION_KEY_PREFIX + chapterUrl.hashCode()), "")
 
+    // ------------------------------------------------------------ highlights
+
+    /**
+     * The chapter's highlights, oldest first. Stored as hand-rolled JSON beside reading
+     * positions, under the same `__PRIVATE_` privacy reasoning — annotations describe a file the
+     * user's backup does not contain.
+     */
+    fun highlights(chapterUrl: String): List<NovelHighlights.Highlight> =
+        NovelHighlights.decode(highlightPreference(chapterUrl).get())
+
+    fun setHighlights(chapterUrl: String, highlights: List<NovelHighlights.Highlight>) {
+        highlightPreference(chapterUrl).set(NovelHighlights.encode(highlights.takeLast(NovelHighlights.MAX_PER_CHAPTER)))
+    }
+
+    private fun highlightPreference(chapterUrl: String): Preference<String> =
+        store.getString(Preference.privateKey(HIGHLIGHT_KEY_PREFIX + chapterUrl.hashCode()), "")
+
     // ------------------------------------------------------------ helpers
 
     /**
@@ -412,6 +638,7 @@ class NovelTypographyPreferences(private val store: PreferenceStore) {
 
     private companion object {
         const val POSITION_KEY_PREFIX = "pref_novel_position_"
+        const val HIGHLIGHT_KEY_PREFIX = "pref_novel_highlights_"
     }
 }
 // KMK <--

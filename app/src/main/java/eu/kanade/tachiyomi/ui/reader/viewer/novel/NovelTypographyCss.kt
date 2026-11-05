@@ -78,6 +78,7 @@ object NovelTypographyCss {
             appendLine("  --kmk-line: ${fmt(t.lineSpacing)};")
             appendLine("  --kmk-para: ${fmt(t.paragraphSpacing)}em;")
             appendLine("  --kmk-tracking: ${fmt(t.fontSpacing)}em;")
+            if (t.wordSpacing != 0f) appendLine("  --kmk-word: ${fmt(t.wordSpacing)}em;")
             appendLine("}")
 
             // Root sizing. `html` is set too because publisher CSS commonly overrides `body` and
@@ -114,9 +115,10 @@ object NovelTypographyCss {
             // page looking like a wall of unindented lines - so `on` emits the indent and `off` has to
             // emit `0` rather than nothing, or a publisher that indents would keep indenting and the
             // setting would read as having done nothing. `null` omits the rule entirely, which is the
-            // only way to say "follow the publisher" once the reader has seen both answers.
+            // only way to say "follow the publisher" once the reader has seen both answers. The
+            // depth is the reader's own `indent_length` (Moon+'s spelling), not a fixed `1em`.
             t.paragraphIndent?.let {
-                appendLine("""p + p { text-indent: ${if (it) "1em" else "0"} !important; }""")
+                appendLine("""p + p { text-indent: ${if (it) fmt(t.paragraphIndentLengthEm) + "em" else "0"} !important; }""")
             }
 
             // Bold text is a weight on the text-bearing set only. `h1`–`h6` are excluded on purpose:
@@ -130,6 +132,44 @@ object NovelTypographyCss {
                 appendLine(
                     "body, p, div, span, li, td, th, blockquote, dd, dt, section, article, figcaption, small " +
                         "{ font-weight: ${if (it) 700 else 400} !important; }",
+                )
+            }
+
+            // Italic rides the same set and the same exclusions as bold, for the same reason: the
+            // book's own `em`/`i` are meaning, not decoration to flatten, and "off" must be able to
+            // beat a publisher that italicised the body. Moon+ Reader ships the same switch
+            // (`fontItalic` in its visual preferences).
+            t.italicText?.let {
+                appendLine(
+                    "body, p, div, span, li, td, th, blockquote, dd, dt, section, article, figcaption, small " +
+                        "{ font-style: ${if (it) "italic" else "normal"} !important; }",
+                )
+            }
+
+            // The text shadow follows the text's own colour — a `text-shadow` with no colour
+            // resolves against `currentColor` — so the one switch works on light-on-dark exactly as
+            // on dark-on-light, and no second colour setting is dragged in behind it.
+            t.textShadow?.let {
+                if (it) {
+                    appendLine(
+                        "body, p, div, span, li, td, th, blockquote, dd, dt, section, article, figcaption, small " +
+                            "{ text-shadow: 0.04em 0.04em 0.07em !important; }",
+                    )
+                } else {
+                    appendLine(
+                        "body, p, div, span, li, td, th, blockquote, dd, dt, section, article, figcaption, small " +
+                            "{ text-shadow: none !important; }",
+                    )
+                }
+            }
+
+            // The glyph outline follows the text's own colour like the shadow, so one switch reads
+            // on both palettes. "Off" emits a zero stroke: a publisher's own outline has to be
+            // overridable, and `auto` would defer to exactly the rule the reader is overriding.
+            t.textOutline?.let {
+                appendLine(
+                    "body, p, div, span, li, td, th, blockquote, dd, dt, section, article, figcaption, small " +
+                        "{ -webkit-text-stroke: ${if (it) "0.3px currentColor" else "0 currentColor"} !important; }",
                 )
             }
 
@@ -212,6 +252,7 @@ object NovelTypographyCss {
         append(" font-size: var(--kmk-font-size) !important;")
         append(" line-height: var(--kmk-line) !important;")
         if (t.fontSpacing != 0f) append(" letter-spacing: var(--kmk-tracking) !important;")
+        if (t.wordSpacing != 0f) append(" word-spacing: var(--kmk-word) !important;")
         textColor?.let { append(" color: $it !important;") }
         append(" }")
     }

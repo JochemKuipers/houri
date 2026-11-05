@@ -91,7 +91,13 @@ class Komga(id: Long) : BaseTracker(id, "Komga"), EnhancedTracker {
         saveCredentials("user", "pass")
     }
 
-    override fun getAcceptedSources() = listOf("eu.kanade.tachiyomi.extension.all.komga.Komga")
+    override fun getAcceptedSources() = listOf(
+        "eu.kanade.tachiyomi.extension.all.komga.Komga",
+        // KMK --> The baked-in server source tracks through the same API; one Komga entry per
+        // server is the shared shape, so both sources bind to this tracker without user setup.
+        "eu.kanade.tachiyomi.source.online.all.komga.Komga",
+        // KMK <--
+    )
 
     override suspend fun match(manga: Manga): TrackSearch? =
         try {

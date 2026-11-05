@@ -12,6 +12,31 @@ The monolithic application module containing UI, domain, data services, and DI w
 | `exh.*` | TachiyomiSY/ExHentai | E-Hentai, MangaDex, recommendations |
 | `mihon.*` | Mihon upstream | Migration, upcoming, Shizuku |
 
+## Baked-in Komga source (KMK)
+
+`app/src/main/java/eu/kanade/tachiyomi/source/online/all/komga/` — a self-hosted Komga server
+(https://komga.org) as a built-in source, registered in `AndroidSourceManager`'s builtins map under
+`exh.source.KOMGA_SOURCE_ID` (no catalog extension needed; the Keiyoushi Komga extension
+coexists — the app's Komga enhanced tracker accepts both FQCNs, so either source binds to it).
+
+| File | Concern |
+|------|---------|
+| `Komga.kt` | The `HttpSource` + `TextSource` + `MixedContentSource`/`EntryTypeSource` + `EpubArchiveSource` + text capability interfaces; browse/chapters/pages REST; epub chapter routing |
+| `KomgaClient.kt` | One OkHttp client: per-request `X-API-Key` interceptor + Basic `Authenticator` (never re-authenticates, never answers a foreign host's challenge), `Dns.SYSTEM` (Komga servers are often IP-addressed; DoH would break that) |
+| `KomgaDto.kt` | kotlinx-serialization DTOs (server sends more; unknown keys are ignored) |
+| `KomgaPreferences.kt` | Keys on the standard `source_$id` file; `serverBase()`/`displayName()` |
+| `KomgaEpubAdapter.kt` | Downloads the EPUB to `cacheDir/komga/<bookId>.epub.cache` (keyed on the server's `fileHash`), then serves it through `EpubTextSource`/`EpubResourceServer` — the same stack as the local source's epub half |
+
+**URLs are stored absolute** (`$server/api/v1/series/<id>`), matching the Keiyoushi extension's
+storage format: the enhanced tracker GETs `manga.url` directly, and this source's library entries
+interoperate with the extension's. Chapter urls carry the book id; `KomgaEpubAdapter.bookIdOf`
+parses it out wherever it is needed.
+
+**Entry typing**: `entryTypeOf` deliberately answers null (a series may mix books and comics);
+`detectBookEntry` probes the book's `mediaProfile` — `EPUB` and *not* Divina-compatible means the
+book reader claims the chapter, everything else goes to image pages. The host's explicit-user-first
+precedence (`PageLoaderFactory.isBookEntry`) sits above both.
+
 ## Key directories
 
 | Path | Purpose |
