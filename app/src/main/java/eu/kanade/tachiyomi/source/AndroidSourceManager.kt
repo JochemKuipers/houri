@@ -17,6 +17,7 @@ import eu.kanade.tachiyomi.source.online.all.MangaDex
 import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.source.online.all.NHentai
 import eu.kanade.tachiyomi.source.online.all.Pururin
+import eu.kanade.tachiyomi.source.online.all.komga.Komga
 import eu.kanade.tachiyomi.source.online.english.EightMuses
 import exh.log.xLogD
 import exh.source.BlacklistedSources
@@ -26,6 +27,7 @@ import exh.source.EIGHTMUSES_SOURCE_ID
 import exh.source.EXHENTAI_EXT_SOURCES
 import exh.source.EnhancedHttpSource
 import exh.source.ExhPreferences
+import exh.source.KOMGA_SOURCE_ID
 import exh.source.MERGED_SOURCE_ID
 import exh.source.handleSourceLibrary
 import kotlinx.coroutines.CoroutineScope
@@ -140,6 +142,12 @@ class AndroidSourceManager(
                             // SY -->
                             put(MERGED_SOURCE_ID, MergedSource())
                             // SY <--
+                            // KMK --> Baked-in Komga server source: browse + read, EPUB chapters
+                            // land in the book reader. Registered unconditionally — an unconfigured
+                            // instance shows "Set the server address" on first browse, which is the
+                            // same answer every other self-hosted source gives.
+                            put(KOMGA_SOURCE_ID, Komga(context, KOMGA_SOURCE_ID))
+                            // KMK <--
                         }
                         // KMK -->
                         extensions.forEach { extension ->

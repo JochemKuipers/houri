@@ -79,6 +79,13 @@ val EXHENTAI_EXT_SOURCES = mapOf(
 val eHentaiSourceIds = EHENTAI_EXT_SOURCES.keys + EXHENTAI_EXT_SOURCES.keys
 
 // KMK -->
+// Baked-in Komga source (self-hosted server, https://komga.org). One instance; the Keiyoushi
+// Komga extension coexists with it (same server contract, different id space), and the app's
+// Komga enhanced tracker accepts both.
+const val KOMGA_SOURCE_ID = LEWD_SOURCE_SERIES + 18 // 6918
+// KMK <--
+
+// KMK -->
 // Light novel source IDs: reserved range LEWD_SOURCE_SERIES+100..+117, one per
 // locale mirroring the EHENTAI 18-locale set. No community extension occupies
 // these yet; the NovelViewer stub keys off them until real LN sources ship.
