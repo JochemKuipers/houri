@@ -25,7 +25,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation3.runtime.NavKey
 import eu.kanade.tachiyomi.util.system.toast
-import exh.yakuyomi.TranslatedPageStore
 import kotlinx.serialization.Serializable
 import mihon.app.di.globalAppGraph
 import mihon.core.navigation.util.LocalBackStack
@@ -35,10 +34,15 @@ import java.io.File
 @Serializable
 data object SettingsMangaTranslatorCacheRoute : NavKey
 
-// KMK --> Cache dirs are keyed by manga id; the title sidecar (written at save
-// time) names them even after library removal, raw id is the last resort.
-private data class CacheEntry(val dir: File, val title: String?)
+// KMK --> Saved translations live in the spine's disk page store under
+// filesDir/mtl_pages/saved/<safeKey>, where safeKey starts with "<mangaId>_<chapterId>_…",
+// so per-manga grouping is recovered from the key prefix. The .title sidecar rides next
+// to the translated page (safeKey + ".title") and names the entry after library removal.
+private data class CacheEntry(val mangaId: Long, val title: String?, val chapters: Int, val pages: Int, val sizeKb: Long)
 // KMK <--
+
+private fun savedPagesDir(context: android.content.Context): File =
+    File(context.filesDir, "mtl_pages/saved")
 
 @Composable
 fun SettingsMangaTranslatorCacheScreen() {
@@ -48,9 +52,7 @@ fun SettingsMangaTranslatorCacheScreen() {
     var refreshTick by remember { mutableStateOf(0) }
 
     LaunchedEffect(refreshTick) {
-        entries = withIOContext {
-            listSavedMangaDirs(context).map { dir -> CacheEntry(dir, resolveTitle(context, dir.name)) }
-        }
+        entries = withIOContext { listSavedEntries(context) }
     }
 
     Column(
@@ -59,12 +61,12 @@ fun SettingsMangaTranslatorCacheScreen() {
     ) {
         Text(text = "Per-Manga Translation Cache", style = MaterialTheme.typography.titleLarge)
         Text(
-            text = "Wipe translated pages for a specific manga — works even after removing it from library. MangaTranslator pages are cached permanently under filesDir/yakuyomi_saved/<mangaId>/<chapterId>/page_*.webp. Tap Wipe to delete all translated pages for that manga.",
+            text = "Wipe translated pages for a specific manga — works even after removing it from library. Saved translations are cached permanently under filesDir/mtl_pages/saved/. Tap Wipe to delete all translated pages for that manga.",
             style = MaterialTheme.typography.bodySmall,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             TextButton(onClick = {
-                File(context.filesDir, "yakuyomi_saved").deleteRecursively()
+                globalAppGraph.mtlPageStore.clear()
                 context.toast("All translation cache cleared")
                 refreshTick++
             }) { Text("Clear All") }
@@ -77,21 +79,14 @@ fun SettingsMangaTranslatorCacheScreen() {
         Text(text = "${entries.size} manga with cached translations", style = MaterialTheme.typography.bodyMedium)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(entries) { entry ->
-                val mangaDir = entry.dir
-                val mangaId = mangaDir.name
-                val chapters = mangaDir.listFiles()?.filter { it.isDirectory }?.size ?: 0
-                val pages = mangaDir.listFiles()?.flatMap { it.listFiles()?.toList() ?: emptyList() }?.size ?: 0
-                val sizeKb = mangaDir.listFiles()?.flatMap { it.listFiles()?.toList() ?: emptyList() }?.sumOf { it.length() }?.div(1024) ?: 0
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        // KMK --> Sidecar title survives library removal; raw id is the last resort.
-                        Text(text = entry.title ?: "Manga $mangaId", style = MaterialTheme.typography.titleSmall)
-                        // KMK <--
-                        Text(text = "$chapters chapters · $pages pages · $sizeKb KB", style = MaterialTheme.typography.bodySmall)
+                        Text(text = entry.title ?: "Manga ${entry.mangaId}", style = MaterialTheme.typography.titleSmall)
+                        Text(text = "${entry.chapters} chapters · ${entry.pages} pages · ${entry.sizeKb} KB", style = MaterialTheme.typography.bodySmall)
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TextButton(onClick = {
-                                mangaDir.deleteRecursively()
-                                context.toast("Wiped manga $mangaId")
+                                wipeSavedPages(context, entry.mangaId)
+                                context.toast("Wiped manga ${entry.mangaId}")
                                 refreshTick++
                             }) { Text("Wipe") }
                         }
@@ -102,25 +97,41 @@ fun SettingsMangaTranslatorCacheScreen() {
     }
 }
 
-// KMK --> Sidecar first (survives library removal), then the database (covers caches
-// saved before sidecars existed), then null so the caller falls back to the raw id.
-private suspend fun resolveTitle(context: android.content.Context, mangaIdRaw: String): String? {
-    val id = mangaIdRaw.toLongOrNull() ?: return null
-    runCatching {
-        File(context.filesDir, "yakuyomi_saved/$id/${TranslatedPageStore.TITLE_FILE}")
-            .takeIf { it.isFile }
-            ?.readText()
-            ?.takeIf { it.isNotBlank() }
-    }.getOrNull()?.let { return it }
-    return runCatching { globalAppGraph.getManga.await(id)?.title }.getOrNull()
-}
-// KMK <--
-
-private fun listSavedMangaDirs(context: android.content.Context): List<File> {
-    val base = File(context.filesDir, "yakuyomi_saved")
-    if (!base.exists()) return emptyList()
-    return base.listFiles()
-        ?.filter { it.isDirectory && it.listFiles()?.any { child -> child.isDirectory } == true }
-        ?.sortedByDescending { it.lastModified() }
+private suspend fun listSavedEntries(context: android.content.Context): List<CacheEntry> {
+    val dir = savedPagesDir(context)
+    if (!dir.isDirectory) return emptyList()
+    return dir.listFiles()
+        ?.filter { it.isFile && !it.name.endsWith(".title") && !it.name.endsWith(".tmp") }
+        ?.mapNotNull { file ->
+            file.name.substringBefore('_').toLongOrNull()?.let { mangaId -> mangaId to file }
+        }
+        ?.groupBy({ it.first }, { it.second })
+        ?.map { (mangaId, files) ->
+            CacheEntry(
+                mangaId = mangaId,
+                title = resolveTitle(context, mangaId, files),
+                chapters = files.mapNotNull { it.name.substringAfter('_').substringBefore('_').takeIf(String::isNotBlank) }.distinct().size,
+                pages = files.size,
+                sizeKb = files.sumOf { it.length() } / 1024,
+            )
+        }
+        ?.sortedByDescending { it.pages }
         ?: emptyList()
 }
+
+private fun wipeSavedPages(context: android.content.Context, mangaId: Long) {
+    savedPagesDir(context).listFiles()
+        ?.filter { it.name.startsWith("${mangaId}_") }
+        ?.forEach { runCatching { it.delete() } }
+}
+
+// KMK --> Sidecar first (survives library removal), then the database (covers caches
+// saved before sidecars existed), then null so the caller falls back to the raw id.
+private suspend fun resolveTitle(context: android.content.Context, mangaId: Long, files: List<File>): String? {
+    files.firstNotNullOfOrNull { page ->
+        val sidecar = File(page.absolutePath + ".title")
+        sidecar.takeIf { it.isFile }?.readText()?.takeIf(String::isNotBlank)
+    }?.let { return it }
+    return runCatching { globalAppGraph.getManga.await(mangaId)?.title }.getOrNull()
+}
+// KMK <--

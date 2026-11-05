@@ -9,6 +9,7 @@ import exh.log.xLogD
 import exh.log.xLogE
 import mihon.app.di.globalAppGraph
 import mihon.core.archive.archiveReader
+import mtl.sched.PageOutcome
 import tachiyomi.core.common.util.system.ImageUtil
 
 class TranslationWork(
@@ -24,7 +25,7 @@ class TranslationWork(
         val chapterId = inputData.getLong("chapterId", -1)
         if (mangaId == -1L || chapterId == -1L) return Result.failure()
         return try {
-            val manager = globalAppGraph.translationManager
+            val manager = globalAppGraph.mtlController
             val prefs = globalAppGraph.translationPreferences
             if (!manager.isEnabled()) return Result.success()
             if (!globalAppGraph.yakuyomiEngine.isHardwareSupported()) {
@@ -47,10 +48,7 @@ class TranslationWork(
             }
             val manga = globalAppGraph.getManga.await(mangaId) ?: return Result.success()
             val chapter = globalAppGraph.getChapter.await(chapterId) ?: return Result.success()
-            // Prewarm breadcrumb and cache
-            try {
-                globalAppGraph.translationCache.pruneIfNeeded()
-            } catch (_: Exception) {}
+            // Prewarm breadcrumbs so the first page request has context ready.
             try {
                 globalAppGraph.breadcrumbNotes.buildContextPrompt(mangaId)
             } catch (_: Exception) {}
@@ -106,45 +104,31 @@ class TranslationWork(
                 // On a retry, drop the previous run's stale ERROR/DONE states so the chapter list
                 // doesn't keep showing an error badge while this attempt re-translates.
                 if (runAttemptCount > 0) {
-                    globalAppGraph.translationStatus.resetChapter(mangaId, chapterId)
+                    globalAppGraph.mtlStatus.resetChapter(mangaId, chapterId)
                 }
                 // Declare the page count up front so the chapter list shows live progress instead of 0%.
-                globalAppGraph.translationStatus.setTotalPages(mangaId, chapterId, orderedPages.size)
+                globalAppGraph.mtlStatus.setTotalPages(mangaId, chapterId, orderedPages.size)
                 for ((index, bytes) in orderedPages) {
                     try {
-                        val result = manager.translatePage(mangaId, chapterId, bytes, index)
-                        // translatePage returns only the bytes, so a null means "not translated"
-                        // without saying why; the status store is the record of which case it was.
-                        val outcome = globalAppGraph.translationStatus.chapterStatus(mangaId, chapterId)?.pages?.get(index)
-                        if (result != null) {
-                            translated++
-                        } else {
-                            when (outcome?.state) {
-                                TranslationStatus.PageState.ERROR -> errored++
-                                // A skip the provider caused (as opposed to a page with genuinely
-                                // no text) belongs with the failures: counting it as a success is
-                                // what let one unreachable provider quietly finish a whole chapter
-                                // with nothing translated and no retry.
-                                TranslationStatus.PageState.SKIPPED -> {
-                                    if (outcome?.isRetryable == true) {
-                                        errored++
-                                        xLogE(
-                                            "TranslationWork page $index skipped by provider " +
-                                                "(${outcome?.code}), will retry",
-                                        )
-                                    } else {
-                                        cached++
-                                    }
+                        // The outcome names its own case — no cross-checking the status store
+                        // afterwards, the way the bytes-or-null API forced.
+                        when (val outcome = manager.translatePage(mangaId, chapterId, index, bytes).await()) {
+                            is PageOutcome.Done -> translated++
+                            is PageOutcome.Cached -> cached++
+                            // A skip the provider caused (as opposed to a page with genuinely
+                            // no text) belongs with the failures: counting it as a success is
+                            // what let one unreachable provider quietly finish a whole chapter
+                            // with nothing translated and no retry.
+                            is PageOutcome.Skipped -> cached++
+                            is PageOutcome.Failed -> {
+                                errored++
+                                if (outcome.retryable) {
+                                    xLogE("TranslationWork page $index failed (retryable): ${outcome.error}")
+                                } else {
+                                    xLogE("TranslationWork page $index failed: ${outcome.error}")
                                 }
-
-                                TranslationStatus.PageState.CACHED,
-                                TranslationStatus.PageState.DONE,
-                                -> cached++
-
-                                else -> {}
                             }
                         }
-                        xLogD("TranslationWork page $index result=${if (result != null) "ok" else "null"} outcome=$outcome")
                     } catch (e: Exception) {
                         errored++
                         xLogE("TranslationWork translate page $index failed", e)

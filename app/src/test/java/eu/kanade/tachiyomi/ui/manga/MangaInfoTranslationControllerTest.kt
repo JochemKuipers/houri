@@ -1,11 +1,7 @@
 package eu.kanade.tachiyomi.ui.manga
 
 // KMK --> State-transition, cancellation, and independent-gating coverage for metadata translation.
-import exh.yakuyomi.MangaInfoProviderState
-import exh.yakuyomi.MangaInfoTranslation
-import exh.yakuyomi.MangaInfoTranslationStore
 import exh.yakuyomi.TranslateMangaStore
-import exh.yakuyomi.TranslationManager
 import io.kotest.matchers.shouldBe
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -14,11 +10,24 @@ import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.test.runTest
+import mtl.MangaInfoStore
+import mtl.MangaInfoTranslation
+import mtl.MtlController
+import mtl.MtlController.MangaInfoProviderState
+import mtl.store.CacheIdentity
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
+
+private fun fakeTranslation(title: String, description: String? = null) =
+    MangaInfoTranslation(
+        title = title,
+        description = description,
+        sourceFingerprint = "fp",
+        identity = CacheIdentity("openrouter", "google/gemma-2-9b-it:free", "JA", "en", "prompt-v1"),
+    )
 
 private class MapPreferenceStore : PreferenceStore {
     private val booleans = mutableMapOf<String, Boolean>()
@@ -83,8 +92,8 @@ class MangaInfoTranslationControllerTest {
 
     private data class Harness(
         val controller: MangaInfoTranslationController,
-        val manager: TranslationManager,
-        val infoStore: MangaInfoTranslationStore,
+        val manager: MtlController,
+        val infoStore: MangaInfoStore,
         val prefs: MapPreferenceStore,
     )
 
@@ -93,12 +102,12 @@ class MangaInfoTranslationControllerTest {
         isNoMtl: Boolean = false,
     ): Harness {
         val prefs = MapPreferenceStore()
-        val manager = mockk<TranslationManager>()
-        val infoStore = mockk<MangaInfoTranslationStore>()
+        val manager = mockk<MtlController>()
+        val infoStore = mockk<MangaInfoStore>()
         every { manager.isEnabled() } returns true
         every { manager.isGated() } returns false
         every { manager.mangaInfoProviderState() } returns MangaInfoProviderState.READY
-        every { manager.getValidCachedMangaInfo(any(), any(), any(), any(), any()) } returns null
+        coEvery { manager.getValidCachedMangaInfo(any(), any(), any(), any()) } returns null
         every { infoStore.clear(any()) } returns Unit
         return Harness(
             MangaInfoTranslationController(1L, scope, prefs, manager, infoStore, isNoMtl),
@@ -128,8 +137,8 @@ class MangaInfoTranslationControllerTest {
         testScheduler.advanceUntilIdle()
 
         h.controller.state.value shouldBe MangaInfoUiState.Hidden
-        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any(), any()) }
-        verify(exactly = 0) { h.manager.getValidCachedMangaInfo(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { h.manager.getValidCachedMangaInfo(any(), any(), any(), any()) }
     }
 
     @Test
@@ -164,21 +173,21 @@ class MangaInfoTranslationControllerTest {
         testScheduler.advanceUntilIdle()
 
         h.controller.state.value shouldBe MangaInfoUiState.Disabled
-        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any()) }
     }
 
     @Test
     fun `bind serves validated cache without translating`() = runTest {
         val h = harness(this)
         enableInfoPref(h.prefs)
-        every { h.manager.getValidCachedMangaInfo(1L, 7L, "Title", "Desc", "JA") } returns
-            MangaInfoTranslation(title = "Cached Title", description = "Cached desc")
+        coEvery { h.manager.getValidCachedMangaInfo(1L, "Title", "Desc", "JA") } returns
+            fakeTranslation(title = "Cached Title", description = "Cached desc")
 
         h.controller.bind(7L, "Title", "Desc", "JA")
         testScheduler.advanceUntilIdle()
 
         h.controller.state.value shouldBe MangaInfoUiState.Translated("Cached Title", "Cached desc", true)
-        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any()) }
     }
 
     @Test
@@ -187,8 +196,8 @@ class MangaInfoTranslationControllerTest {
         enableInfoPref(h.prefs)
         val pageStore = TranslateMangaStore(h.prefs)
         pageStore.isEnabled(1L) shouldBe false
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } returns
-            MangaInfoTranslation(title = "T9n Title", description = null)
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } returns
+            fakeTranslation(title = "T9n Title", description = null)
 
         h.controller.bind(7L, "Title", "Desc", "JA")
         testScheduler.advanceUntilIdle()
@@ -207,20 +216,20 @@ class MangaInfoTranslationControllerTest {
         testScheduler.advanceUntilIdle()
 
         h.controller.state.value shouldBe MangaInfoUiState.Error(MangaInfoErrorKind.ProviderNotReady)
-        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any()) }
     }
 
     @Test
     fun `mangatranslator selection surfaces unsupported Error`() = runTest {
         val h = harness(this)
         enableInfoPref(h.prefs)
-        every { h.manager.mangaInfoProviderState() } returns MangaInfoProviderState.MANGA_TRANSLATOR_UNSUPPORTED
+        every { h.manager.mangaInfoProviderState() } returns MangaInfoProviderState.UNSUPPORTED
 
         h.controller.bind(7L, "Title", "Desc", "JA")
         testScheduler.advanceUntilIdle()
 
         h.controller.state.value shouldBe MangaInfoUiState.Error(MangaInfoErrorKind.MangaTranslatorUnsupported)
-        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any()) }
     }
 
     @Test
@@ -228,9 +237,9 @@ class MangaInfoTranslationControllerTest {
         val h = harness(this)
         enableInfoPref(h.prefs)
         var calls = 0
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } coAnswers {
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } coAnswers {
             calls++
-            if (calls == 1) null else MangaInfoTranslation(title = "Recovered", description = null)
+            if (calls == 1) null else fakeTranslation(title = "Recovered", description = null)
         }
 
         h.controller.bind(7L, "Title", "Desc", "JA")
@@ -249,9 +258,9 @@ class MangaInfoTranslationControllerTest {
         enableInfoPref(h.prefs)
         val staleGate = CompletableDeferred<MangaInfoTranslation?>()
         var calls = 0
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } coAnswers {
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } coAnswers {
             calls++
-            if (calls == 1) staleGate.await() else MangaInfoTranslation(title = "Fresh", description = null)
+            if (calls == 1) staleGate.await() else fakeTranslation(title = "Fresh", description = null)
         }
 
         h.controller.bind(7L, "Title", "Desc", "JA")
@@ -262,7 +271,7 @@ class MangaInfoTranslationControllerTest {
         testScheduler.advanceUntilIdle()
         h.controller.state.value shouldBe MangaInfoUiState.Translated("Fresh", null, true)
 
-        staleGate.complete(MangaInfoTranslation(title = "Late", description = null))
+        staleGate.complete(fakeTranslation(title = "Late", description = null))
         testScheduler.advanceUntilIdle()
         h.controller.state.value shouldBe MangaInfoUiState.Translated("Fresh", null, true)
         calls shouldBe 2
@@ -273,7 +282,7 @@ class MangaInfoTranslationControllerTest {
         val h = harness(this)
         enableInfoPref(h.prefs)
         val gate = CompletableDeferred<MangaInfoTranslation?>()
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } coAnswers { gate.await() }
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } coAnswers { gate.await() }
 
         h.controller.bind(7L, "Title", "Desc", "JA")
         testScheduler.advanceUntilIdle()
@@ -283,7 +292,7 @@ class MangaInfoTranslationControllerTest {
         h.controller.state.value shouldBe MangaInfoUiState.Disabled
         verify { h.infoStore.clear(1L) }
 
-        gate.complete(MangaInfoTranslation(title = "Late", description = null))
+        gate.complete(fakeTranslation(title = "Late", description = null))
         testScheduler.advanceUntilIdle()
         h.controller.state.value shouldBe MangaInfoUiState.Disabled
     }
@@ -292,8 +301,8 @@ class MangaInfoTranslationControllerTest {
     fun `show-original toggle switches display without deleting cache`() = runTest {
         val h = harness(this)
         enableInfoPref(h.prefs)
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } returns
-            MangaInfoTranslation(title = "T9n", description = "T9n desc")
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } returns
+            fakeTranslation(title = "T9n", description = "T9n desc")
 
         h.controller.bind(7L, "Title", "Desc", "JA")
         testScheduler.advanceUntilIdle()
@@ -309,8 +318,8 @@ class MangaInfoTranslationControllerTest {
     fun `reset clears cache and returns to Disabled`() = runTest {
         val h = harness(this)
         enableInfoPref(h.prefs)
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } returns
-            MangaInfoTranslation(title = "T9n", description = null)
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } returns
+            fakeTranslation(title = "T9n", description = null)
 
         h.controller.bind(7L, "Title", "Desc", "JA")
         testScheduler.advanceUntilIdle()
@@ -326,8 +335,8 @@ class MangaInfoTranslationControllerTest {
     fun `repeated bind with unchanged metadata issues no new request`() = runTest {
         val h = harness(this)
         enableInfoPref(h.prefs)
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } returns
-            MangaInfoTranslation(title = "T9n", description = null)
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } returns
+            fakeTranslation(title = "T9n", description = null)
 
         repeat(3) {
             h.controller.bind(7L, "Title", "Desc", "JA")
@@ -335,8 +344,8 @@ class MangaInfoTranslationControllerTest {
         }
 
         h.controller.state.value shouldBe MangaInfoUiState.Translated("T9n", null, true)
-        verify(exactly = 1) { h.manager.getValidCachedMangaInfo(any(), any(), any(), any(), any()) }
-        coVerify(exactly = 1) { h.manager.translateMangaInfo(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) { h.manager.getValidCachedMangaInfo(any(), any(), any(), any()) }
+        coVerify(exactly = 1) { h.manager.translateMangaInfo(any(), any(), any(), any()) }
     }
 
     @Test
@@ -345,7 +354,7 @@ class MangaInfoTranslationControllerTest {
         enableInfoPref(h.prefs)
         val gate = CompletableDeferred<MangaInfoTranslation?>()
         var calls = 0
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } coAnswers {
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } coAnswers {
             calls++
             gate.await()
         }
@@ -358,7 +367,7 @@ class MangaInfoTranslationControllerTest {
         h.controller.state.value shouldBe MangaInfoUiState.Translating
         calls shouldBe 1
 
-        gate.complete(MangaInfoTranslation(title = "T9n", description = null))
+        gate.complete(fakeTranslation(title = "T9n", description = null))
         testScheduler.advanceUntilIdle()
         h.controller.state.value shouldBe MangaInfoUiState.Translated("T9n", null, true)
     }
@@ -367,10 +376,10 @@ class MangaInfoTranslationControllerTest {
     fun `bind with changed metadata rebinds`() = runTest {
         val h = harness(this)
         enableInfoPref(h.prefs)
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } returns
-            MangaInfoTranslation(title = "T9n", description = null)
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc2", "JA", 7L) } returns
-            MangaInfoTranslation(title = "T9n2", description = null)
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } returns
+            fakeTranslation(title = "T9n", description = null)
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc2", "JA") } returns
+            fakeTranslation(title = "T9n2", description = null)
 
         h.controller.bind(7L, "Title", "Desc", "JA")
         testScheduler.advanceUntilIdle()
@@ -380,8 +389,8 @@ class MangaInfoTranslationControllerTest {
         testScheduler.advanceUntilIdle()
         h.controller.state.value shouldBe MangaInfoUiState.Translated("T9n2", null, true)
 
-        coVerify(exactly = 1) { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) }
-        coVerify(exactly = 1) { h.manager.translateMangaInfo(1L, "Title", "Desc2", "JA", 7L) }
+        coVerify(exactly = 1) { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") }
+        coVerify(exactly = 1) { h.manager.translateMangaInfo(1L, "Title", "Desc2", "JA") }
     }
 
     @Test
@@ -389,27 +398,27 @@ class MangaInfoTranslationControllerTest {
         val h = harness(this)
         enableInfoPref(h.prefs)
         every { h.manager.isEnabled() } returns false
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } returns
-            MangaInfoTranslation(title = "T9n", description = null)
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } returns
+            fakeTranslation(title = "T9n", description = null)
 
         h.controller.bind(7L, "Title", "Desc", "JA")
         testScheduler.advanceUntilIdle()
         h.controller.state.value shouldBe MangaInfoUiState.Hidden
-        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any()) }
 
         every { h.manager.isEnabled() } returns true
         h.controller.bind(7L, "Title", "Desc", "JA")
         testScheduler.advanceUntilIdle()
         h.controller.state.value shouldBe MangaInfoUiState.Translated("T9n", null, true)
-        coVerify(exactly = 1) { h.manager.translateMangaInfo(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) { h.manager.translateMangaInfo(any(), any(), any(), any()) }
     }
 
     @Test
     fun `language case-only change does not rebind`() = runTest {
         val h = harness(this)
         enableInfoPref(h.prefs)
-        coEvery { h.manager.translateMangaInfo(any(), any(), any(), any(), any()) } returns
-            MangaInfoTranslation(title = "T9n", description = null)
+        coEvery { h.manager.translateMangaInfo(any(), any(), any(), any()) } returns
+            fakeTranslation(title = "T9n", description = null)
 
         h.controller.bind(7L, "Title", "Desc", "ja")
         testScheduler.advanceUntilIdle()
@@ -417,7 +426,7 @@ class MangaInfoTranslationControllerTest {
         testScheduler.advanceUntilIdle()
 
         h.controller.state.value shouldBe MangaInfoUiState.Translated("T9n", null, true)
-        coVerify(exactly = 1) { h.manager.translateMangaInfo(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) { h.manager.translateMangaInfo(any(), any(), any(), any()) }
     }
 
     @Test
@@ -426,9 +435,9 @@ class MangaInfoTranslationControllerTest {
         enableInfoPref(h.prefs)
         val gate = CompletableDeferred<MangaInfoTranslation?>()
         var calls = 0
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } coAnswers {
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } coAnswers {
             calls++
-            if (calls == 1) gate.await() else MangaInfoTranslation(title = "T9n", description = null)
+            if (calls == 1) gate.await() else fakeTranslation(title = "T9n", description = null)
         }
 
         h.controller.bind(7L, "Title", "Desc", "JA")
@@ -440,7 +449,7 @@ class MangaInfoTranslationControllerTest {
         testScheduler.advanceUntilIdle()
         h.controller.state.value shouldBe MangaInfoUiState.Hidden
 
-        gate.complete(MangaInfoTranslation(title = "Late", description = null))
+        gate.complete(fakeTranslation(title = "Late", description = null))
         testScheduler.advanceUntilIdle()
         h.controller.state.value shouldBe MangaInfoUiState.Hidden
         calls shouldBe 1
@@ -457,9 +466,9 @@ class MangaInfoTranslationControllerTest {
         val h = harness(this)
         enableInfoPref(h.prefs)
         val gate = CompletableDeferred<MangaInfoTranslation?>()
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } coAnswers {
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } coAnswers {
             kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) { gate.await() }
-            MangaInfoTranslation(title = "Late", description = null)
+            fakeTranslation(title = "Late", description = null)
         }
 
         h.controller.bind(7L, "Title", "Desc", "JA")
@@ -474,7 +483,7 @@ class MangaInfoTranslationControllerTest {
         gate.complete(null)
         testScheduler.advanceUntilIdle()
         h.controller.state.value shouldBe MangaInfoUiState.Hidden
-        coVerify(exactly = 1) { h.manager.translateMangaInfo(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 1) { h.manager.translateMangaInfo(any(), any(), any(), any()) }
     }
 
     @Test
@@ -487,11 +496,11 @@ class MangaInfoTranslationControllerTest {
         testScheduler.advanceUntilIdle()
 
         h.controller.state.value shouldBe MangaInfoUiState.Error(MangaInfoErrorKind.Failed)
-        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) { h.manager.translateMangaInfo(any(), any(), any(), any()) }
 
         every { h.manager.mangaInfoProviderState() } returns MangaInfoProviderState.READY
-        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA", 7L) } returns
-            MangaInfoTranslation(title = "T9n", description = null)
+        coEvery { h.manager.translateMangaInfo(1L, "Title", "Desc", "JA") } returns
+            fakeTranslation(title = "T9n", description = null)
         h.controller.retry()
         testScheduler.advanceUntilIdle()
         h.controller.state.value shouldBe MangaInfoUiState.Translated("T9n", null, true)

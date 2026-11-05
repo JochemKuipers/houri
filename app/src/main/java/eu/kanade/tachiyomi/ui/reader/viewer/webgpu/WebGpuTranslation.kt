@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import mtl.sched.PageOutcome
 import java.nio.ByteBuffer
 
 private val translationSemaphore = Semaphore(2)
@@ -42,17 +43,23 @@ internal fun WebGpuViewer.scheduleTranslation(page: ViewerReaderPage, sourceByte
 
     scope.launch(Dispatchers.Default) {
         try {
-            if (!mgr.shouldTranslateForManga(mangaId)) return@launch
+            // The controller's own gate (disabled / gated / per-manga off) answers the
+            // submission with a skip; the old shouldTranslateForManga re-check is its twin.
             val translatedWebP = translationSemaphore.withPermit {
                 mgr.translatePage(
                     mangaId = mangaId,
                     chapterId = chapterId,
                     imageBytes = sourceBytes,
                     pageIndex = pageIndex,
-                )
+                ).await()
             }
-            if (translatedWebP == null) return@launch
-            val translatedBitmap = BitmapFactory.decodeByteArray(translatedWebP, 0, translatedWebP.size)
+            val translatedBytes = when (translatedWebP) {
+                is PageOutcome.Done -> translatedWebP.imageBytes
+                is PageOutcome.Cached -> translatedWebP.imageBytes
+                else -> null
+            }
+            if (translatedBytes == null) return@launch
+            val translatedBitmap = BitmapFactory.decodeByteArray(translatedBytes, 0, translatedBytes.size)
             if (translatedBitmap != null) {
                 try {
                     val translatedImage = Image(

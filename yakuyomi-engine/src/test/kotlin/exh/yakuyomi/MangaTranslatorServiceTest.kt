@@ -14,7 +14,6 @@ import okhttp3.Response
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
-import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
@@ -291,14 +290,6 @@ class MangaTranslatorServiceTest {
         assertEquals("fresh-access-token-cccccccc", prefs.mangaTranslatorAccessToken().get())
         assertEquals(1, refreshCalls.get())
         assertEquals(2, metricsCalls.get())
-    }
-
-    @Test
-    fun `429 maps to friendly rate-limit error`() {
-        val msg = TranslationErrorMapper.toUserMessage(
-            "MangaTranslator rate-limited (429) — try again later or log in at ichigo.moe",
-        )
-        assertTrue(msg.contains("429") || msg.lowercase().contains("rate-limit"))
     }
 }
 // KMK <--

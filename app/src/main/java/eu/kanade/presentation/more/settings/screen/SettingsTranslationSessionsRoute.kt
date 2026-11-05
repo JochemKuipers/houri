@@ -40,8 +40,8 @@ data object SettingsTranslationSessionsRoute : NavKey
 
 @Composable
 fun SettingsTranslationSessionsScreen() {
-    val status = remember { globalAppGraph.translationStatus }
-    val manager = remember { globalAppGraph.translationManager }
+    val status = remember { globalAppGraph.mtlStatus }
+    val manager = remember { globalAppGraph.mtlController }
     val chapters by status.chapters.collectAsState()
     val backStack = LocalBackStack.current
 
@@ -55,7 +55,7 @@ fun SettingsTranslationSessionsScreen() {
             style = MaterialTheme.typography.bodySmall,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { manager.clearAllChapters() }) { Text("Clear All") }
+            TextButton(onClick = { manager.clearAll() }) { Text("Clear All") }
             TextButton(onClick = { backStack.removeLastOrNull() }) { Text("Back") }
         }
         if (chapters.isEmpty()) {
@@ -66,7 +66,7 @@ fun SettingsTranslationSessionsScreen() {
             items(chapters.values.toList().sortedByDescending { it.lastUpdated }) { ch ->
                 val total = ch.totalPages
                 val done = ch.translatedCount
-                val err = ch.errorCount
+                val err = ch.failedCount
                 val isTranslating = ch.isTranslating
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

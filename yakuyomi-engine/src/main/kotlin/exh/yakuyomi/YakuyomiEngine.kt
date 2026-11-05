@@ -203,6 +203,30 @@ class YakuyomiEngine(
     }
 
     /**
+     * KMK --> Stage-level access for the mtl.* vision SPI adapter (deleted at cutover):
+     * the built native sessions plus the render config/typeface the renderer needs,
+     * honoring the horizontal-force rule the whole-pipeline path uses. Null when the
+     * device or models are not ready — the adapter maps that to [MtlException.ModelMissing].
+     */
+    fun nativeVision(targetLang: String?): NativeVision? {
+        val c = buildIfNeeded() ?: return null
+        val configFactory = this.configFactory
+        val cfg = if (configFactory.shouldForceHorizontal(targetLang)) {
+            configFactory.horizontalConfig()
+        } else {
+            configFactory.defaultConfig()
+        }
+        return NativeVision(components = c, renderConfig = cfg.render, typeface = configFactory.resolveTypeface())
+    }
+
+    class NativeVision(
+        val components: NativeComponents,
+        val renderConfig: li.joye.yakuyomi.engine.RenderConfig,
+        val typeface: android.graphics.Typeface?,
+    )
+    // KMK <--
+
+    /**
      * Best-effort warm-up: builds the native components (downloading nothing) so the first page
      * translation does not pay the cold-start cost. Idempotent and cheap after first build.
      */

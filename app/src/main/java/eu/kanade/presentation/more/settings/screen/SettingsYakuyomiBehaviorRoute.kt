@@ -31,7 +31,7 @@ data object SettingsYakuyomiBehaviorRoute : NavKey, SearchableRoute {
     @Composable
     override fun getPreferences(): List<Preference> {
         val prefs = remember { globalAppGraph.translationPreferences }
-        val cache = remember { globalAppGraph.translationCache }
+        val cache = remember { globalAppGraph.mtlPageStore }
         val provider by prefs.provider().collectAsState()
         return listOf(
             SettingsYakuyomiRoute.getBehaviorGroup(prefs, cache, hideLocal = provider == "mangatranslator"),

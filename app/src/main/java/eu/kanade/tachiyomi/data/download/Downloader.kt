@@ -491,10 +491,10 @@ class Downloader(
 
             // KMK --> Enqueue translation after successful download if enabled
             try {
-                val translationEnabled = globalAppGraph.translationManager.isEnabled()
+                val translationEnabled = globalAppGraph.mtlController.isEnabled()
                 val autoTranslate = globalAppGraph.translationPreferences.autoTranslateOnDownload().get()
-                val perMangaEnabled = globalAppGraph.translationManager.isPerMangaEnabled(download.manga.id)
-                val gated = globalAppGraph.translationManager.isGated()
+                val perMangaEnabled = globalAppGraph.mtlController.isPerMangaEnabled(download.manga.id)
+                val gated = globalAppGraph.mtlController.isGated()
                 xLogD("Downloader translation gate manga=${download.manga.id} chapter=${download.chapter.id} enabled=$translationEnabled auto=$autoTranslate perManga=$perMangaEnabled gated=$gated")
                 if (translationEnabled && autoTranslate && perMangaEnabled && !gated) {
                     val data = Data.Builder()

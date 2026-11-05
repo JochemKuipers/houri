@@ -6,9 +6,9 @@ import eu.kanade.tachiyomi.ui.reader.setting.UpscaleReaderHook
 // The reader's own extensions, installed so they are present before any viewer can ask for them.
 //
 // Both are adapters over code that already works and is not going anywhere: [UpscaleReaderHook] is
-// shared with the pager and webtoon readers, and translation is driven by TranslationManager with
-// its own caching and gating. Moving them in means the reader stops knowing they exist; it does not
-// mean reimplementing them, and the behaviour a user gets is byte-for-byte what it was.
+// shared with the pager and webtoon readers, and translation is driven by the mtl spine (MtlController)
+// with its own caching and gating. Moving them in means the reader stops knowing they exist; it does
+// not mean reimplementing them, and the behaviour a user gets is byte-for-byte what it was.
 //
 // Registered from [WebGpuExtensions]' initialiser rather than from a call site, so there is no window
 // in which a viewer exists without them. A user switching a feature off goes through

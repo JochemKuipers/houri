@@ -4,16 +4,21 @@ import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.UpscaleReaderHook
 import kotlinx.coroutines.CoroutineScope
 import mihon.app.di.globalAppGraph
+import mtl.sched.PageOutcome
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withUIContext
 
 /**
  * Shared entry point for MTL translation in the non-WebGPU readers (pager + webtoon).
  *
+ * Cut over to the new spine: every call goes through [MtlController], and the pipeline's
+ * cache fast-path answers re-binds without re-running anything — the old session-level
+ * "already done" checks and the separate [getTranslatedBytes] lookup were that cache's
+ * older, duplicated self.
+ *
  * Unlike the WebGPU viewer (which bakes translated images into its own [ImagePage] pipeline),
- * these readers display pages through [ReaderPageImageView]; this helper runs the same
- * [exh.yakuyomi.TranslationManager] pipeline against the original encoded bytes and hands the
- * translated WEBP back on the main thread for the holder to swap in.
+ * these readers display pages through [ReaderPageImageView]; this helper submits the original
+ * encoded bytes and hands the translated WEBP back on the main thread for the holder to swap in.
  */
 // Top-level rather than a companion: `ReaderTranslation` is an `object`, and a standalone
 // object cannot declare one.
@@ -30,16 +35,15 @@ object ReaderTranslation : PageTranslator {
      * (both features off) it is pure waste multiplied by every page scrolled past.
      */
     suspend fun needsOriginalBytes(page: ReaderPage): Boolean {
-        val manager = globalAppGraph.translationManager
         val mangaId = page.chapter.chapter.manga_id ?: 0L
-        if (manager.isEnabledForManga(mangaId)) return true
+        if (globalAppGraph.mtlController.isEnabledForManga(mangaId)) return true
         return UpscaleReaderHook.isUpscaleActive(mangaId)
     }
 
     /**
-     * Kicks off translation for [page] if (and only if) translation is enabled globally,
-     * not gated, enabled for this manga, and the AI models are installed. On success,
-     * [onResult] is invoked on the main thread with the translated WEBP bytes.
+     * Submits [page] for translation when the controller's gates pass. The spine owns the
+     * rest: cache hits answer immediately, in-flight pages deduplicate to the same deferred,
+     * and a skip/failure leaves the original page in place with the status hub recording why.
      */
     override fun translate(
         scope: CoroutineScope,
@@ -49,59 +53,31 @@ object ReaderTranslation : PageTranslator {
     ) {
         if (originalBytes == null || originalBytes.isEmpty()) return
 
-        val manager = globalAppGraph.translationManager
-        val statusStore = globalAppGraph.translationStatus
+        val controller = globalAppGraph.mtlController
         val mangaId = page.chapter.chapter.manga_id ?: 0L
-        if (!manager.isEnabledForManga(mangaId)) return
+        if (!controller.isEnabledForManga(mangaId)) return
 
         val chapterId = page.chapter.chapter.id ?: 0L
-        val pageIndex = page.index
-
-        // Declare the chapter's page count so chapter-list/overlay progress is accurate.
-        manager.setChapterTotalPages(mangaId, chapterId, page.chapter.pages?.size ?: 0)
-
-        // Avoid re-translating pages already processed in this session, but still serve any
-        // stored translated bytes so the reader keeps showing the translated image on re-bind.
-        val existing = statusStore.chapterStatus(mangaId, chapterId)?.pages?.get(pageIndex)
-        when {
-            existing?.state == exh.yakuyomi.TranslationStatus.PageState.TRANSLATING -> return
-            // A skip the provider caused is not a final answer, so it falls through to another
-            // attempt; returning here is what made one dropped connection skip the page for the
-            // rest of the session with nothing logged and nothing to retry from.
-            existing != null &&
-                existing.state == exh.yakuyomi.TranslationStatus.PageState.SKIPPED &&
-                !existing.isRetryable -> return
-            existing?.state in setOf(
-                exh.yakuyomi.TranslationStatus.PageState.DONE,
-                exh.yakuyomi.TranslationStatus.PageState.CACHED,
-            ) -> {
-                scope.launchIO {
-                    try {
-                        val bytes = manager.getTranslatedBytes(mangaId, chapterId, originalBytes, pageIndex)
-                        if (bytes != null && bytes.isNotEmpty()) {
-                            withUIContext { onResult(bytes) }
-                            return@launchIO
-                        }
-                        // No stored copy (e.g. caches disabled): fall back to translatePage, which
-                        // still serves a cache hit if one exists without re-running the pipeline.
-                        val webp = manager.translatePage(mangaId, chapterId, originalBytes, pageIndex) ?: return@launchIO
-                        withUIContext { onResult(webp) }
-                    } catch (_: Exception) {
-                    }
-                }
-                return
-            }
-            else -> Unit // ERROR, a retryable skip, or unknown → allow retry
-        }
+        controller.setChapterTotalPages(mangaId, chapterId, page.chapter.pages?.size ?: 0)
 
         scope.launchIO {
-            try {
-                if (!manager.shouldTranslateForManga(mangaId)) return@launchIO
-                val webp = manager.translatePage(mangaId, chapterId, originalBytes, pageIndex) ?: return@launchIO
-                withUIContext { onResult(webp) }
-                countChapterOnceComplete(mangaId, chapterId)
+            val outcome = try {
+                controller.translatePage(
+                    mangaId = mangaId,
+                    chapterId = chapterId,
+                    pageIndex = page.index,
+                    imageBytes = originalBytes,
+                ).await()
             } catch (_: Exception) {
+                return@launchIO
             }
+            val bytes = when (outcome) {
+                is PageOutcome.Done -> outcome.imageBytes
+                is PageOutcome.Cached -> outcome.imageBytes
+                else -> null
+            } ?: return@launchIO
+            withUIContext { onResult(bytes) }
+            countChapterOnceComplete(mangaId, chapterId)
         }
     }
 
@@ -115,7 +91,7 @@ object ReaderTranslation : PageTranslator {
 
     private suspend fun countChapterOnceComplete(mangaId: Long, chapterId: Long) {
         runCatching {
-            val status = globalAppGraph.translationStatus.chapterStatus(mangaId, chapterId) ?: return
+            val status = globalAppGraph.mtlStatus.chapterStatus(mangaId, chapterId) ?: return
             if (status.pendingCount != 0 || status.translatedCount == 0) return
             if (!countedChapters.add(mangaId to chapterId)) return
             globalAppGraph.achievementManager.incrementCounter("translated_chapters")

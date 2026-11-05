@@ -45,6 +45,10 @@ import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 
+// The spine's Gemini Nano provider id — the status row probes the controller by id.
+// Kept in sync with mtl/provider/GeminiNanoProvider.kt.
+private const val SETTINGS_NANO_ID = "gemini-nano"
+
 @Serializable
 data object SettingsYakuyomiRoute : NavKey, SearchableRoute {
     @ReadOnlyComposable
@@ -371,12 +375,14 @@ data object SettingsYakuyomiRoute : NavKey, SearchableRoute {
                             var nanoRefreshTick by remember { mutableStateOf(0) }
                             LaunchedEffect(geminiNanoEnabled, nanoRefreshTick) {
                                 statusText = withIOContext {
-                                    val nano = globalAppGraph.geminiNanoTranslator
+                                    val controller = globalAppGraph.mtlController
+                                    controller.refreshProviderReadiness(SETTINGS_NANO_ID)
+                                    val readiness = controller.providerReadiness(SETTINGS_NANO_ID)
                                     when {
                                         !geminiNanoEnabled -> "Disabled by toggle — cloud provider will be used"
-                                        nano.isAvailable() -> "Available — on-device translation active"
+                                        readiness is mtl.core.Readiness.Ready -> "Available — on-device translation active"
                                         else -> {
-                                            val err = nano.statusError()
+                                            val err = (readiness as? mtl.core.Readiness.Unavailable)?.reason
                                             if (!err.isNullOrBlank() && (
                                                     err.contains("601") || err.contains("BINDING") ||
                                                         err.contains("606") || err.contains("FEATURE_NOT_FOUND")
@@ -946,7 +952,7 @@ data object SettingsYakuyomiRoute : NavKey, SearchableRoute {
     @Composable
     internal fun getBehaviorGroup(
         prefs: exh.yakuyomi.TranslationPreferences,
-        cache: exh.yakuyomi.TranslationCache,
+        cache: mtl.store.DiskPageStore,
         hideLocal: Boolean = false,
     ): Preference.PreferenceGroup {
         val context = LocalContext.current
@@ -1008,7 +1014,7 @@ data object SettingsYakuyomiRoute : NavKey, SearchableRoute {
                         title = "Clear translation cache",
                         subtitle = "Current: ${cacheBytes / 1024} KB / 32768 KB",
                         onClick = {
-                            cache.clearAll()
+                            cache.clear()
                             cacheTick = cacheTick + 1
                             context.toast("Translation cache cleared")
                         },
