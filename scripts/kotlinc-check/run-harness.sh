@@ -18,7 +18,9 @@ die() { echo "run-harness: $*" >&2; exit 1; }
 
 find_jar() {
     local jar
-    jar=$(find "$CACHE/$1/$2" -name '*.jar' 2>/dev/null | grep -v -- '-sources' | sort -V | tail -1)
+    # Exclude -sources and -javadoc: sort -V can put the javadoc jar last, and codegen then
+    # crashes with NoClassDefFoundError for org.jetbrains.annotations.NotNull.
+    jar=$(find "$CACHE/$1/$2" -name '*.jar' 2>/dev/null | grep -vE -- '-(sources|javadoc)\.jar$' | sort -V | tail -1)
     [ -n "$jar" ] || die "could not find $1:$2 in the Gradle cache"
     echo "$jar"
 }
@@ -79,6 +81,13 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     # discovery screen's countdown. No Android imports, compiled directly for the same reason as
     # EpubDoctype above.
     SOURCES+=("$REPO_ROOT/app/src/main/java/eu/kanade/tachiyomi/data/cache/ChapterCacheRetention.kt")
+    # SyncDeltaLogic is pure (no Android / backup models); the SyncDelta harness pins the v2
+    # delta contract and the chapter tombstone key format. Drop the novel/EPUB sources this
+    # harness does not need — compiling them alongside can crash kotlinc without an `error:`
+    # line, which the filter below would treat as success.
+    if [ "$NAME" = "SyncDeltaHarness" ]; then
+        SOURCES=("$REPO_ROOT/app/src/main/java/eu/kanade/tachiyomi/data/sync/SyncDeltaLogic.kt")
+    fi
 
     # The OPF metadata harness drives the real pull parser — kxml2, the library Android ships
     # behind `Xml.newPullParser` — so `EpubXmlReader`/`EpubOpfParser`/`EpubTocParser` can run on a
@@ -248,8 +257,9 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     OUT=$(mktemp -d)
     echo "== $NAME =="
     # A hard compile error must fail the run, not fall through to "class not found".
+    # Annotations on the compile classpath: kotlinc 2.4 codegen emits nullability annotations.
     if ! java -cp "$COMPILER_CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
-            -no-stdlib -nowarn -cp "$STDLIB$KXML_CP$MTL_CP$UPSCALE_CP$BLACKLIST_CP$RELEASE_CP" -d "$OUT/classes" "${SOURCES[@]}" "${OPF_SOURCES[@]}" "$MAIN" 2>&1 \
+            -no-stdlib -nowarn -cp "$STDLIB:$ANNOTATIONS$KXML_CP$MTL_CP$UPSCALE_CP$BLACKLIST_CP$RELEASE_CP" -d "$OUT/classes" "${SOURCES[@]}" "${OPF_SOURCES[@]}" "$MAIN" 2>&1 \
             | grep -E 'error:' | grep -vE 'unresolved reference'; then
         :
     else
@@ -260,7 +270,7 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     fi
 
     # Kotlin file-facade class for a top-level main() is the file name plus "Kt".
-    if java -cp "$OUT/classes:$STDLIB$KXML_CP$MTL_CP$UPSCALE_CP$RUN_CP$RELEASE_CP" "${NAME}Kt" 2> "$OUT/run.err"; then
+    if java -cp "$OUT/classes:$STDLIB:$ANNOTATIONS$KXML_CP$MTL_CP$UPSCALE_CP$RUN_CP$RELEASE_CP" "${NAME}Kt" 2> "$OUT/run.err"; then
         RAN=$((RAN + 1))
     else
         # A runtime crash must name the crash: everything above succeeds and passes silently

@@ -265,6 +265,21 @@ internal fun getSelfHostPreferences(syncPreferences: SyncPreferences): List<Pref
                     val trimmedValue = newValue.trim()
                     val modifiedValue = trimmedValue.trimEnd { it == '/' }
                     syncPreferences.clientHost().set(modifiedValue)
+                    // Force a capabilities re-probe on the next SyncYomi sync.
+                    syncPreferences.v2ProbedHost().set("")
+                }
+                true
+            },
+        ),
+        Preference.PreferenceItem.SwitchPreference(
+            preference = syncPreferences.useProtocolV2(),
+            title = stringResource(SYMR.strings.pref_sync_protocol_v2),
+            subtitle = stringResource(SYMR.strings.pref_sync_protocol_v2_summ),
+            onValueChanged = { enabled ->
+                // Re-probe (or forget) on the next sync so the cached answer cannot stick.
+                syncPreferences.v2ProbedHost().set("")
+                if (!enabled) {
+                    syncPreferences.serverSupportsV2().set(false)
                 }
                 true
             },

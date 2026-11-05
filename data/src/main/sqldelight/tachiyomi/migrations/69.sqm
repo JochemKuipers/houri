@@ -1,0 +1,45 @@
+-- Sync uploads keyed off favorite_modified_at, but that column stays NULL for library
+-- entries created by backup restore / network insert (only UPDATE OF user_favorite_at
+-- stamped it). Backfill from user_favorite_at and stamp on INSERT going forward.
+--
+-- last_modified_at likewise stayed 0 on insert (only the UPDATE trigger stamped it), so
+-- entries created between migration and their first edit were invisible to delta sync.
+
+UPDATE manga
+SET favorite_modified_at = CAST(user_favorite_at / 1000 AS INTEGER)
+WHERE user_favorite_at IS NOT NULL AND favorite_modified_at IS NULL;
+
+UPDATE manga
+SET last_modified_at = strftime('%s', 'now')
+WHERE last_modified_at = 0;
+
+UPDATE chapter
+SET last_modified_at = strftime('%s', 'now')
+WHERE last_modified_at = 0;
+
+CREATE TRIGGER IF NOT EXISTS insert_favorite_modified_at_mangas
+AFTER INSERT ON manga
+WHEN new.user_favorite_at IS NOT NULL AND new.favorite_modified_at IS NULL
+BEGIN
+  UPDATE manga
+  SET favorite_modified_at = strftime('%s', 'now')
+  WHERE id = new.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS insert_last_modified_at_mangas
+AFTER INSERT ON manga
+WHEN new.last_modified_at = 0
+BEGIN
+  UPDATE manga
+  SET last_modified_at = strftime('%s', 'now')
+  WHERE id = new.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS insert_last_modified_at_chapters
+AFTER INSERT ON chapter
+WHEN new.last_modified_at = 0
+BEGIN
+  UPDATE chapter
+  SET last_modified_at = strftime('%s', 'now')
+  WHERE id = new.id;
+END;

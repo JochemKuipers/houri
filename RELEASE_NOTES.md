@@ -133,3 +133,12 @@ files moved. See .github/scripts/release_notes.py.
 - **Beta builds now log what the Discord RPC is doing.** The RPC logs through Timber, which was only planted in debug builds — every RPC failure (including the external-asset errors behind a missing presence image) was silent outside debug. Logging is now planted in every build, external-asset failures are mirrored into the in-app log, and successful image conversions are cached so the rate-limited endpoint is asked once per image instead of on every presence update.
 - **Beta builds are now release builds with a beta tag.** The beta channel had been shipping the unminified debug build, which is why a low-end device could spend 30-40 seconds opening the beta where the stable release took ten. Betas are now built from the same minified, shrunk preview variant as a release and published automatically from `master`, and a beta install checks the beta repository for its updates. Existing beta installs need one manual install to move over: the new build has its own application id and signing key.
 - **The WebGPU reader now records degraded sessions in the in-app log** — when a session ends with a dead or parked renderer, the strike (and what it means for future launches, up to the automatic fallback to the standard reader) is written where a phone-only user can actually see it.
+- SyncYomi protocol v2 is available as an opt-in: server-side merge and delta sync, with automatic fallback to v1 when the host does not advertise v2
+- SyncYomi manga `version` now bumps when an entry's categories change, and no longer bumps when chapters are read (chapter progress is versioned on the chapter itself)
+
+### Fix
+
+- SyncYomi/sync no longer skips most of the library: entries restored from a backup were missing the favorite stamp the uploader required, so chapter progress never left the device (run **Sync now** once after updating so the full library can upload)
+- SyncYomi now applies remote un-favourites and drops chapters tombstoned on another device
+- SyncYomi full-library syncs allow up to 5 minutes per request so large libraries stop timing out mid-upload
+- SyncYomi no longer fails to apply a sync when tracker/history fields the server omits (proto3 defaults) are missing from the response

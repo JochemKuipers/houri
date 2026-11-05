@@ -264,7 +264,9 @@ class MangaRestorer(
 
     private fun Manga.copyFrom(newer: Manga): Manga {
         return this.copy(
-            favorite = this.favorite || newer.favorite,
+            // SyncYomi v2: un-favouriting is a normal versioned change. Manual restore still
+            // keeps an entry in the library if either side had it (legacy backup behaviour).
+            favorite = if (isSync) newer.favorite else (this.favorite || newer.favorite),
             // SY -->
             ogAuthor = newer.author,
             ogArtist = newer.artist,
@@ -275,6 +277,9 @@ class MangaRestorer(
             // SY <--
             initialized = this.initialized || newer.initialized,
             version = newer.version,
+            // SY -->
+            lastModifiedAt = newer.lastModifiedAt,
+            // SY <--
         )
     }
 
@@ -313,7 +318,10 @@ class MangaRestorer(
                 mangaId = manga.id,
                 updateStrategy = manga.updateStrategy.let(UpdateStrategyColumnAdapter::encode),
                 version = manga.version,
-                isSyncing = 1,
+                // SY -->
+                lastModifiedAt = if (isSync) manga.lastModifiedAt else null,
+                isSyncing = if (isSync) 1 else 0,
+                // SY <--
                 notes = manga.notes,
                 memo = manga.memo.let(MemoColumnAdapter::encode),
                 // KMK -->
@@ -363,6 +371,20 @@ class MangaRestorer(
 
         insertNewChapters(newChapters)
         updateExistingChapters(existingChapters)
+
+        // SyncYomi v2 responses carry the complete remaining chapter list for each manga.
+        // Drop local chapters the server (or another device) tombstoned — without remembering
+        // new tombstones; we are applying remote state, not deleting locally.
+        if (isSync) {
+            val keepUrls = backupChapters.mapTo(HashSet(backupChapters.size)) { it.url }
+            val obsoleteIds = dbChaptersByUrl.values
+                .mapNotNull { chapter -> chapter.id.takeIf { chapter.url !in keepUrls } }
+            if (obsoleteIds.isNotEmpty()) {
+                handler.await(true) {
+                    chapterQueries.removeChaptersWithIds(obsoleteIds)
+                }
+            }
+        }
     }
 
     private fun updateChapterBasedOnSyncState(chapter: Chapter, dbChapter: Chapter): Chapter {
@@ -431,6 +453,10 @@ class MangaRestorer(
                     dateFetch = chapter.dateFetch,
                     dateUpload = chapter.dateUpload,
                     version = chapter.version,
+                    // SY -->
+                    lastModifiedAt = if (isSync) chapter.lastModifiedAt else 0,
+                    isSyncing = if (isSync) 1 else 0,
+                    // SY <--
                     memo = chapter.memo,
                 )
             }
@@ -456,7 +482,10 @@ class MangaRestorer(
                     // KMK <--
                     chapterId = chapter.id,
                     version = chapter.version,
-                    isSyncing = 1,
+                    // SY -->
+                    lastModifiedAt = if (isSync) chapter.lastModifiedAt else null,
+                    isSyncing = if (isSync) 1 else 0,
+                    // SY <--
                     memo = chapter.memo.let(MemoColumnAdapter::encode),
                     // KMK -->
                     bookmarkColor = chapter.bookmarkColor.value.toLong(),
@@ -500,6 +529,10 @@ class MangaRestorer(
                 coverLastModified = manga.coverLastModified,
                 updateStrategy = manga.updateStrategy,
                 version = manga.version,
+                // SY -->
+                lastModifiedAt = if (isSync) manga.lastModifiedAt else 0,
+                isSyncing = if (isSync) 1 else 0,
+                // SY <--
                 notes = manga.notes,
                 memo = manga.memo,
                 // KMK --> The insert takes every column the backup can carry, so the

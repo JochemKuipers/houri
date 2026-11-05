@@ -220,6 +220,8 @@
     <string name="pref_sync_host_summ">Enter the host address for synchronizing your library</string>
     <string name="pref_sync_api_key">API key</string>
     <string name="pref_sync_api_key_summ">Enter the API key to synchronize your library</string>
+    <string name="pref_sync_protocol_v2">Use protocol v2</string>
+    <string name="pref_sync_protocol_v2_summ">Server-side merge and delta sync. Requires SyncYomi 1.6+. Leave off to keep the classic full-library sync</string>
     <string name="pref_sync_now_group_title">Sync Actions</string>
     <string name="pref_sync_now">Sync now</string>
     <string name="pref_sync_now_subtitle">Initiate immediate synchronization of your data</string>
