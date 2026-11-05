@@ -809,4 +809,60 @@
     <string name="pref_novel_custom_js_support">Runs inside every book you open. Injected JavaScript can have security risks — only enable it for code you trust</string>
     <string name="novel_custom_js_edit">Edit custom JavaScript</string>
     <string name="novel_custom_js_hint">Runs in each document\'s head, after the reader\'s bridge — takes effect when the next page is loaded</string>
+
+    <!-- KMK: Moon+ Reader port — typography additions (italic, text shadow, indent length). -->
+    <string name="pref_novel_italic_text">Italic text</string>
+    <string name="pref_novel_highlights">Highlights &amp; selection actions</string>
+    <string name="action_remove_highlight">Remove highlight</string>
+    <string name="action_lookup_selection">Look up</string>
+    <string name="action_copy_text">Copy</string>
+    <string name="pref_novel_tts">Read aloud</string>
+    <string name="pref_novel_tts_rate">Speech rate</string>
+    <string name="novel_tts_rate_value">%sx speed</string>
+    <string name="pref_novel_text_shadow">Text shadow</string>
+    <string name="pref_novel_text_outline">Text outline</string>
+    <string name="pref_novel_word_spacing">Word spacing</string>
+    <string name="pref_novel_indent_length">Indent length</string>
+
+    <!-- KMK: Moon+ Reader port — webnovel plain-text cleanup (intelligent paragraphs and friends). -->
+    <string name="novel_webnovel">Webnovels</string>
+    <string name="pref_novel_plain_smart">Intelligent paragraphs</string>
+    <string name="pref_novel_plain_trim_blank">Remove blank lines</string>
+    <string name="pref_novel_plain_trim_spaces">Trim unwanted spaces</string>
+
+    <!-- KMK: Moon+ Reader port — reading behaviour. -->
+    <string name="novel_reading_behaviour">Reading behaviour</string>
+    <string name="pref_novel_footnote_popups">Footnote popups</string>
+    <string name="pref_novel_auto_scroll">Auto-scroll</string>
+    <string name="pref_novel_auto_scroll_speed">Auto-scroll speed</string>
+    <string name="novel_auto_scroll_speed_value">%1$d dp/s</string>
+
+    <!-- KMK: Moon+ Reader port — page-turn animation for paged mode. -->
+    <string name="novel_page_turn">Page turn</string>
+    <string name="pref_novel_page_turn_animation">Animation</string>
+    <string name="novel_page_turn_none">None</string>
+    <string name="novel_page_turn_slide_h">Slide</string>
+    <string name="novel_page_turn_slide_v">Slide vertical</string>
+    <string name="novel_page_turn_fade">Fade</string>
+    <string name="novel_page_turn_curl">Curl</string>
+    <string name="pref_novel_page_turn_speed">Animation speed</string>
+    <string name="novel_page_turn_speed_value">%1$d ms</string>
+
+    <!-- KMK: Moon+ Reader port — the status line over the book. -->
+    <string name="novel_status_line">Status line</string>
+    <string name="pref_novel_status_fields">Show</string>
+    <string name="novel_status_field_time">Time</string>
+    <string name="novel_status_field_progress">Progress</string>
+    <string name="novel_status_field_chapter">Chapter</string>
+    <string name="novel_status_field_battery">Battery</string>
+    <string name="pref_novel_status_position">Position</string>
+    <string name="novel_status_position_top">Top</string>
+    <string name="novel_status_position_bottom">Bottom</string>
+    <string name="pref_novel_status_text_size">Text size</string>
+    <string name="novel_status_text_size_value">%1$d sp</string>
+    <string name="pref_novel_status_color">Colour</string>
+    <string name="pref_novel_status_show_when_hidden">Show while menus are hidden</string>
+
+    <!-- KMK: Moon+ Reader port — drop the publisher\'s own stylesheets. -->
+    <string name="pref_novel_ignore_publisher_css">Ignore publisher styles</string>
 </resources>

@@ -2,6 +2,8 @@ package eu.kanade.tachiyomi.ui.reader.viewer.novel
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
 import android.net.Uri
 import android.os.Handler
@@ -11,11 +13,13 @@ import android.view.GestureDetector
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -36,14 +40,17 @@ import eu.kanade.tachiyomi.util.system.readerBackgroundColor
 import exh.log.xLogE
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import mihon.core.archive.EpubArchiveUrls
+import mihon.core.archive.EpubFootnotes
 import mihon.core.archive.EpubMimeSniff
 import tachiyomi.core.common.util.system.logcat
 import java.io.ByteArrayInputStream
@@ -302,8 +309,8 @@ internal class NovelWebViewer(
      */
     private fun documentInline(page: ReaderPage): String {
         val textPage = page.textPage ?: return ""
-        return cachedInline(page, INLINE_KIND_DOCUMENT) {
-            NovelInline.inline(textPage.text, baseUrlFor(textPage), inlineFetcher)
+        return cachedInline(page, INLINE_KIND_DOCUMENT + plainCacheSuffix(textPage)) {
+            NovelInline.inline(plainTextOf(textPage), baseUrlFor(textPage), inlineFetcher)
         }
     }
 
@@ -317,14 +324,51 @@ internal class NovelWebViewer(
      */
     private fun fragmentInline(page: ReaderPage): String {
         val textPage = page.textPage ?: return ""
-        return cachedInline(page, INLINE_KIND_FRAGMENT) {
+        return cachedInline(page, INLINE_KIND_FRAGMENT + plainCacheSuffix(textPage)) {
             NovelInline.inline(
-                NovelContinuous.bodyFragment(textPage.text),
+                NovelContinuous.bodyFragment(plainTextOf(textPage)),
                 baseUrlFor(textPage),
                 inlineFetcher,
             )
         }
     }
+
+    // KMK -->
+    /**
+     * The markup [textPage] hands the inliner, converted first when it is a **webnovel's plain
+     * text**: `Kind.PLAIN` promises "line breaks are paragraph breaks", and this is where the
+     * promise is kept — at the inline-build seam, before any document or window fragment is built
+     * from it. The converter and its cleanup passes are [NovelPlainText].
+     */
+    private fun plainTextOf(textPage: TextPage): String =
+        if (textPage.kind == TextPage.Kind.PLAIN) {
+            NovelPlainText.toHtml(textPage.text, novelPrefs.plainTextCleanup())
+        } else {
+            textPage.text
+        }
+
+    /**
+     * The inline-cache key's suffix for [textPage]'s kind: a plain page's build depends on the
+     * cleanup passes, so a settings change must re-build rather than serve a document converted
+     * under the old flags. HTML pages carry no suffix — their build does not depend on those
+     * settings, and suffixing them would needlessly invalidate the cache.
+     */
+    private fun plainCacheSuffix(textPage: TextPage): String =
+        if (textPage.kind == TextPage.Kind.PLAIN) "-" + novelPrefs.plainTextCleanup().cacheToken else ""
+
+    /**
+     * The reader feature scripts this document is built with: the footnote click listener when
+     * popups are on, the auto-scroll engine in continuous documents (a paged document is
+     * turned on taps, never on time, so it has no use for one), and the highlight engine
+     * whenever annotations are enabled — the engine both marks stored highlights and watches
+     * for new selections.
+     */
+    private fun extraReaderScripts(): List<String> = buildList {
+        if (novelPrefs.footnotePopups.get()) add(NovelFootnotes.CLICK_SCRIPT)
+        if (!isPagedMode) add(NovelAutoScroll.ENGINE_SCRIPT)
+        if (novelPrefs.highlightsEnabled.get()) add(NovelHighlights.ENGINE_SCRIPT)
+    }
+    // KMK <--
 
     /** The cache lookup and fill [documentInline] and [fragmentInline] share. */
     private inline fun cachedInline(page: ReaderPage, kind: String, build: () -> String): String {
@@ -403,6 +447,101 @@ internal class NovelWebViewer(
 
     /** Cancelled in [destroy]: the page-mode subscription is [typographyJob]'s sibling. */
     private var pageModeJob: Job? = null
+
+    // KMK -->
+    /** Cancelled in [destroy]: the rebuild subscription (publisher-CSS strip, plain-text cleanup). */
+    private var rebuildJob: Job? = null
+
+    // The paged timed page-turn (Moon+'s auto page-turn in a paged document): host-side, because
+    // a turn is a host decision — the page-side engines cannot reflow a column box.
+    private var pagedAutoTurnJob: Job? = null
+
+    /**
+     * The read-aloud engine and the flag that chains it across documents: [NovelTts] calls
+     * [advanceDocument] when a document is spoken out, and the next document's text is handed
+     * back from [onPageFinished] once it has laid out. Torn down with the viewer.
+     */
+    private var tts: NovelTts? = null
+    private var speakAfterLoad = false
+    private var ttsRateJob: Job? = null
+    // KMK <--
+
+    /** Cancelled in [destroy]: the auto-scroll enable/speed subscription. */
+    private var autoScrollJob: Job? = null
+
+    /**
+     * Starts or stops the document's auto-scroll engine from the settings as they stand.
+     *
+     * Continuous documents only: a paged book turns on taps, and an engine scrolling the body of a
+     * column layout would move it by a fraction of a page and stop — motion with no meaning. The
+     * speed is converted to px/s here, the only place the display density is known; the engine
+     * itself speaks document pixels.
+     *
+     * Replies are read: `end` means the document was already at its last screen when asked, which
+     * is not an error but is not a start either — the reader taps to turn, exactly as they did
+     * before this existed.
+     */
+    private fun syncAutoScroll() {
+        val density = webView.resources.displayMetrics.density
+        if (novelPrefs.autoScrollEnabled.get() && !isPagedMode) {
+            val pxPerSecond = novelPrefs.autoScrollSpeedDp.get() * density
+            webView.evaluateJavascript(NovelAutoScroll.startScript(pxPerSecond), null)
+        } else {
+            webView.evaluateJavascript(NovelAutoScroll.STOP_SCRIPT, null)
+        }
+        // KMK -->
+        // The paged timed page-turn (Moon+'s auto page-turn in a paged document): host-side,
+        // because a turn is a host decision — the page-side engine cannot reflow a column box.
+        // The interval maps the same speed slider the continuous engine reads, so one control
+        // means one thing in both layouts.
+        pagedAutoTurnJob?.cancel()
+        if (novelPrefs.autoScrollEnabled.get() && isPagedMode) {
+            val seconds = (SECONDS_PER_PAGE_SCALE / novelPrefs.autoScrollSpeedDp.get()).coerceIn(2f, 120f)
+            pagedAutoTurnJob = activity.lifecycleScope.launch {
+                while (isActive) {
+                    delay((seconds * 1000).toLong())
+                    if (isPagedMode) nextSection()
+                }
+            }
+        }
+        // KMK <--
+    }
+
+    /** Fire-and-forget script evaluation — the reader's scripts answer nothing that must block. */
+    private fun evaluateJs(script: String) {
+        webView.evaluateJavascript(script, null)
+    }
+
+    // KMK --> Read-aloud controls. The text spoken is the *window's* text, read off the live
+    // document — the same prose the reader sees, appended sections included.
+    /** Starts (or restarts) reading the open window aloud, from its top. */
+    fun speakCurrentDocument() {
+        val engine = tts ?: return
+        if (!novelPrefs.ttsEnabled.get()) return
+        webView.evaluateJavascript("(document.body && document.body.innerText) || ''") { raw ->
+            // The engine hands back the JSON encoding of the string; unquote, and refuse silence.
+            val text = NovelScrollBridge.string(raw).orEmpty()
+            if (text.isBlank()) return@evaluateJavascript
+            engine.start(text, novelPrefs.ttsRate.get())
+        }
+    }
+
+    /** Stops read-aloud. The reader's own tap, or the chapter ending. */
+    fun stopSpeaking() {
+        speakAfterLoad = false
+        tts?.stop()
+    }
+
+    /** The engine's end-of-document hop: advance and re-arm. Runs on main. */
+    private fun onTtsDocumentEnd() {
+        if (!novelPrefs.ttsEnabled.get()) {
+            stopSpeaking()
+            return
+        }
+        speakAfterLoad = true
+        advanceDocument()
+    }
+    // KMK <--
 
     /**
      * Typography, republished from settings. Changing it re-applies in place, no reload.
@@ -580,7 +719,23 @@ internal class NovelWebViewer(
         // KMK <--
     }
 
-    override fun getView(): View = webView
+    /**
+     * The [webView] sits inside a plain frame so a page-turn animation has something to cover it
+     * with: the overlay is a sibling drawn on top, not a child of the WebView (a WebView cannot be
+     * both the animated surface and the thing being revealed). [getView] hands out the frame, so
+     * the activity's layout code does not know the difference.
+     */
+    private val turnContainer: FrameLayout = FrameLayout(activity).apply {
+        addView(
+            webView,
+            FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT),
+        )
+    }
+
+    /** The page-turn overlay, added to [turnContainer] per animated turn and removed on end. */
+    private val pageTurnOverlay = NovelPageTurnOverlay(activity)
+
+    override fun getView(): View = turnContainer
 
     // KMK -->
     // ---------------------------------------------------------------- image viewer
@@ -619,6 +774,203 @@ internal class NovelWebViewer(
         }
         activity.viewModel.openNovelImageDialog(imageUrl)
         return true
+    }
+
+    // KMK <--
+
+    // KMK -->
+    // ---------------------------------------------------------------- footnotes (KMK)
+
+    /**
+     * Follows a link inside the book, when it names a document this chapter actually loaded.
+     *
+     * Viewer-level so two callers share it: the WebViewClient's link interception, and the footnote
+     * bridge's fallback — a cross-document note the bridge could not extract navigates exactly as
+     * the link always did, which is the feature's contract for anything it cannot show.
+     *
+     * The URL is mapped back with [EpubArchiveUrls.archivePathOf] — the same decoding and
+     * normalisation the resource loader applies — so it lines up with the `TextPage.url` values
+     * the page list is built from. Anything that does not name one of them is refused: a whole
+     * book's links span files this chapter never read, and showing a document the loader has no
+     * page for would leave the viewer with nothing to display.
+     *
+     * The `#fragment` is a destination too, and a link to `ch3.xhtml#fn-12` is asking for the
+     * footnote and not for the top of chapter 3. It is split off before the (fragment-stripping)
+     * path mapping, decoded the way the path is, and handed to [showDocument] as its [anchor] —
+     * the same request-bound destination a contents jump travels with, applied after layout in
+     * `onPageFinished`, and quoted by `NovelScrollBridge` before anything script-shaped sees it.
+     */
+    private fun openArchiveLink(url: String) {
+        val pages = chapters?.currChapter?.pages
+        val document = EpubArchiveUrls.archivePathOf(url)
+        val page = pages?.firstOrNull { it.textPage?.url == document }
+        if (page != null) {
+            // `showDocument` with a null anchor clears both destinations, exactly as the plain
+            // call does — so a fragment-less link behaves as it always did.
+            val fragment = url.substringAfter('#', "")
+                .takeIf { it.isNotEmpty() }
+                ?.let(EpubArchiveUrls::percentDecode)
+            showDocument(page, anchor = fragment)
+        } else {
+            xLogE("Refusing in-book link to a document this chapter does not contain: $url")
+        }
+    }
+
+    /**
+     * The `addJavascriptInterface` receiver for [NovelFootnotes.CLICK_SCRIPT]. The annotation
+     * surface is one method taking one string; it runs on a JS-bridge thread and hops to main
+     * immediately, so nothing below it is ever off the main thread.
+     */
+    private val footnoteHost = NovelFootnotes.Host { payload ->
+        activity.lifecycleScope.launch(Dispatchers.Main) { handleFootnote(payload) }
+    }
+
+    /**
+     * The `addJavascriptInterface` receiver for [NovelHighlights.ENGINE_SCRIPT]'s watcher. One
+     * settled selection per call, JSON-encoded by the page; hops to main exactly like
+     * [footnoteHost].
+     */
+    private val highlightHost = NovelHighlights.Host { payload ->
+        activity.lifecycleScope.launch(Dispatchers.Main) { handleHighlightSelection(payload) }
+    }
+
+    /**
+     * One settled text selection, on the main thread.
+     *
+     * Gated on the highlight toggle; the report is trimmed by the page already, so all that is
+     * left is decoding and handing the action to the activity's sheet. A selection that carries
+     * an existing highlight's id arrives the same way — the sheet then offers removal instead of
+     * another pen.
+     */
+    private suspend fun handleHighlightSelection(payload: String) {
+        if (!novelPrefs.highlightsEnabled.get()) return
+        val selection = NovelHighlights.Selection.decode(payload) ?: return
+        val page = currentPage ?: return
+        activity.showNovelHighlightDialog(page, selection)
+    }
+
+    /**
+     * Marks [selection] in the open chapter's store and in the live document.
+     *
+     * The id is random: it is bookkeeping, not a position — the quotation is what finds the text
+     * again. Adding re-runs the page-side apply with the whole list rather than wrapping
+     * incrementally, because the apply is idempotent against marks it made itself.
+     */
+    fun addHighlight(selection: NovelHighlights.Selection, color: Int, page: ReaderPage) {
+        val chapterUrl = page.chapter.chapter.url
+        val highlight = NovelHighlights.Highlight(
+            id = java.util.UUID.randomUUID().toString(),
+            color = color.coerceIn(0, NovelHighlights.COLORS.lastIndex),
+            quote = selection.quote.take(NovelHighlights.MAX_QUOTE_CHARS),
+            prefix = selection.prefix.takeLast(NovelHighlights.MAX_CONTEXT_CHARS),
+            suffix = selection.suffix.take(NovelHighlights.MAX_CONTEXT_CHARS),
+            createdAt = System.currentTimeMillis(),
+        )
+        val updated = novelPrefs.highlights(chapterUrl) + highlight
+        novelPrefs.setHighlights(chapterUrl, updated)
+        applyHighlights(updated)
+    }
+
+    /** Unwraps [id] in the live document and drops it from the open chapter's store. */
+    fun removeHighlight(id: String, page: ReaderPage) {
+        val chapterUrl = page.chapter.chapter.url
+        novelPrefs.setHighlights(chapterUrl, novelPrefs.highlights(chapterUrl).filterNot { it.id == id })
+        evaluateJs(NovelHighlights.removeScript(id))
+    }
+
+    /** Re-marks the open chapter's highlights in the live document. */
+    private fun applyHighlights(list: List<NovelHighlights.Highlight> = highlightsForCurrentChapter()) {
+        if (!novelPrefs.highlightsEnabled.get()) return
+        if (list.isEmpty()) return
+        evaluateJs(NovelHighlights.applyScript(NovelHighlights.encode(list)))
+    }
+
+    private fun highlightsForCurrentChapter(): List<NovelHighlights.Highlight> {
+        val page = currentPage ?: return emptyList()
+        return novelPrefs.highlights(page.chapter.chapter.url)
+    }
+
+    /**
+     * One footnote tap, on the main thread.
+     *
+     * Two shapes arrive: an in-document note's markup (the base is this document's own — its
+     * relative refs resolve against the same directory the document loaded at), and a reference
+     * whose target lives in another document, which is read out of the archive here. The
+     * extraction is bounded ([EpubFootnotes]); any failure falls through to [openArchiveLink]
+     * with the absolute URL the tap originally named, which is the behaviour the reader would
+     * have had with the feature off.
+     */
+    private suspend fun handleFootnote(payload: NovelFootnotes.NotePayload) {
+        if (!novelPrefs.footnotePopups.get()) return
+        val page = currentPage?.textPage
+
+        val html: String
+        val noteBase: String
+        when {
+            payload.html != null && page != null -> {
+                html = payload.html
+                noteBase = baseUrlFor(page)
+            }
+            payload.href != null && page != null -> {
+                val extracted = resolveCrossDocumentNote(page, payload.href)
+                if (extracted == null) {
+                    openArchiveLink(absoluteNoteUrl(page, payload.href) ?: return)
+                    return
+                }
+                html = extracted.first
+                noteBase = extracted.second
+            }
+            else -> return
+        }
+        activity.showNovelFootnoteDialog(html, noteBase)
+    }
+
+    /**
+     * Reads another document of the book and pulls [href]'s target out of it.
+     *
+     * @return the note's markup and the base URL its own references resolve against (the notes
+     *   document's directory), or null when anything refuses: an absolute or external href, a
+     *   document the archive does not contain, markup past the read ceiling, an id the document
+     *   does not name. Null always means "navigate instead", never "show nothing".
+     */
+    private suspend fun resolveCrossDocumentNote(page: TextPage, href: String): Pair<String, String>? =
+        withContext(Dispatchers.Default) {
+            val fragment = href.substringAfter('#', "")
+            if (fragment.isEmpty()) return@withContext null
+            val url = absoluteNoteUrl(page, href) ?: return@withContext null
+            val resource = try {
+                inlineFetcher.fetch(url)
+            } catch (e: Exception) {
+                xLogE("Footnote document read failed: $url", e)
+                null
+            } ?: return@withContext null
+            if (resource.bytes.size > MAX_NOTE_DOCUMENT_BYTES) return@withContext null
+            val markup = String(resource.bytes, Charsets.UTF_8).trimStart('\uFEFF')
+            val note = EpubFootnotes.extract(markup, EpubArchiveUrls.percentDecode(fragment))
+                ?: return@withContext null
+            note to EpubArchiveUrls.documentBaseUrl(EpubArchiveUrls.archivePathOf(url))
+        }
+
+    /**
+     * The absolute `book.internal` URL [href] names, as seen from [page]'s document, or null when
+     * [href] is not one of the book's own relative references. The href arrives exactly as the
+     * book wrote it — percent-encoded the way publishers do — so appending it to the document's
+     * directory base spells the same URL the browser would have formed, and the serving path
+     * answers it identically.
+     */
+    private fun absoluteNoteUrl(page: TextPage, href: String): String? {
+        if (href.startsWith("//") || (!EpubArchiveUrls.isArchiveUrl(href) && href.contains("://"))) {
+            return null
+        }
+        val withoutFragment = href.substringBefore('#')
+        val base = baseUrlFor(page)
+        return when {
+            EpubArchiveUrls.isArchiveUrl(href) -> href
+            withoutFragment.startsWith('/') -> {
+                EpubArchiveUrls.BASE_URL + withoutFragment.removePrefix("/")
+            }
+            else -> base + withoutFragment
+        }
     }
 
     // KMK <--
@@ -697,10 +1049,25 @@ internal class NovelWebViewer(
         // KMK -->
         pageModeJob?.cancel()
         pageModeJob = null
+        rebuildJob?.cancel()
+        rebuildJob = null
+        autoScrollJob?.cancel()
+        autoScrollJob = null
+        pagedAutoTurnJob?.cancel()
+        pagedAutoTurnJob = null
+        ttsRateJob?.cancel()
+        ttsRateJob = null
+        // Read-aloud holds the audio focus through the engine; release it with the viewer.
+        tts?.shutdown()
+        tts = null
+        // The footnote and highlight receivers hold references back to the activity through the
+        // viewer; the engine drops them explicitly, since a WebView outliving its interfaces is
+        // how a listener ends up firing into a destroyed reader.
+        webView.removeJavascriptInterface("KmkFootnote")
+        webView.removeJavascriptInterface("KmkHighlight")
+        // KMK <--
         readAheadJob?.cancel()
         readAheadJob = null
-        // KMK <--
-        // A read in flight must not outlive the viewer: it would finish against a destroyed WebView.
         documentLoadJob?.cancel()
         documentLoadJob = null
         // The window grows on the activity's scope; it has no business outliving the view it feeds.
@@ -896,6 +1263,12 @@ internal class NovelWebViewer(
             // next turn, and so a disabled toggle can never leave a stale copy in the build.
             customCss = customCssForInjection(),
             customJs = customJsForInjection(),
+            // KMK --> Moon+ Reader's disable_css and the reader feature scripts (footnote click
+            // listener, auto-scroll engine). Both are read per render: the strip toggle and the
+            // footnote toggle land on the next turn, and the scripts are per-document by nature.
+            stripPublisherCss = novelPrefs.ignorePublisherCss.get(),
+            extraScripts = extraReaderScripts(),
+            // KMK <--
             // KMK <--
         )
         webView.loadDataWithBaseURL(currentBaseUrl, html, "text/html", "UTF-8", null)
@@ -908,6 +1281,23 @@ internal class NovelWebViewer(
     /** The URL a document must be loaded at so its own relative references resolve. */
     private fun baseUrlFor(textPage: TextPage): String =
         (resources as? TextBaseUrlSource)?.baseUrlFor(textPage) ?: EpubArchiveUrls.BASE_URL
+
+    // KMK -->
+    /**
+     * The stylesheet a footnote popup renders the note with — the same rules the open document
+     * wears, so the note does not change face between the page and its popup. Read at dialog
+     * composition rather than snapshotted into the dialog state, so a rebuilt viewer cannot
+     * orphan it and a settings change mid-session is honoured on the next popup.
+     */
+    fun footnoteTypographyCss(): String =
+        readerFontCss() + NovelTypographyCss.stylesheet(typography, customCssActive = false)
+
+    /**
+     * The resource source the footnote popup streams the note's images and stylesheets from —
+     * the same archive lease the document itself is served through.
+     */
+    val footnoteResources: TextResourceSource? get() = resources
+    // KMK <--
 
     /** The fraction to restore for [page], or null when this document has no stored position. */
     private fun restoreFractionFor(page: ReaderPage): Float? {
@@ -1126,24 +1516,72 @@ internal class NovelWebViewer(
      * continuous step takes from an unmoved scroll. The bridge also carries the new position, which
      * updates the progress slider and the saved reading position without a probe (there is nothing
      * scrolling for a probe to watch in a paged document).
+     *
+     * // KMK --> With a page-turn animation chosen, the page as it stands is captured *before* the
+     * turn script is sent - the snapshot is the old page by construction, however fast the engine
+     * paints the new one - and when the bridge confirms the turn moved, the snapshot animates away
+     * over the live document. A turn that did not move recycles the snapshot untouched: the page
+     * under it is exactly the page on it, and an animation of nothing would read as a flash.
+     * // KMK <--
      */
     private fun stepPaged(volumeForward: Boolean) {
+        // KMK -->
+        val animation = novelPrefs.pageTurnAnimation
+        val snapshot = if (!animation.isNone) capturePageBitmap() else null
+        // KMK <--
         webView.evaluateJavascript(
             NovelPageLayout.turnScript(if (volumeForward) 1 else -1),
         ) { raw ->
-            val turn = NovelPageLayout.parseTurn(raw) ?: return@evaluateJavascript
-            if (turn.moved) {
-                onPagedPosition(turn)
-                // Warm the next document's markup as the last page nears, so the document turn
-                // lands on a document that is already read. One ahead, cancelled by the next.
-                if (volumeForward && turn.screen >= turn.screens - 2) {
-                    readAhead(neighbour(1))
+            val turn = NovelPageLayout.parseTurn(raw)
+            if (turn == null || !turn.moved) {
+                snapshot?.recycle()
+                if (turn != null && !turn.moved) {
+                    if (volumeForward) advanceDocument() else retreatDocument()
                 }
-            } else {
-                if (volumeForward) advanceDocument() else retreatDocument()
+                return@evaluateJavascript
+            }
+            // KMK -->
+            snapshot?.let { runPageTurn(it, animation, volumeForward) }
+            // KMK <--
+            onPagedPosition(turn)
+            // Warm the next document's markup as the last page nears, so the document turn
+            // lands on a document that is already read. One ahead, cancelled by the next.
+            if (volumeForward && turn.screen >= turn.screens - 2) {
+                readAhead(neighbour(1))
             }
         }
     }
+
+    // KMK -->
+    /**
+     * The old page, as pixels, for the turn animation. Must run on the main thread - it does,
+     * every [stepPaged] call is a gesture or a key - and answers null when there is nothing to
+     * draw (a zero-sized engine, or an allocation the device refused). A null here degrades to the
+     * instant turn, which is [PageTurnAnimation.NONE]'s behaviour anyway.
+     */
+    private fun capturePageBitmap(): Bitmap? {
+        if (webView.width <= 0 || webView.height <= 0) return null
+        val bitmap = try {
+            Bitmap.createBitmap(webView.width, webView.height, Bitmap.Config.ARGB_8888)
+        } catch (e: Exception) {
+            xLogE("Could not allocate the page-turn snapshot", e)
+            return null
+        }
+        webView.draw(Canvas(bitmap))
+        return bitmap
+    }
+
+    /** Animates the captured page away over the live document. Recycles [snapshot] on end. */
+    private fun runPageTurn(snapshot: Bitmap, animation: PageTurnAnimation, forward: Boolean) {
+        pageTurnOverlay.run(
+            turnContainer,
+            snapshot,
+            animation,
+            forward,
+            novelPrefs.pageTurnSpeedMs.get().toLong(),
+        )
+    }
+    // KMK <--
 
     /** A paged turn's outcome: the slider follows it and so does the stored position. */
     private fun onPagedPosition(turn: NovelPageLayout.PagedTurn) {
@@ -1675,21 +2113,7 @@ internal class NovelWebViewer(
          * the same request-bound destination a contents jump travels with, applied after layout in
          * `onPageFinished`, and quoted by `NovelScrollBridge` before anything script-shaped sees it.
          */
-        private fun openArchiveLink(url: String) {
-            val pages = chapters?.currChapter?.pages
-            val document = EpubArchiveUrls.archivePathOf(url)
-            val page = pages?.firstOrNull { it.textPage?.url == document }
-            if (page != null) {
-                // `showDocument` with a null anchor clears both destinations, exactly as the plain
-                // call does — so a fragment-less link behaves as it always did.
-                val fragment = url.substringAfter('#', "")
-                    .takeIf { it.isNotEmpty() }
-                    ?.let(EpubArchiveUrls::percentDecode)
-                showDocument(page, anchor = fragment)
-            } else {
-                xLogE("Refusing in-book link to a document this chapter does not contain: $url")
-            }
-        }
+        private fun openArchiveLink(url: String) = this@NovelWebViewer.openArchiveLink(url)
 
         /**
          * Hands a URL to whatever the system uses for links.
@@ -1735,6 +2159,9 @@ internal class NovelWebViewer(
                 webView.evaluateJavascript(NovelPageLayout.setupScript(pageMode.columns)) { raw ->
                     onPagedSetup(NovelPageLayout.parseLayout(raw))
                     applyPendingPosition()
+                    // Highlights ride the paged callback too — this branch returns before the
+                    // continuous path's post-finish block below.
+                    applyHighlights()
                 }
                 return
             }
@@ -1749,6 +2176,22 @@ internal class NovelWebViewer(
             // Re-assert typography in the live DOM too, so the injected stylesheet and the running
             // document cannot drift apart after a self-navigation.
             view.evaluateJavascript(liveTypographyJs(), null)
+            // KMK --> The document just installed its own copy of the auto-scroll engine (see
+            // extraReaderScripts), and every install starts cold: re-apply the setting so a
+            // scroll the reader left running keeps running across the turn.
+            syncAutoScroll()
+            // Stored highlights are re-marked once the document has laid out: the engine's
+            // matching runs on laid-out text just like the anchors the reader took them against,
+            // and marking earlier would race the parser mid-document.
+            applyHighlights()
+            // Read-aloud chains across documents: an end-of-document callback advanced the
+            // reader here (speakAfterLoad); now the next window has laid out, speak it. The
+            // delay is the breathing room between a document's end and the next first utterance.
+            if (speakAfterLoad) {
+                speakAfterLoad = false
+                view.postDelayed({ if (novelPrefs.ttsEnabled.get()) speakCurrentDocument() }, TTS_SPEAK_DELAY_MS)
+            }
+            // KMK <--
             // The probe is where the page counter, the saved position and the progress slider all
             // start from: run one now rather than waiting for the reader's first scroll.
             scheduleContinuousProbe()
@@ -1905,6 +2348,45 @@ internal class NovelWebViewer(
             novelPrefs.pageModePref.changes().drop(1).collect { onPageModeChanged() }
         }
         // KMK <--
+        // KMK -->
+        // The footnote receiver is registered for the viewer's life; the injected click script
+        // decides whether anything ever calls it, and the handler re-checks the toggle so a
+        // mid-book change is honoured without re-registering the interface.
+        webView.addJavascriptInterface(footnoteHost, "KmkFootnote")
+        webView.addJavascriptInterface(highlightHost, "KmkHighlight")
+        // Rebuild-on-change: two build inputs a stylesheet swap cannot carry. The publisher strip
+        // is a build-time removal (the inline cache keeps the styled markup, so flipping back is
+        // instant), and a plain-text cleanup change re-spells the conversion the cache was built
+        // from (its key carries the cleanup token). Both re-render the open document in place,
+        // keeping the reader's place the way a page-mode change does.
+        rebuildJob = activity.lifecycleScope.launch {
+            merge(
+                novelPrefs.ignorePublisherCss.changes(),
+                novelPrefs.plainTextCleanupChanges(),
+            ).collect { rerenderCurrentDocument() }
+        }
+        // Auto-scroll follows its two settings live: on with a speed in continuous documents,
+        // stopped otherwise. Started after each document load too (see onPageFinished).
+        autoScrollJob = activity.lifecycleScope.launch {
+            merge(
+                novelPrefs.autoScrollEnabled.changes(),
+                novelPrefs.autoScrollSpeedDp.changes(),
+            ).drop(1).collect { syncAutoScroll() }
+        }
+        // KMK --> The read-aloud engine: constructed with the viewer, driven by the viewer's own
+        // document-advance paths, torn down in destroy(). A rate change mid-speech restarts the
+        // current document's queue on the new rate.
+        tts = NovelTts(activity, main = { activity.runOnUiThread(it) }, onDocumentEnd = {
+            speakAfterLoad = true
+            advanceDocument()
+        })
+        ttsRateJob = activity.lifecycleScope.launch {
+            novelPrefs.ttsRate.changes().drop(1).collect {
+                if (tts?.active == true) speakCurrentDocument()
+            }
+        }
+        // KMK <--
+        // KMK <--
     }
 
     /**
@@ -1920,13 +2402,49 @@ internal class NovelWebViewer(
         val mode = novelPrefs.pageMode
         if (mode == pageMode) return
         pageMode = mode
+        rerenderCurrentDocument()
+    }
+
+    // KMK -->
+    /**
+     * Re-renders the document on screen under the build inputs as they now stand, keeping the
+     * reader's place by the fraction that survives the reflow.
+     *
+     * Shared by the two build-input changes that a stylesheet swap cannot carry: a page-mode
+     * change (a different layout) and the publisher-CSS strip / plain-text cleanup changes (a
+     * different build of the same markup — the strip happens at build time precisely so the
+     * inline cache can stay kind-neutral, which is also why they must re-render here rather
+     * than swap anything live).
+     */
+    private fun rerenderCurrentDocument() {
         val page = pendingPage ?: currentPage ?: return
         showDocument(page, fraction = scrollFraction)
     }
+    // KMK <--
 
     private companion object {
+        /**
+         * The largest documents [resolveCrossDocumentNote] will read to answer a footnote tap.
+         * A notes document is text the reader never sees whole — the tap only needs one element —
+         * so an oversized file is answered with "navigate instead" rather than decoded in full;
+         * 4 MiB is far past any real endnotes list and well short of a memory problem.
+         */
+        const val MAX_NOTE_DOCUMENT_BYTES = 4 * 1024 * 1024
+
         /** Fraction of the width, at each edge, that turns a page. */
         const val TAP_ZONE = 0.30f
+
+        /**
+         * Maps the auto-scroll speed (dp/s) onto the paged timed turn's seconds per screen, so
+         * one slider means one pace in both layouts: 240 dp/s reads as ~5 s a page.
+         */
+        const val SECONDS_PER_PAGE_SCALE = 1_200f
+
+        /**
+         * The pause between a read-aloud document turn and the next document's first utterance: long
+         * enough that the layout of a heavy document has settled, short enough to read as continuous.
+         */
+        const val TTS_SPEAK_DELAY_MS = 450L
 
         /**
          * How many font faces the [readerFontCache] may hold. See its comment for the number.

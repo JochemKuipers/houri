@@ -55,6 +55,24 @@ object NovelTypographySettingKeys {
     val BOLD_TEXT = SettingKey("pref_novel_bold_text", NOVEL_FOLLOW_PUBLISHER)
     val FORCE_DARK = SettingKey("pref_novel_force_dark", NOVEL_FOLLOW_PUBLISHER)
 
+    /** Slant the body text, tri-state like bold. See [eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography.italicText]. */
+    val ITALIC_TEXT = SettingKey("pref_novel_italic_text", NOVEL_FOLLOW_PUBLISHER)
+
+    /** Soft text shadow, tri-state. See [eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography.textShadow]. */
+    val TEXT_SHADOW = SettingKey("pref_novel_text_shadow", NOVEL_FOLLOW_PUBLISHER)
+
+    /** Thin glyph outline, tri-state. See [eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography.textOutline]. */
+    val TEXT_OUTLINE = SettingKey("pref_novel_text_outline", NOVEL_FOLLOW_PUBLISHER)
+
+    /** Selection → highlight annotations. See [eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelHighlights]. */
+    val HIGHLIGHTS_ENABLED = SettingKey("pref_novel_highlights_enabled", true)
+
+    /** Read-aloud, offered as an explicit action, never started by a settings change. */
+    val TTS_ENABLED = SettingKey("pref_novel_tts_enabled", false)
+
+    /** Speech rate multiplier, 0.5..3.0. */
+    val TTS_RATE = SettingKey("pref_novel_tts_rate", 1.0f)
+
     /**
      * Whether a paragraph after the first is indented.
      *
@@ -69,9 +87,16 @@ object NovelTypographySettingKeys {
      */
     val PARAGRAPH_INDENT = SettingKey("pref_novel_paragraph_indent", "true")
 
+    /**
+     * How deep the paragraph indent goes, in em — Moon+ Reader's `indent_length`, which the fixed
+     * `1em` this reader shipped could not express. Applies only while [PARAGRAPH_INDENT] is on.
+     */
+    val PARAGRAPH_INDENT_LENGTH = SettingKey("pref_novel_paragraph_indent_length", 1.0f)
+
     val LINE_SPACING = SettingKey("pref_novel_line_spacing", 1.6f)
     val PARAGRAPH_SPACING = SettingKey("pref_novel_paragraph_spacing", 0.0f)
     val FONT_SPACING = SettingKey("pref_novel_font_spacing", 0.0f)
+    val WORD_SPACING = SettingKey("pref_novel_word_spacing", 0.0f)
 
     val MARGIN_LEFT = SettingKey("pref_novel_margin_left", 0.05f)
     val MARGIN_RIGHT = SettingKey("pref_novel_margin_right", 0.05f)
@@ -127,6 +152,70 @@ object NovelTypographySettingKeys {
     val CUSTOM_JS = SettingKey("pref_novel_custom_js", "")
 
     /**
+     * Whether the publisher's own stylesheets are dropped from text documents.
+     *
+     * Moon+ Reader's `disable_css` family. Off by default — a book's stylesheet *is* the book's
+     * typography, and the reader's own overrides exist precisely so both can coexist. This is the
+     * escape hatch for the books whose stylesheet actively fights the reader: hardcoded font sizes
+     * in `px`, page-width `div`s, letter-spacing tuned for paper.
+     */
+    val IGNORE_PUBLISHER_CSS = SettingKey("pref_novel_ignore_publisher_css", false)
+
+    // ------------------------------------------------------------ webnovel plain text
+
+    /**
+     * Whether `Kind.PLAIN` pages go through the webnovel converter, and which cleanup passes run
+     * with it. All on: the material is machine-assembled and every pass only removes noise. See
+     * [eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelPlainText] for what each one does.
+     */
+    val PLAIN_TEXT_CLEANUP = SettingKey("pref_novel_plain_text_cleanup", true)
+    val PLAIN_TEXT_TRIM_BLANK = SettingKey("pref_novel_plain_text_trim_blank", true)
+    val PLAIN_TEXT_TRIM_SPACES = SettingKey("pref_novel_plain_text_trim_spaces", true)
+
+    /**
+     * Whether a tap on a note reference opens a popup with the note beside the text, Moon+ Reader's
+     * footnote behaviour, instead of turning to the notes document.
+     */
+    val FOOTNOTE_POPUPS = SettingKey("pref_novel_footnote_popups", true)
+
+    // ------------------------------------------------------------ page turn
+
+    /**
+     * The animation a paged page turn is carried by — Moon+ Reader's flip list, reduced to the
+     * effects a snapshot overlay can render honestly. Stored as
+     * [eu.kanade.tachiyomi.ui.reader.viewer.novel.PageTurnAnimation]'s ordinal; [NONE] (the
+     * default, and everything this reader did before) adds no overlay at all.
+     */
+    val PAGE_TURN_ANIMATION = SettingKey("pref_novel_page_turn_animation", 0)
+
+    /** How long that animation runs, in milliseconds. */
+    val PAGE_TURN_SPEED_MS = SettingKey("pref_novel_page_turn_speed_ms", 220)
+
+    // ------------------------------------------------------------ status line
+
+    /**
+     * The status line Moon+ Reader draws in the page margin, ported as a Compose overlay beside
+     * the book. The fields are a stored ordinal set ([eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelStatusLine.Field]),
+     * position is the [eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelStatusLine.Position] ordinal;
+     * everything defaults to off, because a line of chrome over the text is a choice, not a given.
+     */
+    val STATUS_FIELDS = SettingKey("pref_novel_status_fields", "")
+    val STATUS_POSITION = SettingKey("pref_novel_status_position", 0)
+    val STATUS_TEXT_SIZE_SP = SettingKey("pref_novel_status_text_size_sp", 11)
+    val STATUS_COLOR = SettingKey("pref_novel_status_color", "")
+    val STATUS_SHOW_WHEN_HIDDEN = SettingKey("pref_novel_status_show_when_hidden", false)
+
+    // ------------------------------------------------------------ auto scroll
+
+    /**
+     * Continuous-mode auto-scroll, Moon+ Reader's reading pace without the finger: the document
+     * scrolls itself at [AUTO_SCROLL_SPEED_DP] (dp per second), pauses when the reader touches the
+     * page, and runs only in continuous mode — a paged document turns on taps, not on time.
+     */
+    val AUTO_SCROLL_ENABLED = SettingKey("pref_novel_auto_scroll_enabled", false)
+    val AUTO_SCROLL_SPEED_DP = SettingKey("pref_novel_auto_scroll_speed_dp", 60)
+
+    /**
      * Every key above, for the [tachiyomi.core.common.preference.SettingsRegistry].
      *
      * Registration asserts global uniqueness at startup, so a key added here that is already
@@ -149,6 +238,7 @@ object NovelTypographySettingKeys {
         LINE_SPACING,
         PARAGRAPH_SPACING,
         FONT_SPACING,
+        WORD_SPACING,
         MARGIN_LEFT,
         MARGIN_RIGHT,
         MARGIN_TOP,
@@ -159,6 +249,27 @@ object NovelTypographySettingKeys {
         CUSTOM_CSS,
         CUSTOM_JS_ENABLED,
         CUSTOM_JS,
+        ITALIC_TEXT,
+        TEXT_SHADOW,
+        TEXT_OUTLINE,
+        HIGHLIGHTS_ENABLED,
+        TTS_ENABLED,
+        TTS_RATE,
+        PARAGRAPH_INDENT_LENGTH,
+        IGNORE_PUBLISHER_CSS,
+        PLAIN_TEXT_CLEANUP,
+        PLAIN_TEXT_TRIM_BLANK,
+        PLAIN_TEXT_TRIM_SPACES,
+        FOOTNOTE_POPUPS,
+        PAGE_TURN_ANIMATION,
+        PAGE_TURN_SPEED_MS,
+        STATUS_FIELDS,
+        STATUS_POSITION,
+        STATUS_TEXT_SIZE_SP,
+        STATUS_COLOR,
+        STATUS_SHOW_WHEN_HIDDEN,
+        AUTO_SCROLL_ENABLED,
+        AUTO_SCROLL_SPEED_DP,
     )
 }
 // KMK <--

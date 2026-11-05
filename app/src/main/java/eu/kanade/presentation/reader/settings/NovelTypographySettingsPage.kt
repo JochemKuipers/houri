@@ -26,6 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,7 +39,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -49,7 +52,9 @@ import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelBuiltinFonts
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelFonts
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelFonts.ImportResult
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelPageLayout
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelStatusLine
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.PageTurnAnimation
 import eu.kanade.tachiyomi.util.system.toast
 import mihon.app.di.globalAppGraph
 import tachiyomi.core.common.preference.TriState
@@ -57,6 +62,7 @@ import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.components.CheckboxItem
 import tachiyomi.presentation.core.components.HeadingItem
+import tachiyomi.presentation.core.components.Pill
 import tachiyomi.presentation.core.components.SettingsChipRow
 import tachiyomi.presentation.core.components.SettingsItemsPaddings
 import tachiyomi.presentation.core.components.SliderItem
@@ -271,6 +277,14 @@ internal fun NovelTypographyPage(
         onChange = { novelPrefs.fontSpacing.set(it / 100f) },
     )
 
+    SliderItem(
+        label = stringResource(KMR.strings.pref_novel_word_spacing),
+        value = percent(typography.wordSpacing),
+        valueRange = percent(NovelTypography.MIN_WORD_SPACING_EM)..percent(NovelTypography.MAX_WORD_SPACING_EM),
+        valueString = decimal(typography.wordSpacing),
+        onChange = { novelPrefs.wordSpacing.set(it / 100f) },
+    )
+
     // ---------------------------------------------------------------- margins
 
     HeadingItem(stringResource(KMR.strings.pref_novel_margins))
@@ -322,6 +336,17 @@ internal fun NovelTypographyPage(
         onClick = { novelPrefs.paragraphIndent = typography.paragraphIndent.next() },
     )
 
+    // KMK --> How deep that indent goes, Moon+ Reader's `indent_length`: the depth the indent rule
+    // emits. Only meaningful while the indent is on, and the slider says so by sitting under it.
+    SliderItem(
+        label = stringResource(KMR.strings.pref_novel_indent_length),
+        value = percent(typography.paragraphIndentLengthEm / NovelTypography.MAX_INDENT_LENGTH_EM),
+        valueRange = 0..percent(1f),
+        valueString = decimal(typography.paragraphIndentLengthEm) + "em",
+        onChange = { novelPrefs.paragraphIndentLength.set(it / 100f * NovelTypography.MAX_INDENT_LENGTH_EM) },
+    )
+    // KMK <--
+
     // Bold body text. On, the sheet emits a real `font-weight: 700 !important` — which is why the
     // bundle ships *variable* fonts: every serif here carries its own bold rather than letting the
     // engine synthesise one. Off forces the publisher's own weights, which is also not a no-op.
@@ -339,6 +364,28 @@ internal fun NovelTypographyPage(
         state = typography.forceDark.toTriState(),
         onClick = { novelPrefs.forceDark = typography.forceDark.next() },
     )
+
+    // KMK --> Italic and text shadow, Moon+ Reader's `fontItalic` / `fontShadow`: the same body-set
+    // answers bold is, for the same reasons — the book's own em/strong keep their meaning, and "off"
+    // must beat a publisher who italicised or shadowed the whole body.
+    TriStateItem(
+        label = stringResource(KMR.strings.pref_novel_italic_text),
+        state = typography.italicText.toTriState(),
+        onClick = { novelPrefs.italicText = typography.italicText.next() },
+    )
+
+    TriStateItem(
+        label = stringResource(KMR.strings.pref_novel_text_shadow),
+        state = typography.textShadow.toTriState(),
+        onClick = { novelPrefs.textShadow = typography.textShadow.next() },
+    )
+
+    TriStateItem(
+        label = stringResource(KMR.strings.pref_novel_text_outline),
+        state = typography.textOutline.toTriState(),
+        onClick = { novelPrefs.textOutline = typography.textOutline.next() },
+    )
+    // KMK <--
 
     // ---------------------------------------------------------------- custom injection
     //
@@ -407,6 +454,167 @@ internal fun NovelTypographyPage(
             onDismiss = { editingCustomJs = false },
         )
     }
+
+    // KMK --> Moon+ Reader's disable_css: the escape hatch for the books whose own stylesheet
+    // fights the reader — hardcoded pixel sizes, page-width divs, paper-tuned letter-spacing. Off
+    // by default: a book's stylesheet is its typography, and the reader's overrides exist so both
+    // can coexist. Applies on the next document render; the reader's own rules are emitted after
+    // the strip, so this can never leave a book unstyled.
+    CheckboxItem(
+        label = stringResource(KMR.strings.pref_novel_ignore_publisher_css),
+        pref = novelPrefs.ignorePublisherCss,
+    )
+    // KMK <--
+
+    // KMK -->
+    // ---------------------------------------------------------------- webnovels
+    //
+    // Machine-assembled plain text (the material `Kind.PLAIN` promises is paragraph-per-line) gets
+    // Moon+ Reader's cleanup suite: intelligent paragraphs, trimmed blank lines, trimmed spaces.
+    // All default on, because every pass only removes noise; a source whose text is deliberately
+    // shaped can turn them off without losing anything structural.
+
+    HeadingItem(stringResource(KMR.strings.novel_webnovel))
+
+    CheckboxItem(
+        label = stringResource(KMR.strings.pref_novel_plain_smart),
+        pref = novelPrefs.plainSmartPref,
+    )
+    CheckboxItem(
+        label = stringResource(KMR.strings.pref_novel_plain_trim_blank),
+        pref = novelPrefs.plainTrimBlankPref,
+    )
+    CheckboxItem(
+        label = stringResource(KMR.strings.pref_novel_plain_trim_spaces),
+        pref = novelPrefs.plainTrimSpacesPref,
+    )
+
+    // ---------------------------------------------------------------- behaviour
+
+    HeadingItem(stringResource(KMR.strings.novel_reading_behaviour))
+
+    CheckboxItem(
+        label = stringResource(KMR.strings.pref_novel_footnote_popups),
+        pref = novelPrefs.footnotePopups,
+    )
+
+    CheckboxItem(
+        label = stringResource(KMR.strings.pref_novel_highlights),
+        pref = novelPrefs.highlightsEnabled,
+    )
+
+    CheckboxItem(
+        label = stringResource(KMR.strings.pref_novel_auto_scroll),
+        pref = novelPrefs.autoScrollEnabled,
+    )
+    SliderItem(
+        label = stringResource(KMR.strings.pref_novel_auto_scroll_speed),
+        value = novelPrefs.autoScrollSpeedDp.get(),
+        valueRange = 10..240,
+        valueString = stringResource(KMR.strings.novel_auto_scroll_speed_value, novelPrefs.autoScrollSpeedDp.get()),
+        onChange = { novelPrefs.autoScrollSpeedDp.set(it) },
+    )
+
+    // KMK --> Read-aloud. The toggle only *offers* the feature (the speak action is explicit, in
+    // the sheet's behaviour section); the rate applies from the next utterance.
+    CheckboxItem(
+        label = stringResource(KMR.strings.pref_novel_tts),
+        pref = novelPrefs.ttsEnabled,
+    )
+    FloatSliderItem(
+        label = stringResource(KMR.strings.pref_novel_tts_rate),
+        value = novelPrefs.ttsRate.get(),
+        valueRange = 0.5f..3.0f,
+        valueString = stringResource(KMR.strings.novel_tts_rate_value, decimal(novelPrefs.ttsRate.get())),
+        onChange = { novelPrefs.ttsRate.set(it) },
+    )
+    // KMK <--
+
+    // ---------------------------------------------------------------- page turn
+
+    HeadingItem(stringResource(KMR.strings.novel_page_turn))
+
+    val pageTurn by novelPrefs.pageTurnAnimationPref.collectAsState()
+    SettingsChipRow(KMR.strings.pref_novel_page_turn_animation) {
+        PageTurnAnimation.entries.forEach { animation ->
+            FilterChip(
+                selected = pageTurn == animation.ordinal,
+                onClick = { novelPrefs.pageTurnAnimationPref.set(animation.ordinal) },
+                label = { Text(stringResource(pageTurnLabel(animation))) },
+            )
+        }
+    }
+    SliderItem(
+        label = stringResource(KMR.strings.pref_novel_page_turn_speed),
+        value = novelPrefs.pageTurnSpeedMs.get(),
+        valueRange = 80..600,
+        valueString = stringResource(KMR.strings.novel_page_turn_speed_value, novelPrefs.pageTurnSpeedMs.get()),
+        onChange = { novelPrefs.pageTurnSpeedMs.set(it) },
+    )
+
+    // ---------------------------------------------------------------- status line
+
+    HeadingItem(stringResource(KMR.strings.novel_status_line))
+
+    val statusFields by novelPrefs.statusFieldsPref.collectAsState()
+    val selectedFields = remember(statusFields) { novelPrefs.statusFields }
+    SettingsChipRow(KMR.strings.pref_novel_status_fields) {
+        NovelStatusLine.Field.entries.forEach { field ->
+            FilterChip(
+                selected = field in selectedFields,
+                onClick = {
+                    val next = if (field in selectedFields) selectedFields - field else selectedFields + field
+                    novelPrefs.setStatusFields(next)
+                },
+                label = { Text(stringResource(statusFieldLabel(field))) },
+            )
+        }
+    }
+
+    val statusPosition by novelPrefs.statusPositionPref.collectAsState()
+    SettingsChipRow(KMR.strings.pref_novel_status_position) {
+        NovelStatusLine.Position.entries.forEach { position ->
+            FilterChip(
+                selected = statusPosition == position.ordinal,
+                onClick = { novelPrefs.statusPositionPref.set(position.ordinal) },
+                label = { Text(stringResource(statusPositionLabel(position))) },
+            )
+        }
+    }
+
+    SliderItem(
+        label = stringResource(KMR.strings.pref_novel_status_text_size),
+        value = novelPrefs.statusTextSizeSp.get(),
+        valueRange = 8..20,
+        valueString = stringResource(KMR.strings.novel_status_text_size_value, novelPrefs.statusTextSizeSp.get()),
+        onChange = { novelPrefs.statusTextSizeSp.set(it) },
+    )
+
+    var editingStatusColor by remember { mutableStateOf(false) }
+    SettingsChipRow(KMR.strings.pref_novel_status_color) {
+        ColorChips(
+            choices = STATUS_COLORS,
+            selected = novelPrefs.statusColor.get(),
+            onCustom = { editingStatusColor = true },
+            onSelect = { novelPrefs.statusColor.set(it) },
+        )
+    }
+    if (editingStatusColor) {
+        HexColorDialog(
+            initial = customColorOrEmpty(novelPrefs.statusColor.get(), STATUS_COLORS),
+            onConfirm = { value ->
+                novelPrefs.statusColor.set(value)
+                editingStatusColor = false
+            },
+            onDismiss = { editingStatusColor = false },
+        )
+    }
+
+    CheckboxItem(
+        label = stringResource(KMR.strings.pref_novel_status_show_when_hidden),
+        pref = novelPrefs.statusShowWhenHidden,
+    )
+    // KMK <--
 }
 
 /**
@@ -1021,6 +1229,43 @@ private fun pageModeLabel(mode: NovelPageLayout.PageMode): StringResource = when
     NovelPageLayout.PageMode.PAGED -> KMR.strings.novel_page_mode_paged
     NovelPageLayout.PageMode.DOUBLE -> KMR.strings.novel_page_mode_double
 }
+
+/** The chip label for one page-turn animation. */
+private fun pageTurnLabel(animation: PageTurnAnimation): StringResource = when (animation) {
+    PageTurnAnimation.NONE -> KMR.strings.novel_page_turn_none
+    PageTurnAnimation.SLIDE_HORIZONTAL -> KMR.strings.novel_page_turn_slide_h
+    PageTurnAnimation.SLIDE_VERTICAL -> KMR.strings.novel_page_turn_slide_v
+    PageTurnAnimation.FADE -> KMR.strings.novel_page_turn_fade
+    PageTurnAnimation.CURL -> KMR.strings.novel_page_turn_curl
+}
+
+/** The chip label for one status-line field. */
+private fun statusFieldLabel(field: NovelStatusLine.Field): StringResource = when (field) {
+    NovelStatusLine.Field.TIME -> KMR.strings.novel_status_field_time
+    NovelStatusLine.Field.PROGRESS -> KMR.strings.novel_status_field_progress
+    NovelStatusLine.Field.CHAPTER -> KMR.strings.novel_status_field_chapter
+    NovelStatusLine.Field.BATTERY -> KMR.strings.novel_status_field_battery
+}
+
+/** The chip label for one status-line position. */
+private fun statusPositionLabel(position: NovelStatusLine.Position): StringResource = when (position) {
+    NovelStatusLine.Position.TOP -> KMR.strings.novel_status_position_top
+    NovelStatusLine.Position.BOTTOM -> KMR.strings.novel_status_position_bottom
+}
+
+/**
+ * The status line's colour palette, reusing the reading palettes' labels: the derived answer first
+ * (blank — the colour the reader theme and typography already imply), then the greys a reading
+ * surface actually wears. A status line is one line of small text; a hue picker for it would be
+ * chrome for chrome. Values are lowercase `#rrggbb`, the one spelling the store canonicalises to.
+ */
+private val STATUS_COLORS = listOf(
+    "" to KMR.strings.novel_follow_publisher,
+    "#e8e6e3" to KMR.strings.novel_color_light_grey,
+    "#9e9e9e" to KMR.strings.novel_color_dark_grey,
+    "#ffffff" to KMR.strings.novel_color_white,
+    "#000000" to KMR.strings.novel_color_black,
+)
 // KMK <--
 
 /** The next value round the three-state cycle, ending back at "follow the book". */
@@ -1032,6 +1277,56 @@ private fun Boolean?.next(): Boolean? = when (this) {
 
 /** A fraction the store holds as a float to the whole percent a slider can express. */
 private fun percent(fraction: Float): Int = (fraction * 100).roundToInt()
+
+/**
+ * Float twin of `SliderItem` — today the read-aloud rate, a multiplier speech synthesis consumes
+ * as a float; projecting it into whole Int steps would quantise a drag the user experiences as
+ * "half a gear too fast or too slow". Same layout and paddings as its Int sibling so the
+ * column reads as one system.
+ */
+@Composable
+private fun FloatSliderItem(
+    value: Float,
+    valueRange: ClosedFloatingPointRange<Float>,
+    label: String,
+    onChange: (Float) -> Unit,
+    valueString: String = value.toString(),
+) {
+    val haptic = LocalHapticFeedback.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(
+                horizontal = SettingsItemsPaddings.Horizontal,
+                vertical = SettingsItemsPaddings.Vertical,
+            ),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.small),
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Pill(
+                text = valueString,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = f@{
+                if (it == value) return@f
+                onChange(it)
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            },
+            valueRange = valueRange,
+        )
+    }
+}
 
 /**
  * Locale-independent, because the stylesheet is.

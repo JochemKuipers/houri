@@ -60,6 +60,7 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderOrientation
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelHighlights
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
 import eu.kanade.tachiyomi.util.chapter.filterDownloaded
@@ -1663,6 +1664,16 @@ class ReaderViewModel(
     fun openNovelImageDialog(imageUrl: String) {
         mutableState.update { it.copy(dialog = Dialog.NovelImageView(imageUrl)) }
     }
+
+    /** The footnote popup for a note reference the reader tapped on inside the open book. */
+    fun openNovelFootnoteDialog(html: String, baseUrl: String) {
+        mutableState.update { it.copy(dialog = Dialog.NovelFootnote(html, baseUrl)) }
+    }
+
+    /** The selection sheet for a settled text selection inside the open book. */
+    fun openNovelHighlightDialog(page: ReaderPage, selection: NovelHighlights.Selection) {
+        mutableState.update { it.copy(dialog = Dialog.NovelHighlightMenu(page, selection)) }
+    }
     // KMK <--
 
     fun closeDialog() {
@@ -2154,6 +2165,30 @@ class ReaderViewModel(
         data class NovelImageView(
             /** URL of the pressed illustration, spelled as the engine's hit test handed it over. */
             val imageUrl: String,
+        ) : Dialog
+
+        /**
+         * The footnote popup, Moon+ Reader's style: the note's own markup rendered beside the text
+         * instead of a turn to the notes document. Carries the note markup plus the base URL its
+         * relative references resolve against (the notes document's directory, for a cross-document
+         * note) — everything the popup WebView needs to draw the note as the book styled it.
+         */
+        data class NovelFootnote(
+            /** The note element's markup, as extracted from the book. */
+            val html: String,
+            /** The base URL the note's relative references resolve against. */
+            val baseUrl: String,
+        ) : Dialog
+
+        /**
+         * The selection action sheet: highlight pens, copy, look up — and removal, when the
+         * selection sits inside an existing highlight. Carries the selection as the page
+         * reported it plus the page it was taken on; the storage and the live-document marking
+         * go through the viewer, which owns both.
+         */
+        data class NovelHighlightMenu(
+            val page: ReaderPage,
+            val selection: NovelHighlights.Selection,
         ) : Dialog
         // KMK <--
 

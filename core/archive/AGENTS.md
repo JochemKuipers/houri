@@ -16,6 +16,7 @@ CBZ/archive reading with optional AES encryption (SY). Package root: `mihon.core
 | `EpubOpfParser` / `EpubTocParser` / `EpubEncryptionParser` | One pass each over `content.opf`, the TOC, `encryption.xml` |
 | `EpubPaths` | Pure-JVM reference resolution (relative, absolute, `..`, percent-encoding) |
 | `EpubArchiveUrls` | The reserved `https://book.internal/` URL space book documents are served under, and its pure translation to archive paths |
+| `EpubFootnotes` | Pure footnote-note extraction: finds an element by `id` (or legacy `name`) and its own closing tag, bounded. Feeds the reader's footnote popups |
 | `ZipWriter` | Archive writing with optional encryption (SY) |
 
 ## Dependencies

@@ -76,6 +76,14 @@ data class NovelTypography(
     val fontSpacing: Float = 0.0f,
 
     /**
+     * Extra space between words, in em — Moon+ Reader's `word_space`, beside its character
+     * spacing. 0 is the font's own default, which emits no rule: word spacing is the one
+     * typographic answer where the browser's default is almost always right, and a reader
+     * changing it is compensating for a specific book's face.
+     */
+    val wordSpacing: Float = 0.0f,
+
+    /**
      * Global multiplier on top of [fontSizePt].
      *
      * Separate from the size so that a reader who wants "this book at my normal size" can store one
@@ -113,6 +121,46 @@ data class NovelTypography(
      * upgrade. The other three default to null because they did nothing before they were settings.
      */
     val paragraphIndent: Boolean? = true,
+
+    /**
+     * How deep that indent goes, in em — Moon+ Reader's `indent_length`, which our fixed `1em`
+     * could not express. Applies only while [paragraphIndent] is true; a reader who turned the
+     * indent off has no length to configure, and emitting a `text-indent` for one anyway would
+     * make "off" a lie.
+     */
+    val paragraphIndentLengthEm: Float = DEFAULT_INDENT_LENGTH_EM,
+
+    /**
+     * Slant the body text; null to follow the book.
+     *
+     * Tri-state like [boldText], emitted on the same text-bearing set with the same exclusions
+     * (headings, `em`/`i`/`strong`/`b` keep their own meaning) and the same both-answers-emit rule:
+     * a publisher that italicised the whole body must be overridable by "off", which emits
+     * `font-style: normal`.
+     */
+    val italicText: Boolean? = null,
+
+    /**
+     * Soft text shadow; null to follow the book.
+     *
+     * Moon+ Reader's `fontShadow`, kept as a tri-state for the same reason as every other
+     * styling answer. The shadow follows the text's own colour — CSS resolves a colourless
+     * `text-shadow` against `currentColor` — so it reads on light text over dark backgrounds
+     * exactly as it does the other way round, and no second colour setting is needed.
+     */
+    val textShadow: Boolean? = null,
+
+    /**
+     * Thin outline around the glyphs; null to follow the book.
+     *
+     * Moon+ Reader's `font_outline`, aimed at the same failure it is there for: low-contrast
+     * reading surfaces and readers with weaker eyesight, where a hairline stroke separates the
+     * glyph from its background without changing the palette. Emitted as `-webkit-text-stroke`,
+     * which the reader's WebView implements; follows the text's own colour like [textShadow], so
+     * the one switch works both ways on the page. Off emits `0`, so a publisher's own outline is
+     * overridable like everything else.
+     */
+    val textOutline: Boolean? = null,
 
     /**
      * Bold body text, on or off; null to follow the book.
@@ -197,11 +245,13 @@ data class NovelTypography(
         paragraphSpacing = paragraphSpacing.coerceIn(0f, MAX_PARAGRAPH_SPACING),
         lineSpacing = lineSpacing.coerceIn(MIN_LINE_SPACING, MAX_LINE_SPACING),
         fontSpacing = fontSpacing.coerceIn(-0.2f, 1.0f),
+        wordSpacing = wordSpacing.coerceIn(MIN_WORD_SPACING_EM, MAX_WORD_SPACING_EM),
         fontScale = fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE),
         marginLeft = marginLeft.coerceIn(0f, MAX_MARGIN),
         marginRight = marginRight.coerceIn(0f, MAX_MARGIN),
         marginTop = marginTop.coerceIn(0f, MAX_VERTICAL_MARGIN),
         marginBottom = marginBottom.coerceIn(0f, MAX_VERTICAL_MARGIN),
+        paragraphIndentLengthEm = paragraphIndentLengthEm.coerceIn(0f, MAX_INDENT_LENGTH_EM),
     )
 
     companion object {
@@ -219,6 +269,14 @@ data class NovelTypography(
         const val MAX_FONT_SIZE_PT = 40
         const val MIN_EFFECTIVE_SIZE_PT = 8f
         const val MAX_EFFECTIVE_SIZE_PT = 72f
+
+        /** The indent Moon+ Reader ships and the stylesheet forced before this was a setting. */
+        const val DEFAULT_INDENT_LENGTH_EM = 1.0f
+        const val MAX_INDENT_LENGTH_EM = 4.0f
+
+        /** Word spacing: the browser default is 0; wide enough to split a line, narrow to tighten. */
+        const val MIN_WORD_SPACING_EM = -0.2f
+        const val MAX_WORD_SPACING_EM = 2.0f
 
         const val MIN_LINE_SPACING = 1.0f
         const val MAX_LINE_SPACING = 3.0f

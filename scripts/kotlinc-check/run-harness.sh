@@ -48,12 +48,14 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
         find "$REPO_ROOT/core/archive/src/main/kotlin/mihon/core/archive" \
              "$REPO_ROOT/app/src/main/java/eu/kanade/tachiyomi/ui/reader/viewer/novel" \
              -name 'EpubPaths.kt' -o -name 'EpubBook.kt' \
+             -o -name 'EpubFootnotes.kt' \
              -o -name 'NovelTypography.kt' -o -name 'NovelTypographyCss.kt' -o -name 'NovelProgress.kt' \
              -o -name 'NovelBuiltinFonts.kt' \
              -o -name 'NovelDocument.kt' -o -name 'NovelScrollBridge.kt' \
              -o -name 'NovelNavigation.kt' -o -name 'NovelReaderTheme.kt' \
              -o -name 'NovelContinuous.kt' -o -name 'NovelInline.kt' \
              -o -name 'NovelPageLayout.kt' \
+             -o -name 'NovelPlainText.kt' -o -name 'NovelStatusLine.kt' -o -name 'NovelAutoScroll.kt' \
         2>/dev/null | sort -u
     )
     # EpubDoctype carries the XXE defence that EpubXmlReader applies, and EpubArchiveUrls is the URL
@@ -87,6 +89,12 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
         OPF_SOURCES+=("$REPO_ROOT/core/archive/src/main/kotlin/mihon/core/archive/EpubTocParser.kt")
         OPF_SOURCES+=("$HARNESS_DIR/OpfPlatformParser.kt")
         KXML_CP=":$(find_jar net.sf.kxml kxml2)"
+    fi
+    # The highlights model is pure but carries the framework's `@JavascriptInterface` marker on
+    # its bridge; the harness gets the one-line stub rather than dragging Android in.
+    if [ "$NAME" = "PlainTextHarness" ]; then
+        SOURCES+=("$REPO_ROOT/scripts/kotlinc-check/stubs/android/webkit/JavascriptInterface.kt")
+        SOURCES+=("$REPO_ROOT/app/src/main/java/eu/kanade/tachiyomi/ui/reader/viewer/novel/NovelHighlights.kt")
     fi
     # Only TextSearchHit: it is a plain data class with no serialization plugin and no SChapter, which
     # is what lets an offline check assert on a hit at all.

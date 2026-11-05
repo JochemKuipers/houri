@@ -214,4 +214,47 @@ object NovelScrollBridge {
         if (trimmed.isEmpty() || trimmed == "null" || trimmed == "undefined") return 0.0
         return trimmed.toDoubleOrNull() ?: 0.0
     }
+
+    /**
+     * Decodes the JSON string an `evaluateJavascript` callback hands back for a script that
+     * returned one — the read-aloud text collector's case. Null, undefined and a malformed
+     * payload all read as "nothing there", which the caller treats as "do not speak".
+     *
+     * Hand-decoded rather than through kotlinx.serialization: this file is compiled by the
+     * offline harness, which has no serialization on its classpath (see `scripts/kotlinc-check`).
+     */
+    fun string(raw: String?): String? {
+        val trimmed = raw?.trim().orEmpty()
+        if (trimmed.length < 2 || trimmed[0] != '"' || trimmed[trimmed.length - 1] != '"') return null
+        val body = trimmed.substring(1, trimmed.length - 1)
+        return buildString(body.length) {
+            var i = 0
+            while (i < body.length) {
+                val c = body[i]
+                if (c != '\\' || i + 1 >= body.length) {
+                    append(c)
+                    i += 1
+                    continue
+                }
+                when (val next = body[i + 1]) {
+                    '"' -> append('"')
+                    '\\' -> append('\\')
+                    '/' -> append('/')
+                    'n' -> append('\n')
+                    'r' -> append('\r')
+                    't' -> append('\t')
+                    'b' -> append('\b')
+                    'f' -> append('\u000C')
+                    'u' -> {
+                        body.drop(i + 2).take(4).toIntOrNull(16)?.let {
+                            append(it.toChar())
+                            i += 4
+                        } ?: append('u')
+                    }
+                    else -> append(next)
+                }
+                i += 2
+            }
+        }
+    }
 }

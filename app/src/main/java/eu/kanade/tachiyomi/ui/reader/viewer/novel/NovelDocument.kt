@@ -102,11 +102,29 @@ object NovelDocument {
          * `DOMContentLoaded` listener. Blank emits nothing.
          */
         customJs: String = "",
+        /**
+         * Reader feature scripts installed beside the scroll bridge - the footnote click
+         * listener, the auto-scroll engine. Each is escaped and appended into the epilogue's
+         * script element, after the bridges (they may assume `window.KmkReader` exists) and
+         * before [customJs] (reader code wins every name it defines). Empty emits nothing.
+         */
+        extraScripts: List<String> = emptyList(),
+        /**
+         * Drops the publisher's own stylesheets from the document, Moon+ Reader's `disable_css`.
+         *
+         * Stripping happens **here**, on the document as handed to the engine, not in the inliner:
+         * the inline cache stays valid (the cached markup still carries the styles, so flipping the
+         * toggle cannot poison a book the reader reads both ways), and `NovelInline` has nothing new
+         * to know. `<style>` blocks and stylesheet `<link>`s go; inline `style=""` attributes stay -
+         * they are rare, usually local alignment a publisher earned, and stripping them would eat
+         * the indents on cover plates and image pages for no gain.
+         */
+        stripPublisherCss: Boolean = false,
         // KMK <--
     ): String {
-        val document = wrapBody(normalize(source), segment)
+        val document = wrapBody(normalize(source, stripPublisherCss), segment)
         val prologue = prologue(baseUrl) + styleTag(extraHead)
-        val epilogue = epilogue(typography, epoch, pageMode, customCss, customJs)
+        val epilogue = epilogue(typography, epoch, pageMode, customCss, customJs, extraScripts)
 
         val headOpen = HEAD_OPEN.find(document)
         if (headOpen != null) {
@@ -161,21 +179,24 @@ object NovelDocument {
     }
 
     /**
-     * Drops the XML prolog, reduces the doctype to `<!DOCTYPE html>`, and removes the `<base>` and
-     * `<meta http-equiv>` the publisher supplied.
+     * Drops the XML prolog, reduces the doctype to `<!DOCTYPE html>`, and removes the `<base>`,
+     * `<meta http-equiv>` and — when [stripPublisherCss] asks — the publisher's stylesheets.
      *
      * The prolog is a bogus comment that hides the doctype from the HTML parser's doctype sniffing,
      * and an XHTML doctype's SYSTEM identifier is a network fetch that cannot succeed inside a
      * document loaded from a string.
      *
-     * The two removals are for the same reason, which is that each one silently outranks something
+     * The first two removals are for the same reason, which is that each one silently outranks something
      * the reader depends on. A `<base>` is first-match-wins, so theirs would beat the one we emit —
      * and it is exactly wrong, being written for whatever the producer rendered the book with. A
      * `<meta http-equiv="refresh">` is honoured by the engine with no involvement from us at all, so
      * a book carrying one navigates the reader's document to a URL of the book's choosing: the text
      * they were reading is replaced, without a tap, by something we then decline to serve.
+     *
+     * The stylesheet strip runs on the publisher's markup only — before any of the reader's own
+     * `<style>`s exist, which land later in the head — so it can never eat a reader rule.
      */
-    private fun normalize(source: String): String {
+    private fun normalize(source: String, stripPublisherCss: Boolean = false): String {
         val withoutProlog = XML_PROLOG.replaceFirst(source, "")
         val withoutDoctype = DOCTYPE.replaceFirst(withoutProlog, "<!DOCTYPE html>")
         // A <base> already in the publisher's markup would silently win over ours, because the first one
@@ -184,8 +205,26 @@ object NovelDocument {
         val withoutBase = BASE_TAG.replace(withoutDoctype, "")
         // Global, not first: a second one is inert while the first survives, but if the first is
         // malformed enough for the engine to skip it, the next in document order takes effect.
-        return META_REFRESH.replace(withoutBase, "").trimStart()
+        val withoutRefresh = META_REFRESH.replace(withoutBase, "")
+        if (!stripPublisherCss) return withoutRefresh.trimStart()
+        val withoutLinks = PUBLISHER_STYLESHEET_LINK.replace(withoutRefresh, "")
+        return PUBLISHER_STYLE_BLOCK.replace(withoutLinks, "").trimStart()
     }
+
+    /**
+     * A stylesheet `<link>`: `rel=stylesheet` is the spelling every producer uses; `type=text/css`
+     * without a `rel` is the legacy spelling a few older generators still emit.
+     */
+    private val PUBLISHER_STYLESHEET_LINK = Regex(
+        """<link\b[^>]*?(?:\brel\s*=\s*["']?stylesheet["']?|\btype\s*=\s*["']?text/css["']?)[^>]*>""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** A `<style>` element and everything inside it, to its own closing tag. */
+    private val PUBLISHER_STYLE_BLOCK = Regex(
+        """<style\b[^>]*>[\s\S]*?</style\s*>""",
+        RegexOption.IGNORE_CASE,
+    )
 
     /** Goes at the very top of the head: everything here has to be seen before the publisher's own URLs are. */
     private fun prologue(baseUrl: String): String = buildString {
@@ -250,6 +289,7 @@ object NovelDocument {
         pageMode: NovelPageLayout.PageMode = NovelPageLayout.PageMode.CONTINUOUS,
         customCss: String = "",
         customJs: String = "",
+        extraScripts: List<String> = emptyList(),
     ): String = buildString {
         // The custom CSS's own presence decides the cascade: a non-blank sheet makes the
         // typography yield the palette colour on the element ladder, so a `body { color: … }` in
@@ -273,6 +313,12 @@ object NovelDocument {
         // `window` itself, and the value is the reader's own request number: no book counts here.
         append(""";window.KmkEpoch = $epoch;""")
         appendLine("</script>")
+        // Reader feature scripts ride their own element each, after the bridge: a syntax error in
+        // one must not take the bridge down, and each is a self-installing IIFE that guards its
+        // own double-install.
+        for (script in extraScripts) {
+            if (script.isNotBlank()) appendLine(customScriptTag(script))
+        }
         if (customJs.isNotBlank()) appendLine(customScriptTag(customJs))
     }
 

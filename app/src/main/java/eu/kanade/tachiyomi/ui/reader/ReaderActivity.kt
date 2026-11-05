@@ -73,8 +73,11 @@ import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.reader.ChapterListDialog
 import eu.kanade.presentation.reader.DisplayRefreshHost
 import eu.kanade.presentation.reader.MtlTranslationOverlay
+import eu.kanade.presentation.reader.NovelFootnoteDialog
+import eu.kanade.presentation.reader.NovelHighlightSheet
 import eu.kanade.presentation.reader.NovelImageViewerDialog
 import eu.kanade.presentation.reader.NovelSearchDialog
+import eu.kanade.presentation.reader.NovelStatusLineOverlay
 import eu.kanade.presentation.reader.NovelTocDialog
 import eu.kanade.presentation.reader.OrientationSelectDialog
 import eu.kanade.presentation.reader.ReaderContentOverlay
@@ -112,8 +115,11 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.isTextChapter
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelHighlights
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelSearchViewModel
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTocScreenModel
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypography
+import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelTypographyCss
 import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelWebViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerConfig
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.PagerViewer
@@ -126,6 +132,7 @@ import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.system.toShareIntent
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.util.view.setComposeContent
+import exh.log.xLogE
 import exh.util.defaultReaderType
 import exh.util.mangaType
 import kotlinx.collections.immutable.persistentSetOf
@@ -144,6 +151,7 @@ import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import logcat.LogPriority
 import mihon.app.di.AppGraph
+import mihon.app.di.globalAppGraph
 import mihon.core.metro.metroGraph
 import tachiyomi.core.common.Constants
 import tachiyomi.core.common.i18n.pluralStringResource
@@ -628,6 +636,50 @@ class ReaderActivity : BaseActivity() {
                         )
                     }
                 }
+
+                is ReaderViewModel.Dialog.NovelFootnote -> {
+                    // The note's markup and base arrive from the footnote bridge; the styling and
+                    // the resource lease are read off the viewer at composition, so the popup wears
+                    // exactly what the page under it wears. A viewer that is momentarily absent
+                    // (rebuild mid-read) renders the note with the library defaults rather than
+                    // dropping the tap — the note is the thing the reader asked for.
+                    (state.dialog as? ReaderViewModel.Dialog.NovelFootnote)?.let { dialog ->
+                        NovelFootnoteDialog(
+                            noteHtml = dialog.html,
+                            baseUrl = dialog.baseUrl,
+                            typography = novelViewer?.typography ?: NovelTypography.DEFAULT,
+                            typographyCss = novelViewer?.footnoteTypographyCss()
+                                ?: NovelTypographyCss.stylesheet(NovelTypography.DEFAULT),
+                            resources = novelViewer?.footnoteResources,
+                            onDismissRequest = onDismissRequest,
+                        )
+                    }
+                }
+
+                is ReaderViewModel.Dialog.NovelHighlightMenu -> {
+                    // The actions mark the live document and the per-chapter store through the
+                    // viewer, which owns both; the sheet only decides. Copy and look-up are the
+                    // activity's own: a clipboard write and the dictionary/web-search intents.
+                    (state.dialog as? ReaderViewModel.Dialog.NovelHighlightMenu)?.let { dialog ->
+                        NovelHighlightSheet(
+                            selection = dialog.selection,
+                            onHighlight = { color ->
+                                novelViewer?.addHighlight(dialog.selection, color, dialog.page)
+                            },
+                            onRemove = {
+                                dialog.selection.existingId?.let { id ->
+                                    novelViewer?.removeHighlight(id, dialog.page)
+                                }
+                            },
+                            onCopy = {
+                                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("text", dialog.selection.quote))
+                            },
+                            onLookup = { openDictionaryLookup(dialog.selection.quote) },
+                            onDismissRequest = onDismissRequest,
+                        )
+                    }
+                }
                 // KMK <--
 
                 ReaderViewModel.Dialog.AutoScrollHelp -> AlertDialog(
@@ -786,6 +838,49 @@ class ReaderActivity : BaseActivity() {
         val handled = viewModel.state.value.viewer?.handleGenericMotionEvent(event) ?: false
         return handled || super.dispatchGenericMotionEvent(event)
     }
+
+    // KMK -->
+    /**
+     * Opens the footnote popup for a note the reader tapped. The viewer extracted the note and
+     * resolved its base; this only routes the result through the ViewModel's dialog state, the
+     * same surface every other reader dialog travels through.
+     */
+    fun showNovelFootnoteDialog(html: String, baseUrl: String) {
+        viewModel.openNovelFootnoteDialog(html, baseUrl)
+    }
+
+    /**
+     * The selection action sheet, from the highlight bridge's settled-selection report. The page
+     * rides along: the store is keyed per chapter and the sheet's actions mark the live document
+     * through the viewer, both of which need it.
+     */
+    fun showNovelHighlightDialog(page: ReaderPage, selection: NovelHighlights.Selection) {
+        viewModel.openNovelHighlightDialog(page, selection)
+    }
+
+    /**
+     * "Look up" for a selection: the ColorDictionary broadcast first (Moon+ Reader's dictionary
+     * hook — ColorDict, GoldenDict and anything else listening), falling back to the system web
+     * search, which every device answers. Neither needs a permission; both leave the reader open.
+     */
+    private fun openDictionaryLookup(query: String) {
+        val dictIntent = Intent("colordict.intent.action.SEARCH")
+            .putExtra("EXTRA_QUERY", query)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val handled = runCatching {
+            startActivity(dictIntent)
+            true
+        }.getOrDefault(false)
+        if (!handled) {
+            runCatching {
+                startActivity(
+                    Intent(Intent.ACTION_WEB_SEARCH).putExtra("query", query)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }.onFailure { xLogE("No dictionary or search handler for look-up", it) }
+        }
+    }
+    // KMK <--
 
     /**
      * Renders the book's contents sheet, and reports whether it did.
@@ -1109,6 +1204,34 @@ class ReaderActivity : BaseActivity() {
             onClickShiftPage = ::shiftDoublePages,
             // SY <--
         )
+
+        // KMK --> The status line, Moon+ Reader's margin facts as an overlay beside the book.
+        // Only for a book: a manga's page is an image, and a line of text over it is not a status,
+        // it is a caption. Lives here — inside the same composition as the app bars — so it shows
+        // and hides with the reader's own menu state, and so it has the same scope the viewer
+        // publishes its fraction on.
+        if (isTextChapter) {
+            val novelPrefs = remember { globalAppGraph.novelTypographyPreferences }
+            val fields by novelPrefs.statusFieldsPref.collectAsState()
+            val position by novelPrefs.statusPositionPref.collectAsState()
+            val textSizeSp by novelPrefs.statusTextSizeSp.collectAsState()
+            val colorHex by novelPrefs.statusColor.collectAsState()
+            val showWhenHidden by novelPrefs.statusShowWhenHidden.collectAsState()
+            val fieldSet = remember(fields) { novelPrefs.statusFields }
+            val statusPosition = remember(position) { novelPrefs.statusPosition }
+            NovelStatusLineOverlay(
+                fields = fieldSet,
+                position = statusPosition,
+                textSizeSp = textSizeSp,
+                colorHex = colorHex.takeIf { it.isNotBlank() },
+                backgroundHex = bookViewer?.typography?.effectiveBackgroundColor,
+                menuVisible = state.menuVisible,
+                showWhenHidden = showWhenHidden,
+                progressPct = bookViewer?.scrollFraction?.let { (it * 100).toInt().coerceIn(0, 100) },
+                chapterName = state.currentChapter?.chapter?.name,
+            )
+        }
+        // KMK <--
     }
 
     // KMK -->
