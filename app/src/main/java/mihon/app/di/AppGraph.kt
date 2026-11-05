@@ -102,20 +102,16 @@ import exh.pref.DelegateSourcePreferences
 import exh.search.SearchEngine
 import exh.source.ExhPreferences
 import exh.yakuyomi.BreadcrumbNotes
-import exh.yakuyomi.GeminiNanoTranslator
 import exh.yakuyomi.LocalLlmDownloadManager
 import exh.yakuyomi.LocalLlmManager
-import exh.yakuyomi.MangaInfoTranslationStore
 import exh.yakuyomi.MangaTranslatorService
 import exh.yakuyomi.ModelManager
 import exh.yakuyomi.TranslateMangaStore
-import exh.yakuyomi.TranslationCache
-import exh.yakuyomi.TranslationManager
 import exh.yakuyomi.TranslationPreferences
-import exh.yakuyomi.TranslationStatus
 import exh.yakuyomi.YakuyomiEngine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
+import mihon.app.mtl.MtlBindings
 import mihon.core.concurrency.AppDispatchers
 import mihon.domain.chapter.interactor.FilterChaptersForDownload
 import mihon.domain.extension.interactor.AddExtensionStore
@@ -127,6 +123,9 @@ import mihon.domain.extension.repository.ExtensionStoreRepository
 import mihon.domain.migration.usecases.MigrateMangaUseCase
 import mihon.domain.source.interactor.UpdateMangaFromRemote
 import mihon.domain.upcoming.interactor.GetUpcomingManga
+import mtl.MtlBootstrap
+import mtl.MtlController
+import mtl.store.DiskPageStore
 import nl.adaptivity.xmlutil.serialization.XML
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.data.Database
@@ -245,7 +244,7 @@ import tachiyomi.source.local.io.LocalSourceFileSystem
 
 @DependencyGraph(
     scope = AppScope::class,
-    bindingContainers = [AppBindings::class],
+    bindingContainers = [AppBindings::class, MtlBindings::class, mtl.provider.MtlComponentsContainer::class],
 )
 interface AppGraph : ViewModelGraph {
     fun inject(app: App)
@@ -511,19 +510,22 @@ interface AppGraph : ViewModelGraph {
     val insertFavoriteEntryAlternative: InsertFavoriteEntryAlternative
     val updateCategory: UpdateCategory
     val upsertHistory: UpsertHistory
-    val translationManager: TranslationManager
     val translationPreferences: TranslationPreferences
-    val translationCache: TranslationCache
     val yakuyomiEngine: YakuyomiEngine
     val breadcrumbNotes: BreadcrumbNotes
     val translateMangaStore: TranslateMangaStore
-    val translationStatus: TranslationStatus
     val modelManager: ModelManager
-    val geminiNanoTranslator: GeminiNanoTranslator
     val localLlmManager: LocalLlmManager
     val localLlmDownloadManager: LocalLlmDownloadManager
-    val mangaInfoTranslationStore: MangaInfoTranslationStore
     val mangaTranslatorService: MangaTranslatorService
+
+    // KMK --> new MTL spine (mtl.*) alongside the old stack until cutover
+    val mtlBootstrap: MtlBootstrap
+    val mtlController: MtlController
+    val mtlStatus: mtl.status.StatusHub
+    val mtlPageStore: DiskPageStore
+    val mtlMangaInfoStore: mtl.MangaInfoStore
+    // KMK <--
 
     /** Provides the manga title/description/tags grounding for the translation prompt. */
     @Provides

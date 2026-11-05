@@ -1773,7 +1773,7 @@ private fun onChapterItemClick(
 
 @Composable
 fun TranslateMangaToggle(manga: tachiyomi.domain.manga.model.Manga) {
-    val manager = androidx.compose.runtime.remember { mihon.app.di.globalAppGraph.translationManager }
+    val manager = androidx.compose.runtime.remember { mihon.app.di.globalAppGraph.mtlController }
     val store = androidx.compose.runtime.remember(manga.id) { mihon.app.di.globalAppGraph.translateMangaStore }
     val prefs = androidx.compose.runtime.remember { mihon.app.di.globalAppGraph.translationPreferences }
     val preferenceStore = androidx.compose.runtime.remember { mihon.app.di.globalAppGraph.preferenceStore }

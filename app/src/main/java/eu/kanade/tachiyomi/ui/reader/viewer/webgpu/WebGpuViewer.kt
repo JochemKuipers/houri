@@ -135,7 +135,7 @@ open class WebGpuViewer(
     val readerPreferences by lazy { globalAppGraph.readerPreferences }
     internal val translationManager by lazy {
         try {
-            globalAppGraph.translationManager
+            globalAppGraph.mtlController
         } catch (_: Exception) {
             null
         }

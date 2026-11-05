@@ -144,7 +144,8 @@ Before `git push`, confirm the working tree contains only the intended changes (
 | `source-api/` / `source-local/` | Extension `Source` API (KMP `commonMain`/`androidMain`) + local manga source (comics **and** books) |
 | `presentation-core/` | Shared Compose components |
 | `presentation-widget/` | Home-screen Glance widget |
-| `yakuyomi-engine/` (`:yakuyomi`) | Komikku-side MTL wrapper (`exh.yakuyomi.*`: manager, translators, models, cache) |
+| `mtl-spine/` (`:mtl-spine`) | Pure MTL orchestration spine (`mtl.*`) shared verbatim by both MTL flavors |
+| `yakuyomi-engine/` (`:yakuyomi`) | Komikku-side MTL wrapper (`exh.yakuyomi.*`: native pipeline sessions, Ichigo service, local LLM; `flavor/` = mtl-only providers) |
 | `yakuyomi-stub/` (`:yakuyomi-stub`) | No-op MTL stub compiled by the `nomtl` flavor |
 | `llamatik-native/` (`:llamatik-native`) | Vendored llamatik/llama.cpp native runtime + Kotlin wrapper (replaces the `com.llamatik:library` AAR, which is CPU-only) |
 | `external/yakuyomi-engine` | Git **submodule** (houri-engine): native pipeline `li.joye.yakuyomi.engine.*` — commit it BEFORE the main repo |

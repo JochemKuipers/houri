@@ -105,7 +105,16 @@ class TranslationPreferences(
     fun promptFewShotSource() = preferenceStore.getString("pref_yakuyomi_prompt_fewshot_source", "")
     fun promptFewShotTarget() = preferenceStore.getString("pref_yakuyomi_prompt_fewshot_target", "")
 
-    fun promptFingerprint(): String = "nomlt"
+    fun promptPolicy() = TranslationPromptPolicy(
+        customInstructions = customTranslationInstructions().get(),
+        formality = translationFormality().get(),
+        sfxPolicy = sfxPolicy().get(),
+        glossary = glossaryMap(),
+        fewShotSource = promptFewShotSource().get(),
+        fewShotTarget = promptFewShotTarget().get(),
+    )
+
+    fun promptFingerprint(): String = promptPolicy().fingerprint()
 
     fun resetPromptPolicy() {
         customTranslationInstructions().set("")

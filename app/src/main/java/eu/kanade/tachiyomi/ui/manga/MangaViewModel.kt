@@ -88,9 +88,6 @@ import exh.source.isMergedSourceId
 import exh.source.mangaDexSourceIds
 import exh.util.nullIfEmpty
 import exh.util.trimOrNull
-import exh.yakuyomi.MangaInfoTranslationStore
-import exh.yakuyomi.TranslationManager
-import exh.yakuyomi.TranslationStatus
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.ImmutableSet
 import kotlinx.collections.immutable.toImmutableList
@@ -118,6 +115,8 @@ import mihon.core.viewmodel.StateViewModel
 import mihon.domain.chapter.interactor.FilterChaptersForDownload
 import mihon.domain.manga.model.toDomainManga
 import mihon.domain.source.interactor.UpdateMangaFromRemote
+import mtl.MtlController
+import mtl.status.StatusHub
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.CheckboxState
 import tachiyomi.core.common.preference.PreferenceStore
@@ -258,10 +257,10 @@ class MangaViewModel(
     private val updateMangaFromRemote: UpdateMangaFromRemote,
     val snackbarHostState: SnackbarHostState = SnackbarHostState(),
     // KMK -->
-    private val translationStatus: TranslationStatus,
+    private val translationStatus: StatusHub,
     private val preferenceStore: PreferenceStore,
-    private val translationManager: TranslationManager,
-    private val mangaInfoTranslationStore: MangaInfoTranslationStore,
+    private val translationManager: MtlController,
+    private val mtlMangaInfoStore: mtl.MangaInfoStore,
     private val deleteLibraryUpdateErrors: DeleteLibraryUpdateErrors,
     private val insertLibraryUpdateErrors: InsertLibraryUpdateErrors,
     private val insertLibraryUpdateErrorMessages: InsertLibraryUpdateErrorMessages,
@@ -388,7 +387,8 @@ class MangaViewModel(
         scope = viewModelScope,
         preferenceStore = preferenceStore,
         translationManager = translationManager,
-        infoStore = mangaInfoTranslationStore,
+        infoStore = mtlMangaInfoStore,
+
         isNoMtl = BuildConfig.IS_NOMTL,
     )
 
@@ -1158,7 +1158,7 @@ class MangaViewModel(
                 else -> Download.State.NOT_DOWNLOADED
             }
 
-            val translationManager = globalAppGraph.translationManager
+            val translationManager = globalAppGraph.mtlController
             // Deliberately not isEnabledForManga: this drives the chapter-list progress indicator, which
             // keeps showing translation state while the UI is gated (incognito/censor only blocks
             // starting work, not displaying what already ran). The gate is not part of this question.
@@ -1172,7 +1172,7 @@ class MangaViewModel(
             val isTranslating = transStatus?.isTranslating ?: false
             // A partially-translated chapter still tracks progress; only a chapter with errors AND
             // zero translated pages (e.g. a failed background run) is shown as errored.
-            val isTranslationError = transStatus?.let { it.errorCount > 0 && it.translatedCount == 0 } ?: false
+            val isTranslationError = transStatus?.let { it.failedCount > 0 && it.translatedCount == 0 } ?: false
 
             ChapterList.Item(
                 chapter = chapter,

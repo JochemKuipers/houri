@@ -1,4 +1,4 @@
-package exh.yakuyomi
+package mtl.provider
 
 import io.kotest.matchers.shouldBe
 import org.junit.jupiter.api.Test

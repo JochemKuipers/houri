@@ -103,11 +103,27 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     )
     SOURCES+=("$MAIN")
 
+    # The MTL spine harness compiles the mtl.* spine and needs kotlinx-coroutines on both
+    # the compile and runtime classpaths — the spine's scheduler, lanes and flows are
+    # coroutine-native, and runBlocking drives the suspend scenarios.
+    # mtl/provider/** is excluded: those files need okhttp + serialization-json and are
+    # covered by check.sh, not by this run-only harness.
+    # BitmapPageImage (mtl/core) touches android.graphics.Bitmap, so the graphics stub rides
+    # along — compiled but never instantiated; the harness scenarios use their own fake images.
+    MTL_CP=""
+    if [ "$NAME" = "MtlSpineHarness" ]; then
+        while IFS= read -r f; do SOURCES+=("$f"); done < <(
+            find "$REPO_ROOT/mtl-spine/src/main/kotlin/mtl" -name '*.kt' -not -path '*/provider/*' 2>/dev/null | sort -u
+            find "$REPO_ROOT/scripts/kotlinc-check/stubs/android/graphics" -name '*.kt' 2>/dev/null
+        )
+        MTL_CP=":$COROUTINES"
+    fi
+
     OUT=$(mktemp -d)
     echo "== $NAME =="
     # A hard compile error must fail the run, not fall through to "class not found".
     if ! java -cp "$COMPILER_CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
-            -no-stdlib -nowarn -cp "$STDLIB$KXML_CP" -d "$OUT/classes" "${SOURCES[@]}" "${OPF_SOURCES[@]}" "$MAIN" 2>&1 \
+            -no-stdlib -nowarn -cp "$STDLIB$KXML_CP$MTL_CP" -d "$OUT/classes" "${SOURCES[@]}" "${OPF_SOURCES[@]}" "$MAIN" 2>&1 \
             | grep -E 'error:' | grep -vE 'unresolved reference'; then
         :
     else
@@ -118,7 +134,7 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     fi
 
     # Kotlin file-facade class for a top-level main() is the file name plus "Kt".
-    if java -cp "$OUT/classes:$STDLIB$KXML_CP" "${NAME}Kt" 2> "$OUT/run.err"; then
+    if java -cp "$OUT/classes:$STDLIB$KXML_CP$MTL_CP" "${NAME}Kt" 2> "$OUT/run.err"; then
         RAN=$((RAN + 1))
     else
         # A runtime crash must name the crash: everything above succeeds and passes silently

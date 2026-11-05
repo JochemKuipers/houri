@@ -1,7 +1,9 @@
 # yakuyomi-engine/ Module
 
-On-device + cloud manga translation ("AI Translation" / MTL). Package root: `exh.yakuyomi.*`.
-Komikku-side orchestration; the native vision pipeline (`li.joye.yakuyomi.engine.*`:
+On-device + cloud manga translation ("AI Translation" / MTL). Package root: `mtl.*` — the
+spine lives in the **`:mtl-spine` module** (`mtl-spine/`), shared verbatim by both MTL flavors
+with no source filters; this module keeps only `exh.yakuyomi.*` (native engine integration,
+Machina service, MLKit/llama.cpp providers in `flavor/`); the native vision pipeline (`li.joye.yakuyomi.engine.*`:
 Detector/Ocr/Inpainter/Grouping/Renderer/Pipeline) lives in `external/yakuyomi-engine`,
 a git **submodule** (PineappleTwilight/houri-engine, branch `main`) — commit the submodule
 pointer BEFORE the main repo. ABIs: arm64 + armeabi-v7a (x86 degrades to "not ready").
@@ -13,47 +15,63 @@ translate (LLM) → inpaint (AOT-GAN NCNN, overlaps translate) → typeset (Canv
 Removal covers **all** detected regions; translation only the OCR-readable ones.
 Never overwrite a good translation with a worse one (§11 rule).
 
-## Architecture
+## Architecture (the `mtl.*` spine)
+
+All translation orchestration lives in `mtl.*` — a ground-up rewrite of the old
+`exh.yakuyomi.TranslationManager` stack. The old stack is gone; do not resurrect it or fork it.
 
 Three decisions are made exactly once. Do not re-derive them at a call site.
 
 | Decision | Owner |
 |---|---|
-| Which backend translates (image service → Gemini Nano → local GGUF → cloud) | `TranslationProviderResolver` |
-| Prompt / parse / align / offline-fallback protocol | `TextTranslationProtocol` + `TranslationRequest` |
-| Which pages are translatable, and at what sample size | `PageImageValidator` |
+| Which backend translates (image service → Gemini Nano → local GGUF → cloud) | `mtl.select.ProviderSelector` (single decision site; MANUAL picks keep the user's pick) |
+| Prompt / parse / align / offline-fallback protocol | `mtl.provider.Prompt.kt` — every text-shaped provider builds through `buildTranslationPrompt` |
+| Which pages are translatable, and at what sample size | `mtl.provider.PageCodec`/`PagePipeline` (`PageImageValidator` still owns the limits) |
+| Page lifecycle, caching and status | `mtl.sched.PagePipeline` / `mtl.store.PageStore` (disk: `DiskPageStore`) / `mtl.status.StatusHub` |
 
 ```
-TranslationManager          facade: gates, status, errors. No provider, cache or queue logic.
-├── TranslationProviderResolver   one answer for "who is translating", incl. cache identity
-├── TextTranslationProtocol       one implementation of the line protocol
-│   └── TranslationRequest        per-request inputs (langs, breadcrumb, glossary, policy)
-├── PageQueue                     per-chapter page-ordered work, pending cap, lifecycle
-├── PageResultCache               saved-page store + content-addressed cache, in one place
-├── PageImageValidator            size/dimension limits, sample size
-├── PageImageEncoder              bitmap → JPEG (vision) / WEBP (output/cache)
-└── YakuyomiEngine                native session lifetime + dispatch only
-    ├── EngineConfigFactory       prefs → EngineConfig; typeface, text colour, orientation.
-    │                             Owns the list of knobs that require a session rebuild.
-    ├── NativeComponents          the three native sessions; built all-or-nothing
-    └── LongPageStitcher          slice → per-slice pipeline → stitch, stats, regions
+MtlBootstrap           assembles everything once; the app's only entry is `controller`
+├── ConfigSource            (app: preferences → MtlConfig, incl. promptPolicy fingerprint)
+├── PolicySource            (app: preferences → SelectionPolicy; the old "provider" pref maps
+│                            to a MANUAL pick + ichigo→nano→local→cloud fallbacks)
+├── PagePipeline            (mtl.sched) the per-page chain: prepare → detect → OCR → (group)
+│                            → translate → inpaint → render → store; stage providers are SPI
+├── MtlScheduler            (mtl.sched) chapter-ordered work queue, per-provider lanes
+├── ProviderSelector        (mtl.select) registry + selection
+└── StatusHub               (mtl.status) per-page progress for UI/settings
 ```
 
-Backends are thin: each supplies only a `generate` (or parsed-lines) function and inherits the
-protocol. Adding a provider means one `TranslationProviderKind` value plus one branch in
-`TranslationProviderResolver` — the `when` over that enum is exhaustive, so a missed site is a
-compile error rather than a stale cache key.
+Flavor seam: app wiring passes `mtl.provider.MtlComponents` (providers + stage lists + resolver).
+The `mtl` flavor binds `mtl.provider.RealMtlComponents` (real providers + native stages); the
+no-MTL flavor (`yakuyomi-stub`) binds an empty `NoMtlComponents` — gates still run, pages fail
+cleanly, never half a pipeline. Both flavors ship a `mtl.provider.MtlComponentsContainer`
+`@BindingContainer`; the app graph binds exactly one.
+
+Layout note: the spine module `:mtl-spine` (`mtl-spine/src/main/kotlin/mtl/`) is compiled into
+both flavors by dependency, not by source filtering — do not move `mtl.*` files into this module.
+The mtl flavor-only files that need ML Kit (`GeminiNanoProvider`), llama.cpp
+(`LocalGgufProvider`), the li.joye engine (`NativeVisionStages`) or the binding container
+(`RealMtlComponents`, `MtlComponentsContainer`) live in `src/main/kotlin/flavor/` with
+`package mtl.provider`. `yakuyomi-stub` depends on `:mtl-spine` and supplies its own empty set.
+The flavor swap point is unchanged: app → `:yakuyomi` | `:yakuyomi-stub`, each `api()` the spine.
+
+Backends are thin providers implementing `mtl.core.MtlProvider`. Adding one means: a class in
+`mtl/provider`, registration in `RealMtlComponents.providers()`, and (if it needs an
+AppId-scoped display in settings) the `SETTINGS_NANO_ID`-style id probe in the settings screen.
 
 ## Extending
 
 **A new text provider**
-1. Implement the stage as a `Translator` (see `LocalLlmTranslator` — ~30 lines) that hands its raw
-   output to `TextTranslationProtocol.run` / `fromParsedLines`. Do **not** re-implement prompt
-   building, `isEnglishFix`, parsing or line alignment.
-2. Add a `TranslationProviderKind` value and one branch in `TranslationProviderResolver.resolve()`.
-3. Switch on that enum where the stage is constructed. The `when` is exhaustive, so the compiler
-   points at every site that needs the new case.
-4. If the provider needs a cache identity, it comes from the resolver — never re-derive it.
+1. Implement `mtl.core.MtlProvider` (see `mtl/provider/LocalGgufProvider.kt` — thin wrapper over
+   the runtime). Hand raw output to `mtl/provider/Prompt.kt` for parse/alignment — do **not**
+   re-implement prompt building or line parsing.
+2. Register it in `RealMtlComponents.providers()` in your preferred order (registration order is
+   the selector's tie-break).
+3. The readiness flow drives the settings screens' "Available / Not available" copy; the
+   `MtlController.providerReadiness` / `refreshProviderReadiness` accessors are the settings UI's
+   probe point — no flavor-specific code in app modules.
+4. Cache identity comes from the pipeline (`MtlConfig.promptPolicy.fingerprint` + provider
+   `modelId()`) — never re-derive it at the call site.
 
 **A new engine tuning knob**
 1. Map it in `EngineConfigFactory.defaultConfig()`.
@@ -105,30 +123,30 @@ are each already single-concern; do not split them for line count alone.
 
 | Class | Role |
 |---|---|
-| `TranslationManager` | Facade: gates, per-manga toggles, status, user-facing errors |
-| `TranslationProviderResolver` | Single provider decision + the cache identity that goes with it |
-| `TextTranslationProtocol` / `TranslationRequest` | The line protocol and its per-request inputs |
-| `PageQueue` | Per-chapter page-ordered work, pending cap, cancel/pause/resume |
-| `PageResultCache` | Both page stores; exposes the three persistence policies by name |
+| `mtl.MtlController` | App-facing facade: enabled/gated/per-manga checks, provider readiness probes, manga-info translation |
+| `mtl.MtlBootstrap` | Assembly: registry/selector/pipeline/scheduler/status from the app's seams |
+| `mtl.sched.PagePipeline` / `MtlScheduler` | Per-page chain (prepare → detect → OCR → group → translate → inpaint → render → store) and the chapter work queue |
+| `mtl.select.ProviderSelector` / `ProviderRegistry` | The one provider decision, with MANUAL-pick semantics and registration-order tie-break |
+| `mtl.store.PageStore` / `DiskPageStore` | Content-addressed cache + saved-page layer (persistence policies: NEVER / WHILE_READING / AUTO) |
+| `mtl.status.StatusHub` | Per-page states for UI and settings |
+| `mtl.core.MtlProvider` / `ProviderSession` | The provider SPI — implement this for a new backend |
+| `mtl.provider.RealMtlComponents` | Binds the real providers + native stages for the `mtl` flavor |
+| `mtl.provider.{CloudLlm,GeminiNano,LocalGguf,Ichigo}Provider` | Cloud LLM, on-device ML Kit GenAI, llama.cpp GGUF, Ichigo image service |
 | `PageImageValidator` | Page size/dimension limits and the decode sample size |
 | `PageImageEncoder` | bitmap → JPEG for vision, WEBP for output and cache |
 | `YakuyomiEngine` | Native session lifetime and dispatch; nothing else |
 | `EngineConfigFactory` | prefs → config, typeface, text colour, orientation, rebuild triggers |
 | `LongPageStitcher` | Tall-page slicing, stitching, stats summing, region offsetting |
 | `NativeComponents` | The detector/OCR/inpainter sessions as one unit |
-| `YakuyomiTranslator` | Cloud LLM (openrouter/gemini/opencode_zen/nvidia_nim/custom_openai) |
-| `GeminiNanoTranslator` | On-device ML Kit GenAI (`genai-prompt:1.0.0-beta4`); priority LLM when AVAILABLE |
-| `LocalLlmManager` / `LocalLlmTranslator` / `LlamaCppLlmBackend` | Local GGUF via llama.cpp; per-model sampling overrides |
+| `LocalLlmManager` / `LlamaCppLlmBackend` | Local GGUF via llama.cpp; per-model sampling overrides |
 | `MangaTranslatorService` / `MangaTranslatorAuth` / `MangaTranslatorFingerprint` | Ichigo image translation; facade over session + device identity |
 | `LocalLlmAccelerator` | Probes whether `gpuLayers` can actually offload (GPU backend built in? Vulkan compute?) |
 | `LocalLlmDownloadManager` | Resumable GGUF+mmproj downloads (Range resume, throttled emits) |
 | `ModelManager` | Downloads detector/OCR/inpainter models |
-| `TranslationCache` / `TranslatedPageStore` | Low-level stores; go through `PageResultCache` |
-| `BreadcrumbNotes` / `MangaInfoTranslation(Store)` | Cross-page consistency notes; per-manga toggle store |
+| `BreadcrumbNotes` | Cross-page consistency notes |
 | `TranslationPreferences` | ~54 prefs (engine tuning, per-provider keys); stub duplicate in `yakuyomi-stub/` |
-| `TranslationPrompt.kt` | Prompt text, sanitisation, line alignment, JSON parsing |
-| `TranslationStatus` / `TranslationErrorMapper` / `TranslationMetrics` | Status, error mapping, metrics |
-| `TranslationException` | Provider failed and offline fallback is off (page → FAILED, retryable) |
+| `mtl/provider/Prompt.kt` / `mtl.core.PromptPolicy` | Prompt text, sanitisation, line alignment, JSON parsing, policy fingerprinting |
+| `TranslationException` | Thrown by the Ichigo service for distinguishable failure classes |
 
 ## Gotchas
 

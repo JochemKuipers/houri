@@ -76,11 +76,14 @@ COMPILER_CP="$COMPILER:$STDLIB:$REFLECT:$COROUTINES:$ANNOTATIONS"
 [ $# -gt 0 ] || die "no input files given; pass at least one .kt file or directory"
 
 # Real jars that are cached and worth linking: kotlinx-serialization for @Serializable on the
-# extension API models, metro-common for @Inject/@SingleIn on DI-annotated classes.
+# extension API models, metro-common for @Inject/@SingleIn on DI-annotated classes, okhttp/okio
+# for the mtl.* providers' HTTP layer.
 EXTRA_CP=""
 for spec in "org.jetbrains.kotlinx/kotlinx-serialization-core-jvm:kotlinx-serialization-core" \
             "org.jetbrains.kotlinx/kotlinx-serialization-json-jvm:kotlinx-serialization-json" \
-            "dev.zacsweers.metro/metro-common:metro-common"; do
+            "dev.zacsweers.metro/metro-common:metro-common" \
+            "com.squareup.okhttp3/okhttp-jvm:okht" \
+            "com.squareup.okio/okio-jvm:okio-jvm"; do
     dir="${spec%%:*}"; name="${spec##*:}"
     jar=$(find "$CACHE/$dir" -name "*.jar" 2>/dev/null | grep -v -- '-sources' | sort -V | tail -1)
     [ -n "$jar" ] && EXTRA_CP="$EXTRA_CP:$jar"
@@ -94,9 +97,13 @@ STUBS=$(find "$STUB_DIR" -name '*.kt' 2>/dev/null)
 
 # -nowarn keeps the output readable; grep then drops the residual
 # unresolved-reference cascade that comes from a missing project classpath.
+# kotlinx-coroutines is on the compile classpath too: Flow/Semaphore/withTimeout are
+# spine-level dependencies (mtl/*), and without it every suspend-shaped call in a checked
+# file cascades into fake "suspension functions can only be called within coroutine body"
+# errors that bury the real ones.
 java -cp "$COMPILER_CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
     -no-stdlib -nowarn \
-    -cp "$STDLIB$EXTRA_CP" \
+    -cp "$STDLIB:$COROUTINES$EXTRA_CP" \
     -d "$OUT/classes" \
     $STUBS \
     "$@" 2>&1 \
@@ -115,10 +122,10 @@ fi
 # the absent project classpath, but a handful can be real (a renamed symbol in
 # a sibling file). Counting them keeps that visible without blocking on it.
 ALL=$(java -cp "$COMPILER_CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
-        -no-stdlib -nowarn -cp "$STDLIB$EXTRA_CP" -d "$OUT/classes" $STUBS "$@" 2>&1 \
+        -no-stdlib -nowarn -cp "$STDLIB$COROUTINES$EXTRA_CP" -d "$OUT/classes" $STUBS "$@" 2>&1 \
       | grep -cE 'error:')
 UNRESOLVED=$(java -cp "$COMPILER_CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
-        -no-stdlib -nowarn -cp "$STDLIB$EXTRA_CP" -d "$OUT/classes" $STUBS "$@" 2>&1 \
+        -no-stdlib -nowarn -cp "$STDLIB$COROUTINES$EXTRA_CP" -d "$OUT/classes" $STUBS "$@" 2>&1 \
       | grep -cE 'unresolved reference')
 
 echo "OK — no hard errors (total diagnostics: $ALL, mostly unresolved refs from the absent project classpath: $UNRESOLVED)"

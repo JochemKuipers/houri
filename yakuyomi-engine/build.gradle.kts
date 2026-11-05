@@ -39,6 +39,7 @@ kotlin {
 
 dependencies {
     api(projects.core.common)
+    api(projects.mtlSpine)
     api(libs.okhttp.core)
     api(kotlinx.coroutines.core)
     api(kotlinx.serialization.json)

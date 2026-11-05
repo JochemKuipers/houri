@@ -199,8 +199,8 @@ class MangaTranslatorService(
         translationModel: String? = null,
     ): List<IchigoTranslation>? {
         // KMK --> #47: the silent `return null`s here used to collapse every local rejection into
-        // one misleading "MangaTranslator returned empty result" error later. Throw distinguishable
-        // causes instead — TranslationManager routes them through TranslationErrorMapper.
+        // one misleading error later. Throw distinguishable causes instead — the spine maps each
+        // to a typed MtlException subtype; the UI renders from the type, not a message regexp.
         if (imageBytes.isEmpty() || imageBytes.size > 8 * 1024 * 1024) {
             throw TranslationException("MangaTranslator image too large (over the 8 MB limit)")
         }
@@ -362,7 +362,7 @@ class MangaTranslatorService(
         translationModel: String? = null,
     ): ByteArray? {
         // KMK --> #47: no silent nulls left — each failure names its cause and the manager's
-        // TranslationException handler sends it through TranslationErrorMapper for the chip text.
+        // TranslationException thrown above is mapped by the spine to a typed MtlException; the UI renders from the type.
         val translations = translateImage(imageBytes, targetLang, translationModel)
             ?: throw TranslationException("MangaTranslator image unsupported (could not decode)")
         if (translations.isEmpty()) {

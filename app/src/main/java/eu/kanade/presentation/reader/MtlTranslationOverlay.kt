@@ -30,13 +30,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
 import mihon.app.di.globalAppGraph
+import mtl.sched.PageOutcome
+import mtl.sched.PagePhase
+import mtl.status.StatusHub
 import tachiyomi.i18n.kmk.KMR
 import tachiyomi.presentation.core.i18n.stringResource
 
 /**
  * Bottom overlay that gives visual feedback about the MTL (machine translation) pipeline
- * for the current chapter: in-progress, done, or failed-with-retry. It observes
- * [exh.yakuyomi.TranslationStatus.chapters], so it reflects live per-page state.
+ * for the current chapter: in-progress, done, or failed-with-retry. It observes the
+ * spine's [StatusHub.chapters], so it reflects live per-page state.
  */
 @Composable
 fun MtlTranslationOverlay(
@@ -48,11 +51,11 @@ fun MtlTranslationOverlay(
     currentPageIndex: Int? = null,
 ) {
     if (mangaId == null || chapterId == null || chapterId == 0L) return
-    val manager = remember { globalAppGraph.translationManager }
+    val controller = remember { globalAppGraph.mtlController }
     // Hide the whole overlay when MTL is disabled or per-manga translation is off.
-    if (!manager.isEnabled() || !manager.isPerMangaEnabled(mangaId)) return
+    if (!controller.isEnabled() || !controller.isPerMangaEnabled(mangaId)) return
 
-    val status = remember { globalAppGraph.translationStatus }
+    val status = remember { globalAppGraph.mtlStatus }
     val chapters by status.chapters.collectAsState()
     val chapterStatus = chapters[mangaId to chapterId]
 
@@ -64,12 +67,12 @@ fun MtlTranslationOverlay(
 
     // Transient "translated" state that auto-hides after a couple of seconds.
     var showTranslated by remember { mutableStateOf(false) }
-    LaunchedEffect(chapterStatus?.isTranslating, chapterStatus?.lastCompletedAt) {
+    LaunchedEffect(chapterStatus?.isTranslating, chapterStatus?.lastUpdated) {
         if (chapterStatus?.isTranslating == true) {
             showTranslated = false
             return@LaunchedEffect
         }
-        if ((chapterStatus?.lastCompletedAt ?: 0L) > 0L) {
+        if ((chapterStatus?.lastUpdated ?: 0L) > 0L) {
             showTranslated = true
             delay(2_500)
             showTranslated = false
@@ -77,15 +80,15 @@ fun MtlTranslationOverlay(
     }
 
     val isTranslating = chapterStatus?.isTranslating == true
-    val errorCount = chapterStatus?.errorCount ?: 0
+    val errorCount = chapterStatus?.failedCount ?: 0
     val translatedCount = chapterStatus?.translatedCount ?: 0
 
     // What the reader is actually looking at. The chapter aggregates cannot answer that: a chapter
     // where page 1 translated and pages 2-20 had no text reports the same totals as one where every
     // page is done, so a chapter-scoped "✓ Translated" sat under pages that were still in Japanese.
     val currentPage = currentPageIndex?.let { chapterStatus?.pages?.get(it) }
-    val currentPageTranslated = currentPage?.state == exh.yakuyomi.TranslationStatus.PageState.DONE ||
-        currentPage?.state == exh.yakuyomi.TranslationStatus.PageState.CACHED
+    val currentPageTranslated = currentPage?.state == StatusHub.PageState.DONE ||
+        currentPage?.state == StatusHub.PageState.CACHED
 
     val visible = isTranslating || (errorCount > 0 && !isTranslating) ||
         (showTranslated && currentPageTranslated)
@@ -106,7 +109,7 @@ fun MtlTranslationOverlay(
                     doneCount = translatedCount,
                     totalPages = knownTotal,
                     hasTotal = hasTotal,
-                    stage = chapterStatus?.activeStage ?: exh.yakuyomi.TranslationStatus.PipelineStage.IDLE,
+                    stage = displayStage(chapterStatus?.activePhase),
                 )
                 errorCount > 0 -> ErrorChip(
                     errorCount = errorCount,
@@ -115,14 +118,15 @@ fun MtlTranslationOverlay(
                 )
                 // The page on screen outranks the chapter aggregate: reporting success next to a
                 // page that is still in its source language is the one thing this chip must not do.
-                currentPage != null && currentPage.state == exh.yakuyomi.TranslationStatus.PageState.SKIPPED &&
+                currentPage != null && currentPage.state == StatusHub.PageState.SKIPPED &&
                     !currentPage.isRetryable -> SkippedChip(
                     skippedCount = 1,
-                    reason = currentPage.skipReason,
+                    // The spine stores a skip's explanation in [PageStatus.error].
+                    reason = currentPage.error,
                 )
                 currentPage != null && currentPage.isRetryable -> ErrorChip(
                     errorCount = 1,
-                    reason = currentPage.error ?: currentPage.skipReason,
+                    reason = currentPage.error,
                     onRetry = onRetry,
                 )
                 showTranslated && currentPageTranslated -> TranslatedChip()
@@ -137,7 +141,7 @@ private fun TranslatingChip(
     doneCount: Int,
     totalPages: Int,
     hasTotal: Boolean,
-    stage: exh.yakuyomi.TranslationStatus.PipelineStage,
+    stage: DisplayStage,
 ) {
     Column(
         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
@@ -174,14 +178,11 @@ private fun TranslatingChip(
             // pipeline is actually in for the page in flight. IDLE only when nothing has started,
             // so it falls back to the page count to avoid labelling an unstarted chapter.
             val stageRes = when (stage) {
-                exh.yakuyomi.TranslationStatus.PipelineStage.DETECTING,
-                exh.yakuyomi.TranslationStatus.PipelineStage.OCR,
-                -> stringResource(KMR.strings.mtl_stage_detecting_ocr)
-
-                exh.yakuyomi.TranslationStatus.PipelineStage.TRANSLATING -> stringResource(KMR.strings.mtl_stage_translating)
-                exh.yakuyomi.TranslationStatus.PipelineStage.INPAINTING -> stringResource(KMR.strings.mtl_stage_inpainting)
-                exh.yakuyomi.TranslationStatus.PipelineStage.TYPESETTING -> stringResource(KMR.strings.mtl_stage_finalizing)
-                exh.yakuyomi.TranslationStatus.PipelineStage.IDLE -> when {
+                DisplayStage.DETECTING_OCR -> stringResource(KMR.strings.mtl_stage_detecting_ocr)
+                DisplayStage.TRANSLATING -> stringResource(KMR.strings.mtl_stage_translating)
+                DisplayStage.INPAINTING -> stringResource(KMR.strings.mtl_stage_inpainting)
+                DisplayStage.TYPESETTING -> stringResource(KMR.strings.mtl_stage_finalizing)
+                DisplayStage.IDLE -> when {
                     doneCount == 0 -> stringResource(KMR.strings.mtl_stage_detecting_ocr)
                     doneCount < totalPages / 2 -> stringResource(KMR.strings.mtl_stage_translating)
                     else -> stringResource(KMR.strings.mtl_stage_finalizing)
@@ -292,4 +293,18 @@ private fun ErrorChip(errorCount: Int, reason: String?, onRetry: () -> Unit) {
             )
         }
     }
+}
+
+/**
+ * The overlay's five display stages, mapped from the spine's finer [PagePhase]s:
+ * detect/OCR share the old chip, and render/store both read as "finalizing" to a reader.
+ */
+private enum class DisplayStage { DETECTING_OCR, TRANSLATING, INPAINTING, TYPESETTING, IDLE }
+
+private fun displayStage(phase: PagePhase?): DisplayStage = when (phase) {
+    PagePhase.DETECTING, PagePhase.RECOGNIZING -> DisplayStage.DETECTING_OCR
+    PagePhase.TRANSLATING -> DisplayStage.TRANSLATING
+    PagePhase.INPAINTING -> DisplayStage.INPAINTING
+    PagePhase.RENDERING, PagePhase.STORING, PagePhase.PREPARING -> DisplayStage.TYPESETTING
+    else -> DisplayStage.IDLE
 }

@@ -48,6 +48,7 @@ val migrations: List<Migration>
         SetupAppUpdateMigration(),
         EHentaiMigration(),
         MergedMangaDedupeModeMigration(),
+        DropLegacyTranslationCacheMigration(),
         // KMK <--
         TrustExtensionRepositoryMigration(),
         CategoryPreferencesCleanupMigration(),

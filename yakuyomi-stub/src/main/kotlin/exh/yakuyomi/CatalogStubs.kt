@@ -116,16 +116,3 @@ object LocalLlmCatalog {
     fun isRuntimeBundled(): Boolean = false
     fun bestForDevice(totalRamBytes: Long): LocalLlmModel? = null
 }
-
-/**
- * No-op stub of [GeminiNanoTranslator] for the no-MTL APK variant.
- * (ModelCatalog intentionally lives only in the app source set — see app/exh/yakuyomi/ModelCatalog.kt.)
- */
-@dev.zacsweers.metro.SingleIn(dev.zacsweers.metro.AppScope::class)
-@dev.zacsweers.metro.Inject
-class GeminiNanoTranslator {
-    fun statusCode(): Int? = null
-    fun statusError(): String? = null
-    suspend fun isAvailable(): Boolean = false
-    suspend fun translate(queries: List<String>, pageBitmap: android.graphics.Bitmap?, sourceLang: String): List<String>? = null
-}

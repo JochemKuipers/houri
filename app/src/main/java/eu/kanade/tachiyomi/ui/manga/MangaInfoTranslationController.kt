@@ -1,9 +1,5 @@
 package eu.kanade.tachiyomi.ui.manga
 
-import exh.yakuyomi.MangaInfoProviderState
-import exh.yakuyomi.MangaInfoTranslationStore
-import exh.yakuyomi.TranslationManager
-import exh.yakuyomi.resolveMangaInfoSourceLang
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -12,6 +8,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import mihon.app.di.globalAppGraph
+import mtl.MtlController
+import mtl.MtlController.MangaInfoProviderState
+import mtl.mangaInfoSourceLang
 import tachiyomi.core.common.preference.PreferenceStore
 
 // KMK --> Manga-details metadata translation lifecycle owner (spec 2026-09-23).
@@ -76,8 +75,8 @@ class MangaInfoTranslationController(
     private val mangaId: Long,
     private val scope: CoroutineScope,
     private val preferenceStore: PreferenceStore,
-    private val translationManager: TranslationManager,
-    private val infoStore: MangaInfoTranslationStore,
+    private val translationManager: MtlController,
+    private val infoStore: mtl.MangaInfoStore,
     private val isNoMtl: Boolean,
 ) {
     private val enabledPref = preferenceStore.getBoolean("pref_translate_info_$mangaId", false)
@@ -135,7 +134,7 @@ class MangaInfoTranslationController(
             request.sourceId,
             request.title,
             request.description,
-            resolveMangaInfoSourceLang(request.sourceLang),
+            mangaInfoSourceLang(request.sourceLang),
         )
         val proceed = synchronized(stateLock) {
             if (key == lastBoundKey && _state.value.preservesAcrossRebind) {
@@ -215,10 +214,9 @@ class MangaInfoTranslationController(
                 runCatching {
                     translationManager.getValidCachedMangaInfo(
                         mangaId,
-                        request.sourceId,
                         request.title,
                         request.description,
-                        request.sourceLang ?: "JA",
+                        mangaInfoSourceLang(request.sourceLang),
                     )
                 }.getOrNull()
             } else {
@@ -248,7 +246,7 @@ class MangaInfoTranslationController(
                 return@launch
             }
             when (providerState) {
-                MangaInfoProviderState.MANGA_TRANSLATOR_UNSUPPORTED -> {
+                MangaInfoProviderState.UNSUPPORTED -> {
                     if (myGeneration == generation) {
                         _state.value = MangaInfoUiState.Error(MangaInfoErrorKind.MangaTranslatorUnsupported)
                     }
@@ -264,11 +262,10 @@ class MangaInfoTranslationController(
             }
             val result = try {
                 translationManager.translateMangaInfo(
-                    mangaId,
-                    request.title,
-                    request.description,
-                    request.sourceLang ?: "JA",
-                    request.sourceId,
+                    mangaId = mangaId,
+                    title = request.title,
+                    description = request.description,
+                    sourceLang = mangaInfoSourceLang(request.sourceLang),
                 )
             } catch (e: CancellationException) {
                 throw e
