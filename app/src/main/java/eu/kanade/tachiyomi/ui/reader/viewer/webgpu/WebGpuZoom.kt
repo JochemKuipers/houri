@@ -181,6 +181,14 @@ internal fun WebGpuViewer.applyDoubleTapZoomPolicy(page: ImagePage.ImageSingle) 
         0
     }
     if (w <= 0 || h <= 0) return
+    // KMK --> The page's parent is not set yet at adoption time (attach happens when the render
+    // walk first fetches it), and homeScale's degenerate branch answers 0.01 for a parentless
+    // page. Latching that into maxScale would clamp every later animation - the degenerate
+    // freeze the zero-size-window guard below was written for, reached through a different
+    // door. Scale types 3/4/5 set the homeScale field above us, so only the library-default
+    // types (1/2) can reach this parentless; the library computes its own maxScale default
+    // for them until attach, which is exactly right. KMK <--
+    if (page.parent == null) return
     try {
         page.maxScale = page.homeScale
     } catch (_: Exception) {

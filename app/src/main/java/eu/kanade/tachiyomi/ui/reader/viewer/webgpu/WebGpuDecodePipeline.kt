@@ -2,6 +2,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webgpu
 
 import ca.mpreg.imagedecoder.ImageDecoder
+import ca.mpreg.webgpuviewer.ImageUtil
 import ca.mpreg.webgpuviewer.renderer.Image
 import ca.mpreg.webgpuviewer.renderer.Image.Companion.invoke
 import ca.mpreg.webgpuviewer.viewer.ImagePage
@@ -16,6 +17,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.withLock
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
+import kotlin.math.sqrt
 
 // The two halves of turning one `ViewerReaderPage` into a decoded `ImagePage.ImageSingle`:
 // getting the bytes (`startPageLoad`) and building the GPU image (`decodeReaderPage`).
@@ -492,6 +494,48 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
             frameWidth = turned.width
             frameHeight = turned.height
         }
+        // KMK --> A page the device cannot afford at full resolution is downsampled here, at
+        // decode, instead of being uploaded whole. The uncapped path handed every megapixel of
+        // a high-resolution comic to the GPU twice over - base texture plus 4/3 for the mip
+        // chain - so a 4000x6000 scan cost ~128MB of swapchain-side memory per page, a 64MP
+        // page ~600MB, and a device two pages into such a comic lost its Vulkan device with
+        // VK_ERROR_OUT_OF_DEVICE_MEMORY. The ceiling is the budget's own: tier decides the
+        // default, live pressure moves it (Budget.maxDecodedPixels). The native linear-area
+        // resize runs on this worker; the decoder's own buffer is untouched and freed with the
+        // decoder, so the pass costs one transient destination, not a second resident copy.
+        // Animated frames share the first frame's scale: a frame stack whose frames resize
+        // independently would present mismatched dimensions. HDR pixels are half-float and go
+        // through the F16 variant. If the resize native is unavailable or fails, the original
+        // pixels continue and the old failure modes apply - no worse than before.
+        val maxPixels = memoryBudget.maxDecodedPixels()
+        val pixelArea = frameWidth.toLong() * frameHeight.toLong()
+        var downsampleTo: Pair<Int, Int>? = null
+        if (pixelArea > maxPixels) {
+            val scale = sqrt(maxPixels.toDouble() / pixelArea.toDouble())
+            val dstW = (frameWidth * scale).toInt().coerceIn(8, frameWidth)
+            val dstH = (frameHeight * scale).toInt().coerceIn(8, frameHeight)
+            traceStage(trace, "downsample", "${frameWidth}x$frameHeight -> ${dstW}x$dstH cap=$maxPixels")
+            try {
+                val resized = if (dec.isHdr) {
+                    ImageUtil.resizeF16(framePixels, frameWidth, frameHeight, dstW, dstH)
+                } else {
+                    ImageUtil.resize(framePixels, frameWidth, frameHeight, dstW, dstH)
+                }
+                framePixels = resized
+                frameWidth = dstW
+                frameHeight = dstH
+                downsampleTo = dstW to dstH
+                logcat(LogPriority.INFO) {
+                    "Downsampled ch=${page.page.chapter.chapter.id}/i=${page.page.index} " +
+                        "to ${dstW}x$dstH (budget $maxPixels px)"
+                }
+            } catch (e: OutOfMemoryError) {
+                System.gc()
+                logcat(LogPriority.WARN) { "Downsample OOM; uploading original resolution" }
+            } catch (e: Throwable) {
+                logcat(LogPriority.WARN, e) { "Downsample failed; uploading original resolution" }
+            }
+        }
         // KMK <--
 
         val imagePage = if (pageCount == 1) {
@@ -538,6 +582,12 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
         } else {
             val frames = ArrayList<Pair<Image, Int>>(pageCount)
 
+            // KMK --> The first frame rides the main downsample decision above: framePixels/
+            // frameWidth/frameHeight already hold the resized buffer, so building the first
+            // Image from them (not firstFrame.*) is what keeps a capped page's frame stack at
+            // one consistent size.
+            // KMK <--
+
             // KMK --> Built frames hold uploaded textures, and ImageSingle owns the only teardown.
             fun discardFrames() {
                 if (frames.isNotEmpty()) ImagePage.ImageSingle(frames).cleanup()
@@ -545,9 +595,9 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
             // KMK <--
 
             val firstImage = Image(
-                firstFrame.image,
-                firstFrame.width,
-                firstFrame.height,
+                framePixels,
+                frameWidth,
+                frameHeight,
                 createMipMaps = false,
                 backgroundColor = backgroundColor,
             )
@@ -591,10 +641,30 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
                         } catch (_: Exception) {}
                         throw Exception("Frame too small ${frame.width}x${frame.height}, skipping GPU upload")
                     }
+                    // KMK --> Animated frames follow the first frame's downsample decision, so a
+                    // capped page presents frames of one consistent size. A frame whose native
+                    // size differs from the first's is resized into the same target outright.
+                    var framePix = frame.image
+                    var frameW = frame.width
+                    var frameH = frame.height
+                    downsampleTo?.let { (dstW, dstH) ->
+                        try {
+                            framePix = if (dec.isHdr) {
+                                ImageUtil.resizeF16(framePix, frameW, frameH, dstW, dstH)
+                            } else {
+                                ImageUtil.resize(framePix, frameW, frameH, dstW, dstH)
+                            }
+                            frameW = dstW
+                            frameH = dstH
+                        } catch (e: Throwable) {
+                            logcat(LogPriority.WARN, e) { "Frame downsample failed; uploading original" }
+                        }
+                    }
+                    // KMK <--
                     val image = Image(
-                        frame.image,
-                        frame.width,
-                        frame.height,
+                        framePix,
+                        frameW,
+                        frameH,
                         createMipMaps = false,
                         backgroundColor = firstImage.backgroundColor,
                     )

@@ -7,9 +7,11 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.L2RPagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.VerticalPagerViewer
+import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.WebGpuHealth
 import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.WebGpuViewer
 import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.WebGpuViewerContinuous
 import eu.kanade.tachiyomi.ui.reader.viewer.webtoon.WebtoonViewer
+import logcat.LogPriority
 import logcat.LogPriority.DEBUG
 import mihon.app.di.globalAppGraph
 import tachiyomi.core.common.util.system.logcat
@@ -146,6 +148,18 @@ private object WebGpuProvider : ViewerProvider {
         val wantsHighQuality = basePreferences.highQualityRenderer().get() &&
             exh.yakuyomi.DeviceMemory.isWebGpuSupported(activity)
         if (!wantsHighQuality) return null
+        // KMK --> Sessions whose GPU device keeps dying without recovery record strikes
+        // (WebGpuHealth); once they stack up, stop offering the renderer. The legacy viewer
+        // is the working fallback - this is what turns the reported black-screen loops into
+        // a reader that opens, instead of the same dead device every launch.
+        if (WebGpuHealth.isDisabled(activity)) {
+            logcat(LogPriority.INFO) {
+                "WebGPU viewer declined: device recorded ${WebGpuHealth.DISABLE_STRIKES}+ " +
+                    "dead-device sessions - falling back to the legacy viewer"
+            }
+            return null
+        }
+        // KMK <--
         val isWebGpuAvailable = try {
             ca.mpreg.webgpuviewer.renderer.WebGpuRenderer.isAvailable
         } catch (_: Throwable) {

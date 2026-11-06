@@ -566,9 +566,17 @@ open class WebGpuViewer(
     // ladder owns the escalation now.
     private val recoveryChainRunning = AtomicBoolean(false)
 
+    /**
+     * Device losses this viewer lived through, for [WebGpuHealth]. Counted on the loss
+     * itself (the callback executor thread), not on the recovery outcome - a session that
+     * thrashed through losses felt broken to the user whether or not each one healed.
+     */
+    private val sessionDeviceLosses = java.util.concurrent.atomic.AtomicInteger(0)
+
     private val deviceLostListener =
         ca.mpreg.webgpuviewer.renderer.WebGpuRenderer.Companion.DeviceLostListener { _, _ ->
             if (isDestroyed) return@DeviceLostListener
+            sessionDeviceLosses.incrementAndGet()
             // Counted on the loss itself, not on a successful recovery: a device loss
             // on a phone is usually the app being backgrounded and the GPU going away, and
             // recovery routinely succeeds either way, so waiting for success would under-count.
@@ -911,6 +919,28 @@ open class WebGpuViewer(
             if (isDestroyed) return
             isDestroyed = true
         }
+        // KMK --> Strike bookkeeping for WebGpuHealth, before anything else tears down state
+        // the check reads. A session that closes with the renderer still dead is the reported
+        // black-screen shape (device lost, every recovery given up, reader unusable until the
+        // process is killed); a session that thrashed through repeated losses is the same
+        // defect with recoveries in between. Consecutive strikes are what flip the WebGPU
+        // provider off - see WebGpuHealth for why that beats another recovery attempt.
+        // The isFinishing gate keeps the system's own background-kill from striking: a phone
+        // drops the GPU device on backgrounding as a matter of course, and an activity the OS
+        // destroyed mid-background is not a session the user gave up on. Only a deliberate
+        // exit (back, or the reader replaced) with a still-dead renderer counts.
+        try {
+            val deadAtExit = !ca.mpreg.webgpuviewer.renderer.WebGpuRenderer.isAvailable &&
+                activity.isFinishing
+            if (deadAtExit || sessionDeviceLosses.get() >= WebGpuHealth.SESSION_LOSS_STRIKE_THRESHOLD) {
+                WebGpuHealth.recordStrike(activity)
+                logcat(LogPriority.WARN) {
+                    "WebGPU session ended degraded (deadAtExit=$deadAtExit, " +
+                        "losses=${sessionDeviceLosses.get()}) - strike recorded"
+                }
+            }
+        } catch (_: Exception) {}
+        // KMK <--
         config.onSettingsChanged = null
         config.navigationModeChangedListener = null
         // KMK -->

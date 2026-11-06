@@ -20,6 +20,15 @@ import tachiyomi.core.common.util.system.logcat
  */
 internal fun WebGpuViewer.queueForDecode(page: ViewerReaderPage, prioritize: Boolean = false) {
     synchronized(lock) {
+        // KMK --> A shell that is no longer the cache's copy (evicted, or replaced by a rebuild)
+        // has nowhere to put a decoded image: the worker would upload full textures nobody will
+        // draw. The field log shows what queueing one anyway costs - an evicted-then-re-demanded
+        // page gained a queue entry every frame while every pop skipped it (`Decode skipped ...
+        // cached=false`), so the queue grew and drained in lockstep for the whole session. Every
+        // other queueing site already checks membership; this closes the one path (the render
+        // walk's ensureDecoding) that did not. KMK <--
+        if (!pageInCache(page)) return
+
         // Already has a decoded image
         if (page.isDecoded) return
 

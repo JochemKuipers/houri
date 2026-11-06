@@ -543,6 +543,15 @@ internal fun isInsidePreloadWindow(distance: Int?, ahead: Int, behind: Int): Boo
  * invisible, destroying a live one is not. Fallback order is oldest undrawn,
  * then oldest, so the cache stays bounded exactly as before.
  *
+ * KMK --> Wanted-undecoded shells (wantedByRender, nothing decoded yet) get the same
+ * immunity as drawn ones, for a different reason: they are nearly free to keep, and
+ * shedding them manufactured the create -> evict -> queue -> skip churn in the 2026-11-04
+ * field log - a page gained a queue entry every frame, every worker pop skipped it as
+ * cached=false, and the page never decoded. Evicting an undecoded shell also frees no
+ * memory, so excluding it from the ranked passes costs the byte budget nothing; when
+ * nothing else is evictable, the absolute fallbacks still take it, exactly as they
+ * would a drawn page. KMK <--
+ *
  * KMK --> Decoded-but-far reads like "the pages I already loaded unloaded themselves".
  * It is not: the continuous viewer keeps a window far larger than the screen, so scrolling out
  * and back re-enters a page that was evicted while its neighbour was still a placeholder. Both
@@ -597,8 +606,15 @@ internal fun WebGpuViewer.evictFarthestPage(reference: ViewerPage? = null) {
         if (isIdle && oldestIdle == null) oldestIdle = page
         // Drawn-page immunity (see KDoc): drawn pages only feed the absolute
         // oldest fallback and never the distance-ranked victims.
-        val drawn = page.imagePage.isOnScreen
-        if (!drawn) {
+        // KMK --> Same for a shell the render walk is still demanding (wantedByRender, nothing
+        // decoded yet). It is nearly free to keep, and evicting it manufactures the
+        // create -> evict -> queue -> skip churn the field log shows: the walk rebuilds the shell
+        // next frame, the insert evicts it again as the cheapest page there is, and the decode
+        // queue gains a dead entry per frame - a loop that never lets the page decode and never
+        // lets the cache settle. It still feeds oldestIdle/oldestAny above, so the absolute
+        // fallbacks can shed it when nothing else exists. KMK <--
+        val wantedUndecoded = page is ViewerReaderPage && page.wantedByRender && !page.isDecoded
+        if (!page.imagePage.isOnScreen && !wantedUndecoded) {
             if (oldestAnySafe == null) oldestAnySafe = page
             if (isIdle && oldestIdleSafe == null) oldestIdleSafe = page
         } else {
@@ -645,8 +661,9 @@ internal fun WebGpuViewer.evictFarthestPage(reference: ViewerPage? = null) {
         for (page in pageCache.values) {
             if (page === anchor) continue
             if (liveCurrent != null && page === liveCurrent) continue
-            // Drawn-page immunity (see KDoc).
+            // Drawn-page immunity (see KDoc), and the same for wanted-undecoded shells.
             if (page.imagePage.isOnScreen) continue
+            if (page is ViewerReaderPage && page.wantedByRender && !page.isDecoded) continue
             val distance = pageDistance(anchor, page) ?: continue
             val rank = abs(distance)
             val cost = evictionCost(page)

@@ -209,6 +209,33 @@ dead* carries an `ErrorPage` and a latched `wantedByRender` that only a fresh re
 under its own derived key; evicting only the parent re-downloads the parent and then
 `ensureSegment` finds the stale slice still cached and hands the same bad bytes back.
 
+### The device upgrades itself to core, and dead devices fall back across sessions
+
+Two hardening layers added from the 2026-11 field reports (Adreno 6xx and Mali bifrost
+webgpureport exports; a PowerVR/nomtl emulator logcat with
+`vkQueueSubmit failed with VK_ERROR_OUT_OF_DEVICE_MEMORY` two seconds into the first decode):
+
+- **`requestDeviceBestEffort` requests `core-features-and-limits` whenever the adapter lists
+  it** (`requiredFeaturesFor` in the submodule's `WebGpuRenderer`). Both field adapters list
+  it, and so does essentially everything else in the field — which means Compatibility mode
+  was supplying only restrictions: 128-invocation compute workgroups, 16384-byte uniform
+  buffers, 15 inter-stage variables, storage buffers barred from the vertex stage, 16
+  texture+sampler combinations per stage. A pipeline that exceeds any of those fails
+  validation with **no exception on the draw path — a frame that draws nothing, i.e. the
+  black screen**. The upgrade is in the library, not the app, and the init/recreate log lines
+  now carry `core=true/false`; compare that flag across field reports before theorising about
+  a limit. A driver that lists the feature but rejects the request retries compat-only
+  instead of latching `initError`.
+- **`WebGpuHealth` (app) turns repeat dead sessions into the legacy viewer.** One strike per
+  reader session that closes with the renderer still dead (`destroy()` re-reads `isAvailable`
+  — gated on `activity.isFinishing`, because a phone drops the GPU device on backgrounding
+  as a matter of course and an OS background-kill is not a session the user gave up on), or
+  that lost the device `SESSION_LOSS_STRIKE_THRESHOLD` (3) times even with recoveries in
+  between; `DISABLE_STRIKES` (2) strikes and `WebGpuProvider` declines, so the reader opens
+  on the pager instead of the same dead device every launch. The About screen easter egg
+  (the RAM-gate one) resets the strikes. A strike is *not* recorded for a session that lost
+  the device once and recovered — backgrounding does that on healthy phones.
+
 ## RESOURCE OWNERSHIP
 
 `releasePageResources(page)` is the single owner and the only place that releases a
@@ -491,6 +518,35 @@ plus whatever fits" rather than destroying what is being read. **Do not add a ha
 that bypasses the evictor** — that is a segfault class of bug (see the spread/`cleanup()`
 landmines), not a memory one.
 
+### A page above the pixel ceiling is downsampled, not uploaded whole
+
+`Budget.maxDecodedPixels` caps the decoded area uploaded at full resolution. Two inputs set
+it: the device tier (TINY 6MP … XLARGE 32MP) and — tighter wherever the display is smaller —
+**the panel itself**: `displayPixels * 4` (2x linear zoom headroom on each axis), floored at
+2MP. A ~1MP e-ink panel therefore caps at ~4MP, a 1440p phone at ~18MP: pixels beyond that are
+unviewable data, and loading them is what turns a high-resolution comic into
+`VK_ERROR_OUT_OF_DEVICE_MEMORY`. Pressure scales the result (1.0 / 0.75 / 0.5).
+
+`decodeReaderPage` resizes anything bigger *before* `Image(...)` through the library's native
+`ImageUtil.resize` (F16 variant for HDR pixels), logging `Downsampled ch=... i=... to WxH
+(budget N px)` and a `downsample` trace stage. Animated frames share the first frame's target
+so the stack stays one size. The decoder has no shrink-on-load, so the pass is CPU-side on the
+decode worker; the decoder's own buffer is freed with the decoder, so the cost is one transient
+destination, not a second resident copy. Consequence worth knowing: **page quality varies
+across the session exactly when memory does** — the same trade the byte ceilings already make.
+If the resize native is unavailable, the original pixels continue and the old failure modes
+(`Image area too large`, device loss) apply.
+
+### 32-bit userspace is capped at SMALL, on purpose
+
+`deviceTierFor` folds three device truths into the tier: total RAM, the vendor low-RAM mark,
+and **the ABI**. A 32-bit process shares ~3GB of address space across the Java heap, the
+native decode buffers and the GPU's own allocations (unified memory) — the budgets a 64-bit
+MEDIUM/LARGE device comfortably holds are the spike that loses the device there (field report:
+armeabi-v7a losing its Vulkan device two pages into a comic). The tier cap also pins decode
+parallelism to one worker (`decodeParallelism` keys on the tier), halving the transient decode
+spike. 32-bit keeps the WebGPU viewer — that is a deliberate decision, not an oversight.
+
 ### Recovery is gated twice
 
 `RECOVER_COOLDOWN_MS` (12 s) **and** `RECOVER_PRESSURE` (ROOMY). The cooldown alone still
@@ -652,7 +708,10 @@ above — a type mismatch that a compiler will not catch.
 | `device lost reason=1: CreateAndroidSurfaceKHR failed with VK_ERROR_NATIVE_WINDOW_IN_USE_KHR`, preceded by `BufferQueueProducer ... connect: already connected` and `vulkan: native_window_api_connect() failed` | A **second** swapchain was created on a window the old one still owned. Dawn can defer `vkDestroySurfaceKHR` past `close()`, so recovery must drop the old `GPUSurface` *and* release the retained `ANativeWindow` (`NativeWindow.release`) **before** it builds the replacement — see `recoverFromDeviceLoss`. The `SurfaceTexture-0-…` name means the TextureView path (API < 34), where the window is a `SurfaceTexture`'s BufferQueue. **If it still appears on a current build, the surface-teardown pump failed — see the landmine below.** |
 | `recovery failed (consecutive: N, next attempt in Xms)` | A recovery produced no usable device; the library ladder is escalating. Consecutive counts reset only after a device survives 15 s. Each failed recovery used to also leak a whole Dawn device (no finalizer on the wrapper) — retired devices are destroyed one recovery cycle later now (`destroyRetired`, with `destroy()` alone; `close()` on a retired device corrupts a still-pending loss record), so a persistently climbing `consecutive:` with native memory growth is the trace to send. |
 | `recovery deferred Xs (consecutive failures: N)` | A recovery attempt arrived inside the ladder's cooldown and was refused without touching the GPU. Normal while the ladder is escalating; a fresh loss event or a stable device resets it. |
-| `recovery gave up after N consecutive failures` | The ladder stopped self-retrying. The reader stays on a dead device until a *new* device-loss event arrives (which restarts the ladder) or the viewer is recreated. Everything app-side keeps working; only WebGPU draws are parked. |
+| `recovery gave up after N consecutive failures` | The ladder stopped self-retrying. The reader stays on a dead device until a *new* device-loss event arrives (which restarts the ladder) or the viewer is recreated. Everything app-side keeps working; only WebGPU draws are parked. Since the strike system: a session that ends in this state records one `WebGpuHealth` strike, and two struck sessions make the next session open on the legacy viewer instead. |
+| `Evicted ch=X/i=N` → `Queued ch=X/i=N` → `Decode skipped ... cached=false` repeating every ~15 ms for the *same* page (the 2026-11-04 field log shows hundreds of cycles) | The evict↔recreate livelock: the shell was the evictor's cheapest victim *and* the render walk kept re-demanding it, so insert evicted it, the walk rebuilt it next frame, and the decode queue gained a dead entry per frame while every pop skipped it — the page never decoded and the cache never settled. Fixed twice over: `evictFarthestPage` no longer ranks wanted-undecoded shells as victims, and `queueForDecode` drops a shell that is no longer `pageInCache`. If it returns, check both halves. |
+| `Downsampled ch=X/i=N to WxH (budget N px)` + a `downsample` trace stage | Normal, not a defect: the page exceeded `Budget.maxDecodedPixels` (display-derived, tier-capped, pressure-scaled) and was resized before upload instead of eating ~600MB of GPU textures. Pages of one chapter may differ in resolution across the session as pressure moves the ceiling — that is the budget's byte-scale philosophy applied to pixels. If the same page repeatedly downsampled *and* the reader still loses the device, compare the `px<=` figure in `MemBudget` against the page's actual area. |
+| A single page draws at a few dozen pixels after surface churn (e-ink refresh-mode switches, sleep/resume, or a fast back-then-forward on a small cache) | A **degenerate-scale latch**: the surface reported 0x0 in a teardown/relayout window and one of the scale paths latched the 0.01 sentinel. Three latches existed; all closed — `resize`/`init` refuse to store sub-8px dimensions (library `WebGpuRenderer`), the page's parent-setter home init defers instead of latching (library `ImagePage`, re-applied by `attach`), and the app's `applyDoubleTapZoomPolicy` no longer reads `homeScale` from a parentless page. If a page still lands tiny, check whether `page.scale` itself holds ~0.01 and which of the three wrote it. |
 | `Transition ensureTextures clamped WxH -> W'xH'` | The device's `maxTextureDimension2D` is below 8192 (4096 on PowerVR-class Compatibility-mode adapters) and the transition cache was sized for a larger surface — now clamped so the turn renders. Before the clamp the symptom was `ensureTextures create failed` **every page turn, for the whole session**. |
 | `FilterChain acquire clamped WxH -> W'xH'` | The same device cap reached through the filter pool. Before the clamp, `beginFrame`'s catch silently disabled every filter for the rest of the session. |
 | Blank/garbage page in dual-page mode only | Check `spreadPage` lifecycle — see landmines. |
@@ -678,6 +737,31 @@ line, for instance, does not appear anywhere in the current tree.
 
 ## KNOWN LANDMINES (each one was a real bug)
 
+- **Never let a 0x0 surface window write a scale.** The 2026-11 field report (e-ink reader:
+  view a page, swipe back, swipe forward — the page now draws at ~50px) was a degenerate-scale
+  latch, not a zoom bug: e-ink readers tear the surface down on refresh-mode switches, the
+  surface reports 0x0 in that window, and `homeScale`'s guard for an unsized parent answers
+  **0.01**. Three paths latched it: the library's `parent` setter initializing a pristine page
+  to home while the renderer dims were 0; the renderer storing 0x0 from `resize`/`init`
+  (making every later computation degenerate for the whole teardown); and the app's
+  `applyDoubleTapZoomPolicy` reading `page.homeScale` at adoption, when the page's parent is
+  still null. All three now refuse the degenerate value — dimensions below
+  `MIN_SURFACE_DIMENSION` are not stored, the home init defers until real dimensions arrive
+  (re-applied in `attach`, because a second attach is otherwise a no-op), and maxScale is not
+  latched from a parentless page. The rule behind all three: **a sentinel fallback (0.01) may
+  be returned, never stored.** The same shape bit once before (2fbe2de5b, sleep/resume) and
+  was fixed for one door only — the renderer dims — which is why it survived.
+- **Never enqueue a shell that is no longer `pageInCache`, and never rank a wanted-undecoded
+  shell as an eviction victim — together they manufacture a frame-rate churn loop.** The
+  2026-11-04 field log: one page (the tail of the previous chapter, farthest from the anchor,
+  never decoded) was evicted at insert, rebuilt by the render walk next frame, evicted again,
+  and gained a `Decode skipped ... cached=false` queue entry per frame for the whole session —
+  every pop skipping, the page never decoding, the GC churning ("Skipped 33 frames"). Two
+  rules came out of it: `queueForDecode` drops a page that is not the cache's copy (decoding
+  it would upload textures nobody will draw), and `evictFarthestPage` treats
+  `wantedByRender && !isDecoded` exactly like drawn pages — excluded from the ranked and edge
+  passes, still reachable through the absolute fallbacks. Evicting an undecoded shell frees
+  no bytes anyway, so the immunity costs the byte budget nothing.
 - **The position store outranks `last_page_read`, so it has to be gated on it.**
   `WebGpuReadingPositionStore` keeps `pageIndex`/`documentY`/`zoom`/`offsetX` per chapter in the
   `webgpu_positions` prefs, because no DB column can express the last three, and

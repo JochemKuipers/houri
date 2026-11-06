@@ -101,14 +101,31 @@ fun AboutScreen() {
                         val now = System.currentTimeMillis()
                         val pruned = (versionTapTimes.filter { now - it < 60_000 } + now)
                         versionTapTimes = pruned
-                        if (eu.kanade.presentation.more.settings.RamGateState.isDisabled.value) {
-                            context.toast("RAM gate already disabled")
-                        } else if (pruned.size >= 10) {
+                        if (pruned.size >= 10) {
+                            // KMK --> The same easter egg clears WebGpuHealth's dead-device
+                            // strikes, so a device that auto-fell-back to the legacy viewer has
+                            // a way back without reinstalling. Recorded first so the toast can
+                            // say whether it actually changed anything.
+                            val webgpuReset = eu.kanade.tachiyomi.ui.reader.viewer.webgpu.WebGpuHealth
+                                .resetStrikes(context)
                             // Routed through RamGateState so the RAM-gated settings rows
                             // recompose immediately; a bare SharedPreferences write left
                             // them on their pre-toggle verdict.
-                            eu.kanade.presentation.more.settings.RamGateState.setDisabled(context, true)
-                            context.toast("RAM gate disabled – all features unlocked")
+                            if (!eu.kanade.presentation.more.settings.RamGateState.isDisabled.value) {
+                                eu.kanade.presentation.more.settings.RamGateState.setDisabled(context, true)
+                                context.toast(
+                                    if (webgpuReset) {
+                                        "RAM gate disabled – WebGPU fallback reset"
+                                    } else {
+                                        "RAM gate disabled – all features unlocked"
+                                    },
+                                )
+                            } else if (webgpuReset) {
+                                context.toast("WebGPU fallback reset")
+                            } else {
+                                context.toast("RAM gate already disabled")
+                            }
+                            // KMK <--
                         }
                     },
                 )
