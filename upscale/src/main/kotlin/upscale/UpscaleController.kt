@@ -7,8 +7,8 @@ import kotlinx.coroutines.sync.Semaphore
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
-import upscale.core.Readiness
 import upscale.core.ReaderKind
+import upscale.core.Readiness
 import upscale.core.UpscaleOutcome
 import upscale.core.UpscaleReason
 import upscale.core.UpscaleRequest
@@ -241,8 +241,14 @@ class UpscaleController(
                     status.markDone(work.mangaId, work.chapterId, work.pageIndex, backend.id, outcome.modelId, elapsed, fromCache = false)
                     status.tryEmit(
                         UpscaleStatusHub.Event.Served(
-                            work.mangaId, work.chapterId, work.pageIndex, backend.id, outcome.modelId,
-                            cacheKey, elapsed, prefetched = true,
+                            work.mangaId,
+                            work.chapterId,
+                            work.pageIndex,
+                            backend.id,
+                            outcome.modelId,
+                            cacheKey,
+                            elapsed,
+                            prefetched = true,
                         ),
                     )
                     return

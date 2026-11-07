@@ -223,10 +223,12 @@ class UpscaleStatusHub {
             } else {
                 chapter.pages
             }
-            current + (key to chapter.copy(
-                pages = pages + (pageIndex to transform(chapter.pages[pageIndex])),
-                lastUpdated = now(),
-            ))
+            current + (
+                key to chapter.copy(
+                    pages = pages + (pageIndex to transform(chapter.pages[pageIndex])),
+                    lastUpdated = now(),
+                )
+                )
         }
     }
 
