@@ -15,7 +15,7 @@ import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
-import eu.kanade.tachiyomi.ui.reader.setting.UpscaleReaderHook
+import upscale.app.UpscaleReaderBridge
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderTranslation
@@ -225,7 +225,13 @@ class WebtoonPageHolder(
                 // Display-time upscale of the original bytes (translation below keeps the
                 // originals). Null falls back to the untouched stream.
                 val displayBytes: ByteArray? = translationBytes?.let { bytes ->
-                    UpscaleReaderHook.upscaleDisplayBytes(mangaId, bytes)
+                    UpscaleReaderBridge.upscaleDisplayBytes(
+                        mangaId = mangaId,
+                        chapterId = current.chapter?.chapter?.id ?: 0L,
+                        pageIndex = current.index,
+                        bytes = bytes,
+                        readerKind = upscale.core.ReaderKind.WEBTOON,
+                    )
                 }
                 // Reuse the captured bytes when we have them, so the source is never read twice.
                 val input = (displayBytes ?: translationBytes)?.inputStream() ?: streamFn()

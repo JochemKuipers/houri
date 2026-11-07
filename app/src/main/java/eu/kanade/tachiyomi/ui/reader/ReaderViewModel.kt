@@ -930,6 +930,34 @@ class ReaderViewModel(
             downloadNextChapters()
         }
 
+        // KMK -->
+        // Prefetch-warm the upscaling cache for the pages ahead. The scheduler dedups and
+        // memory-gates; providers only materialize bytes when the prefetch actually runs.
+        runCatching {
+            val mangaId = selectedChapter.chapter.manga_id
+            if (mangaId == null || mangaId <= 0L) return@runCatching
+            val controller = mihon.app.di.globalAppGraph.upscaleController
+            val providers = buildMap {
+                pages.filter { it.index > page.index }.forEach { aheadPage ->
+                    val streamFn = aheadPage.stream ?: return@forEach
+                    put(aheadPage.index) {
+                        streamFn().use { input ->
+                            val out = java.io.ByteArrayOutputStream()
+                            input.copyTo(out, 64 * 1024)
+                            out.toByteArray()
+                        }
+                    }
+                }
+            }
+            controller.prefetch(
+                mangaId = mangaId,
+                chapterId = selectedChapter.chapter.id,
+                pageIndex = page.index,
+                providers = providers,
+            )
+        }
+        // KMK <--
+
         eventChannel.trySend(Event.PageChanged)
     }
 

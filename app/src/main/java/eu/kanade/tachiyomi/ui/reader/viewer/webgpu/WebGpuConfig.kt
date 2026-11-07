@@ -469,11 +469,18 @@ class WebGpuConfig(
         // KMK <--
 
         // KMK -->
+        // The user's viewer-level toggle AND the spine's display-quality decision (global
+        // enablement, mode != Simple, tile refinement pref) must both hold; the spine decides,
+        // this pref scopes it to the WebGPU viewer.
         readerPreferences.webgpuArtCnnUpscaler()
             .register(
-                { artCnnUpscaler = it },
+                { artCnnUpscaler = it && upscaleGpuSamplerEnabled() },
                 { emitSettingsChange() },
             )
+
+        // The spine decision can flip independently of this pref (global enable, mode, tile
+        // refinement); re-resolve on any settings change so the state sync sees it.
+        registerUpscaleDecisionListener()
 
         readerPreferences.webgpuFastRender()
             .register(
@@ -586,4 +593,27 @@ class WebGpuConfig(
         }
         navigationModeChangedListener?.invoke()
     }
+
+    // KMK -->
+    /** The spine's display-quality decision for GPU tile refinement. */
+    private fun upscaleGpuSamplerEnabled(): Boolean = try {
+        mihon.app.di.globalAppGraph.upscaleController.useGpuTileSampler()
+    } catch (_: Exception) {
+        false
+    }
+
+    /**
+     * Re-resolves the ArtCNN decision whenever the spine's inputs change (global enable, mode,
+     * tile refinement), so the image-state sync notices even when this viewer's own pref did not.
+     */
+    private fun registerUpscaleDecisionListener() {
+        try {
+            val prefs = mihon.app.di.globalAppGraph.upscalePreferences
+            prefs.enabled().changes().onEach { emitSettingsChange() }.launchIn(scope)
+            prefs.mode().changes().onEach { emitSettingsChange() }.launchIn(scope)
+            prefs.tileRefinement().changes().onEach { emitSettingsChange() }.launchIn(scope)
+        } catch (_: Exception) {
+        }
+    }
+    // KMK <--
 }

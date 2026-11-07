@@ -131,11 +131,28 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
         MTL_CP=":$COROUTINES"
     fi
 
+    # The upscaling spine harness compiles the pure half of upscale.* — identity hashing, the
+    # policy planner, the status hub — and drives its suspend scenarios with runBlocking.
+    # Those four dirs import nothing outside kotlinx/java/upscale, so no stubs ride along.
+    # native/** is excluded (JNI, Bitmap, probe), as are the store/sched files that need Android
+    # types; those are covered by check.sh.
+    UPSCALE_CP=""
+    if [ "$NAME" = "UpscaleSpineHarness" ]; then
+        while IFS= read -r f; do SOURCES+=("$f"); done < <(
+            find "$REPO_ROOT/upscale/src/main/kotlin/upscale/core" \
+                 "$REPO_ROOT/upscale/src/main/kotlin/upscale/identity" \
+                 "$REPO_ROOT/upscale/src/main/kotlin/upscale/policy" \
+                 "$REPO_ROOT/upscale/src/main/kotlin/upscale/status" \
+                 -name '*.kt' 2>/dev/null | sort -u
+        )
+        UPSCALE_CP=":$COROUTINES"
+    fi
+
     OUT=$(mktemp -d)
     echo "== $NAME =="
     # A hard compile error must fail the run, not fall through to "class not found".
     if ! java -cp "$COMPILER_CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
-            -no-stdlib -nowarn -cp "$STDLIB$KXML_CP$MTL_CP" -d "$OUT/classes" "${SOURCES[@]}" "${OPF_SOURCES[@]}" "$MAIN" 2>&1 \
+            -no-stdlib -nowarn -cp "$STDLIB$KXML_CP$MTL_CP$UPSCALE_CP" -d "$OUT/classes" "${SOURCES[@]}" "${OPF_SOURCES[@]}" "$MAIN" 2>&1 \
             | grep -E 'error:' | grep -vE 'unresolved reference'; then
         :
     else
@@ -146,7 +163,7 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     fi
 
     # Kotlin file-facade class for a top-level main() is the file name plus "Kt".
-    if java -cp "$OUT/classes:$STDLIB$KXML_CP$MTL_CP" "${NAME}Kt" 2> "$OUT/run.err"; then
+    if java -cp "$OUT/classes:$STDLIB$KXML_CP$MTL_CP$UPSCALE_CP" "${NAME}Kt" 2> "$OUT/run.err"; then
         RAN=$((RAN + 1))
     else
         # A runtime crash must name the crash: everything above succeeds and passes silently

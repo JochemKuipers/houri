@@ -1,3 +1,6 @@
+/* NCNN upscaler JNI bridge. Moved verbatim from yakuyomi-engine (same tile loop, same
+ * guards) with only the JNI symbol package changed to upscale.native.NcnnUpscaler. The
+ * NCNN prebuilts still come from the external/yakuyomi-engine submodule. */
 #include <jni.h>
 #include <android/log.h>
 #include <algorithm>
@@ -187,7 +190,7 @@ void resampleRgba(
 } // namespace
 
 extern "C" JNIEXPORT jint JNICALL
-Java_exh_yakuyomi_NativeUpscaler_nativeGpuCount(JNIEnv*, jobject) {
+Java_upscale_native_NcnnUpscaler_nativeGpuCount(JNIEnv*, jobject) {
 #if NCNN_VULKAN
     return ncnn::get_gpu_count();
 #else
@@ -196,7 +199,7 @@ Java_exh_yakuyomi_NativeUpscaler_nativeGpuCount(JNIEnv*, jobject) {
 }
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_exh_yakuyomi_NativeUpscaler_nativeCreate(
+Java_upscale_native_NcnnUpscaler_nativeCreate(
     JNIEnv* env,
     jobject,
     jstring paramPath,
@@ -261,13 +264,13 @@ Java_exh_yakuyomi_NativeUpscaler_nativeCreate(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_exh_yakuyomi_NativeUpscaler_nativeDestroy(JNIEnv*, jobject, jlong handle) {
+Java_upscale_native_NcnnUpscaler_nativeDestroy(JNIEnv*, jobject, jlong handle) {
     if (handle == 0) return;
     delete reinterpret_cast<UpscaleSession*>(handle);
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_exh_yakuyomi_NativeUpscaler_nativeProcess(
+Java_upscale_native_NcnnUpscaler_nativeProcess(
     JNIEnv* env,
     jobject,
     jlong handle,

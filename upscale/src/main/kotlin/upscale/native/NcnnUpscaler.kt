@@ -1,10 +1,17 @@
-package exh.yakuyomi
+package upscale.native
 
 import android.graphics.Bitmap
 import android.os.Build
 
-/** Thin lifecycle wrapper around the root-module NCNN upscaler JNI library. */
-object NativeUpscaler {
+/** ARM/Vulkan is optional; x86 keeps the bitmap fallback available. */
+internal fun supportsNativeUpscalerAbi(): Boolean =
+    Build.SUPPORTED_ABIS.any { it == "arm64-v8a" || it == "armeabi-v7a" }
+
+/**
+ * Thin lifecycle wrapper around the NCNN upscaler JNI library. The native bridge lives in this
+ * module (`upscale/src/main/cpp`); the JNI symbols are `Java_upscale_native_NcnnUpscaler_*`.
+ */
+object NcnnUpscaler {
     private const val LIBRARY_NAME = "upscale_ncnn"
 
     @Volatile
@@ -35,7 +42,7 @@ object NativeUpscaler {
         nativeScale: Int,
         inputOrder: Int,
         outputOrder: Int,
-    ): NativeUpscaleSession? {
+    ): NcnnSession? {
         if (!isLoaded()) return null
         val handle = runCatching {
             nativeCreate(
@@ -48,7 +55,7 @@ object NativeUpscaler {
                 threads = (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 8),
             )
         }.getOrDefault(0L)
-        return if (handle == 0L) null else NativeUpscaleSession(handle)
+        return if (handle == 0L) null else NcnnSession(handle)
     }
 
     enum class Backend(val nativeId: Int) {
@@ -83,7 +90,7 @@ object NativeUpscaler {
     internal external fun nativeDestroy(handle: Long)
 }
 
-class NativeUpscaleSession internal constructor(
+class NcnnSession internal constructor(
     private var handle: Long,
 ) : AutoCloseable {
     fun process(
@@ -103,7 +110,7 @@ class NativeUpscaleSession internal constructor(
             val input = IntArray(source.width * source.height)
             source.getPixels(input, 0, source.width, 0, 0, source.width, source.height)
             val output = IntArray(targetWidth * targetHeight)
-            val result = NativeUpscaler.nativeProcess(
+            val result = NcnnUpscaler.nativeProcess(
                 handle = handle,
                 inputPixels = input,
                 width = source.width,
@@ -129,10 +136,6 @@ class NativeUpscaleSession internal constructor(
     override fun close() {
         val old = handle
         handle = 0L
-        if (old != 0L) runCatching { NativeUpscaler.nativeDestroy(old) }
+        if (old != 0L) runCatching { NcnnUpscaler.nativeDestroy(old) }
     }
 }
-
-/** ARM/Vulkan is optional; x86 keeps the bitmap fallback available. */
-internal fun supportsNativeUpscalerAbi(): Boolean =
-    Build.SUPPORTED_ABIS.any { it == "arm64-v8a" || it == "armeabi-v7a" }

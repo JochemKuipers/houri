@@ -1,43 +1,18 @@
-package eu.kanade.tachiyomi.ui.reader.setting
+package upscale.store
 
 import java.io.File
-import java.security.MessageDigest
 
 /**
- * Cache manager for upscaled pages. Extracted from [UpscaleEngine] to isolate
- * I/O, hashing, and eviction concerns (single-responsibility).
+ * The disk cache for upscaled pages. Ported verbatim from the old `UpscaleCacheManager` —
+ * same directory layout, same key validation, same TTL/size pruning, same stream-read and
+ * header checks — because the on-disk contract must survive the cutover untouched.
  *
- * Fixes:
- * - B2: Hash covers the full content for small pages and five spread samples
- *   for large ones (manga pages share JPEG headers/backgrounds, so a single
- *   prefix sample collides across distinct pages).
- * - B3/B9: Prune and read/write are synchronized to avoid concurrent `listFiles` races.
+ * Identity moved to [upscale.identity.UpscaleIdentity]; this class only stores and fetches.
  */
-class UpscaleCacheManager(cacheRoot: File) {
-
-    companion object {
-        private const val CACHE_KEY_VERSION = "upscale-cache-v3"
-        private const val FULL_HASH_MAX_BYTES = 256 * 1024
-        private const val TMP_GRACE_MILLIS = 60L * 60 * 1000
-        const val MAX_CACHE_BYTES = 200L * 1024 * 1024
-        const val TTL_DAYS = 30L
-        private const val JPEG_SOI_0 = 0xFF
-        private const val JPEG_SOI_1 = 0xD8
-        private const val JPEG_MARKER_3 = 0xFF
-
-        fun formatBytes(bytes: Long): String {
-            if (bytes <= 0) return "0 MB"
-            val mb = bytes / (1024 * 1024)
-            val kb = (bytes % (1024 * 1024)) / 1024
-            return if (mb == 0L) "$kb KB" else "$mb.${(kb / 102.4).toInt()} MB"
-        }
-
-        fun formatSummary(bytes: Long, count: Int): String {
-            return "${formatBytes(bytes)} of ${formatBytes(MAX_CACHE_BYTES)} • $count files • $TTL_DAYS-day TTL"
-        }
-    }
-
-    private val cacheDir: File = File(cacheRoot, "upscale_cache").apply {
+class UpscalePageCache(
+    cacheRoot: File,
+) {
+    private val cacheDir = File(cacheRoot, "upscale_cache").apply {
         try {
             mkdirs()
         } catch (_: Exception) {}
@@ -46,58 +21,6 @@ class UpscaleCacheManager(cacheRoot: File) {
     private val maxSingleFileBytes = 20L * 1024 * 1024
     private val ttlMillis = TTL_DAYS * 24 * 60 * 60 * 1000
     private val lock = Any()
-
-    fun cacheKey(bytes: ByteArray, factor: Float, model: String): String {
-        return cacheKeyDetailed(bytes, factor, model, "", "")
-    }
-
-    fun cacheKeyDetailed(
-        bytes: ByteArray,
-        factor: Float,
-        model: String,
-        extra1: String,
-        extra2: String,
-    ): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-        digest.update(CACHE_KEY_VERSION.toByteArray())
-        if (bytes.isNotEmpty()) {
-            if (bytes.size <= FULL_HASH_MAX_BYTES) {
-                digest.update(bytes)
-            } else {
-                // Five spread samples: pages from the same chapter share
-                // headers and backgrounds, so clustered samples collide.
-                sample(digest, bytes, 0, 64 * 1024)
-                sample(digest, bytes, bytes.size / 4, 32 * 1024)
-                sample(digest, bytes, bytes.size / 2, 32 * 1024)
-                sample(digest, bytes, bytes.size * 3 / 4, 32 * 1024)
-                val tailLen = minOf(32 * 1024, bytes.size)
-                digest.update(bytes, bytes.size - tailLen, tailLen)
-            }
-        }
-        digest.update(bytes.size.toString().toByteArray())
-        val safeFactor = if (factor.isFinite()) factor else 2f
-        val normalizedExtras = buildString {
-            append(safeFactor)
-            append('|')
-            append(model.take(64))
-            if (extra1.isNotEmpty()) {
-                append('|')
-                append(extra1.take(64))
-            }
-            if (extra2.isNotEmpty()) {
-                append('|')
-                append(extra2.take(64))
-            }
-        }
-        digest.update(normalizedExtras.toByteArray())
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
-
-    private fun sample(digest: MessageDigest, bytes: ByteArray, offset: Int, maxLen: Int) {
-        if (offset < 0 || offset >= bytes.size) return
-        val len = minOf(maxLen, bytes.size - offset)
-        if (len > 0) digest.update(bytes, offset, len)
-    }
 
     fun getCached(key: String): ByteArray? {
         if (!isValidKey(key)) return null
@@ -124,11 +47,11 @@ class UpscaleCacheManager(cacheRoot: File) {
     }
 
     /**
-     * One key can hold either PNG or WebP, because [UpscaleEngine.compressForCache] picks the
-     * format by encoded size, so the magic has to accept both. A file whose header is neither is
-     * a write that never finished - process death inside `compress`, or the OS reclaiming the
-     * file while the decoder still had it mapped - and handing those bytes to the reader as a
-     * finished page shows a half-decoded image until the 30-day TTL evicts it. Drop it instead.
+     * One key can hold either PNG or WebP, because the encode step picks the format by encoded
+     * size, so the magic has to accept both. A file whose header is neither is a write that never
+     * finished - process death inside `compress`, or the OS reclaiming the file while the decoder
+     * still had it mapped - and handing those bytes to the reader as a finished page shows a
+     * half-decoded image until the 30-day TTL evicts it. Drop it instead.
      */
     private fun hasCompleteImageHeader(bytes: ByteArray): Boolean {
         if (bytes.size >= 3 &&
@@ -292,6 +215,26 @@ class UpscaleCacheManager(cacheRoot: File) {
             now - f.lastModified() > TMP_GRACE_MILLIS
         } catch (_: Exception) {
             false
+        }
+    }
+
+    companion object {
+        const val MAX_CACHE_BYTES = 200L * 1024 * 1024
+        const val TTL_DAYS = 30L
+        private const val TMP_GRACE_MILLIS = 60L * 60 * 1000
+        private const val JPEG_SOI_0 = 0xFF
+        private const val JPEG_SOI_1 = 0xD8
+        private const val JPEG_MARKER_3 = 0xFF
+
+        fun formatBytes(bytes: Long): String {
+            if (bytes <= 0) return "0 MB"
+            val mb = bytes / (1024 * 1024)
+            val kb = (bytes % (1024 * 1024)) / 1024
+            return if (mb == 0L) "$kb KB" else "$mb.${(kb / 102.4).toInt()} MB"
+        }
+
+        fun formatSummary(bytes: Long, count: Int): String {
+            return "${formatBytes(bytes)} of ${formatBytes(MAX_CACHE_BYTES)} • $count files • $TTL_DAYS-day TTL"
         }
     }
 }

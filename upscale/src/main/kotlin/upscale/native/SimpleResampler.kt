@@ -1,13 +1,14 @@
-package eu.kanade.tachiyomi.ui.reader.setting
+package upscale.native
 
 import android.graphics.Bitmap
+import upscale.core.SimpleAlgo
+import upscale.core.UpscalePreset
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 /**
- * Pure scaling strategy extracted from [UpscaleEngine.runUpscale].
- *
- * The simple-mode path uses these bitmap scaling strategies. Native mode uses
- * the same dimension and memory guards around the NCNN/ONNX inference path, so
- * changing the scaling strategy does not affect backend/session selection.
+ * Pure scaling strategy for the simple path, and the dimension/memory guards around the native
+ * inference path. Ported from the old `UpscaleScalingStrategy` with the same behavior.
  *
  * Quality notes:
  * - `BILINEAR` is a single `createScaledBitmap(..., filter = true)` pass.
@@ -21,19 +22,10 @@ import android.graphics.Bitmap
  * [scaledDimensions]; callers must still bounds-check *before* decoding (this
  * object only sees already-decoded bitmaps).
  */
-object UpscaleScalingStrategy {
-    private const val MAX_DIM = 8192
-    private const val MAX_PIXELS = 16L * 1024 * 1024
-    private const val MIN_SCALE_DELTA = 0.02f
-
-    fun computeScale(factor: Float, preset: UpscalePreferences.Preset): Float {
-        val safeFactor = factor.takeIf { it.isFinite() }?.coerceIn(1f, 4f) ?: 2f
-        return when (preset) {
-            UpscalePreferences.Preset.FAST -> 1.5f
-            UpscalePreferences.Preset.BALANCED -> safeFactor
-            UpscalePreferences.Preset.HIGH -> (safeFactor * 1.2f).coerceAtMost(4f)
-        }
-    }
+object SimpleResampler {
+    const val MAX_DIM = 8192
+    const val MAX_PIXELS = 16L * 1024 * 1024
+    const val MIN_SCALE_DELTA = 0.02f
 
     fun scaledDimensions(srcW: Int, srcH: Int, scale: Float): Pair<Int, Int> {
         if (srcW <= 0 || srcH <= 0) return 1 to 1
@@ -48,7 +40,7 @@ object UpscaleScalingStrategy {
         var newH = (srcH * uniform).toInt().coerceAtLeast(1).coerceAtMost(MAX_DIM)
         val pixels = newW.toLong() * newH.toLong()
         if (pixels > MAX_PIXELS) {
-            val ratio = kotlin.math.sqrt(MAX_PIXELS.toDouble() / pixels.toDouble())
+            val ratio = sqrt(MAX_PIXELS.toDouble() / pixels.toDouble())
             newW = (newW * ratio).toInt().coerceAtLeast(1).coerceAtMost(MAX_DIM)
             newH = (newH * ratio).toInt().coerceAtLeast(1).coerceAtMost(MAX_DIM)
         }
@@ -57,17 +49,17 @@ object UpscaleScalingStrategy {
 
     fun exceeds16MP(w: Int, h: Int): Boolean = w.toLong() * h.toLong() > MAX_PIXELS
 
-    fun isNearIdentityScale(scale: Float): Boolean = !scale.isFinite() || kotlin.math.abs(scale - 1f) < MIN_SCALE_DELTA
+    fun isNearIdentityScale(scale: Float): Boolean = !scale.isFinite() || abs(scale - 1f) < MIN_SCALE_DELTA
 
     fun upscaleBitmap(src: Bitmap, scale: Float): Bitmap? {
-        return upscaleBitmapWithAlgo(src, scale, UpscalePreferences.SimpleAlgo.BICUBIC)
+        return upscaleBitmapWithAlgo(src, scale, SimpleAlgo.BICUBIC)
     }
 
-    fun upscaleBitmapWithAlgo(src: Bitmap, scale: Float, algo: UpscalePreferences.SimpleAlgo): Bitmap? {
+    fun upscaleBitmapWithAlgo(src: Bitmap, scale: Float, algo: SimpleAlgo): Bitmap? {
         if (src.isRecycled) return null
         if (src.width <= 0 || src.height <= 0) return null
         if (isNearIdentityScale(scale)) return null
-        // Upscale-only contract: never downscale through this path. The engine
+        // Upscale-only contract: never downscale through this path. The policy
         // already coerces to >= 1f; clamp again so direct callers cannot shrink.
         val safeScale = scale.takeIf { it.isFinite() && it > 0f }?.coerceIn(1f, 4f) ?: return null
         if (isNearIdentityScale(safeScale)) return null
@@ -76,9 +68,9 @@ object UpscaleScalingStrategy {
         // scaledDimensions clamps to MAX_PIXELS/MAX_DIM, so the output is already within budget.
         return try {
             when (algo) {
-                UpscalePreferences.SimpleAlgo.NEAREST -> Bitmap.createScaledBitmap(src, newW, newH, false)
-                UpscalePreferences.SimpleAlgo.BILINEAR -> Bitmap.createScaledBitmap(src, newW, newH, true)
-                UpscalePreferences.SimpleAlgo.BICUBIC -> upscaleTwoPass(src, newW, newH, safeScale)
+                SimpleAlgo.NEAREST -> Bitmap.createScaledBitmap(src, newW, newH, false)
+                SimpleAlgo.BILINEAR -> Bitmap.createScaledBitmap(src, newW, newH, true)
+                SimpleAlgo.BICUBIC -> upscaleTwoPass(src, newW, newH, safeScale)
             }
         } catch (e: OutOfMemoryError) {
             System.gc()
@@ -91,17 +83,16 @@ object UpscaleScalingStrategy {
     }
 
     /**
-     * Two-pass filtered upscale used for [UpscalePreferences.SimpleAlgo.BICUBIC].
-     * Splits [scale] into two smaller filtered jumps (via sqrt) which aliases
-     * less than one large jump. Falls back to a single pass when the scale is
-     * small or the intermediate step would be a no-op. Returns null on OOM.
+     * Two-pass filtered upscale used for [SimpleAlgo.BICUBIC]. Splits [scale] into two smaller
+     * filtered jumps (via sqrt) which aliases less than one large jump. Falls back to a single
+     * pass when the scale is small or the intermediate step would be a no-op. Returns null on OOM.
      */
     private fun upscaleTwoPass(src: Bitmap, targetW: Int, targetH: Int, scale: Float): Bitmap? {
         val approxScale = maxOf(targetW.toFloat() / src.width, targetH.toFloat() / src.height)
         if (!approxScale.isFinite() || approxScale < 1.5f) {
             return Bitmap.createScaledBitmap(src, targetW, targetH, true)
         }
-        val midScale = kotlin.math.sqrt(approxScale.toDouble()).toFloat()
+        val midScale = sqrt(approxScale.toDouble()).toFloat()
         if (!midScale.isFinite() || isNearIdentityScale(midScale)) {
             return Bitmap.createScaledBitmap(src, targetW, targetH, true)
         }
