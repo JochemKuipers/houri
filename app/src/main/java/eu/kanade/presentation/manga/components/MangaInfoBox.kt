@@ -1,38 +1,19 @@
 package eu.kanade.presentation.manga.components
 
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.graphics.res.animatedVectorResource
-import androidx.compose.animation.graphics.res.rememberAnimatedVectorPainter
-import androidx.compose.animation.graphics.vector.AnimatedImageVector
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.appendInlineContent
-import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.foundation.text.selection.SelectionState
-import androidx.compose.foundation.text.selection.rememberSelectionState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.CallMerge
 import androidx.compose.material.icons.filled.Brush
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.HourglassDisabled
-import androidx.compose.material.icons.filled.HourglassEmpty
 import androidx.compose.material.icons.filled.PersonOutline
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.AttachMoney
@@ -40,13 +21,8 @@ import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Done
 import androidx.compose.material.icons.outlined.DoneAll
-import androidx.compose.material.icons.outlined.FavoriteBorder
-import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Pause
-import androidx.compose.material.icons.outlined.Public
-import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Schedule
-import androidx.compose.material.icons.outlined.Sync
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -56,77 +32,46 @@ import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.foundation.background
 import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
-import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.PointerType
-import androidx.compose.ui.input.pointer.changedToDown
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.vectorResource
-import androidx.compose.ui.text.LinkAnnotation
-import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withLink
-import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil3.Image
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
-import com.mikepenz.markdown.model.markdownAnnotator
-import com.mikepenz.markdown.model.markdownAnnotatorConfig
-import com.mikepenz.markdown.utils.getUnescapedTextInNode
-import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.components.DropdownMenu
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.util.system.copyToClipboard
 import exh.util.isLewd
 import mihon.app.di.globalAppGraph
-import org.intellij.markdown.MarkdownElementTypes
-import org.intellij.markdown.MarkdownTokenTypes
-import org.intellij.markdown.ast.findChildOfType
-import tachiyomi.domain.library.service.LibraryPreferences
-import tachiyomi.domain.library.service.LibraryPreferences.Companion.MANGA_NON_COMPLETED
-import tachiyomi.domain.manga.interactor.FetchInterval
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
-import tachiyomi.i18n.sy.SYMR
-import tachiyomi.presentation.core.components.material.DISABLED_ALPHA
-import tachiyomi.presentation.core.components.material.TextButton
 import tachiyomi.presentation.core.components.material.padding
-import tachiyomi.presentation.core.i18n.pluralStringResource
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.clickableNoIndication
 import tachiyomi.presentation.core.util.collectAsState
 import tachiyomi.presentation.core.util.secondaryItemAlpha
-import java.time.Instant
-import java.time.temporal.ChronoUnit
-import kotlin.math.roundToInt
 import tachiyomi.domain.manga.model.MangaCover as DomainMangaCover
 
 @Composable
@@ -244,308 +189,6 @@ fun MangaInfoBox(
                     // KMK <--
                     displayTitle = titleOverride,
                 )
-            }
-        }
-    }
-}
-
-@Composable
-fun MangaActionRow(
-    favorite: Boolean,
-    trackingCount: Int,
-    nextUpdate: Instant?,
-    isUserIntervalMode: Boolean,
-    onAddToLibraryClicked: () -> Unit,
-    onWebViewClicked: (() -> Unit)?,
-    onWebViewLongClicked: (() -> Unit)?,
-    onTrackingClicked: () -> Unit,
-    onEditIntervalClicked: (() -> Unit)?,
-    onEditCategory: (() -> Unit)?,
-    // SY -->
-    onMergeClicked: (() -> Unit)?,
-    // SY <--
-    // KMK -->
-    status: Long,
-    interval: Int,
-    rereadCount: Int,
-    isRereading: Boolean,
-    onRereadClicked: (() -> Unit)?,
-    // KMK --> Only non-null when the entry is an `.epub` in a local library, i.e. when the question
-    // has an answer. A comic from an extension gets no such button, because there is nothing to
-    // decide for it.
-    onToggleEntryTypeClicked: (() -> Unit)?,
-    // KMK <--
-    modifier: Modifier = Modifier,
-) {
-    // KMK -->
-    val libraryPreferences: LibraryPreferences = globalAppGraph.libraryPreferences
-    val restrictions = libraryPreferences.autoUpdateMangaRestrictions().get()
-    val notSkipCompleted = MANGA_NON_COMPLETED !in restrictions || status != SManga.COMPLETED.toLong()
-    val selectedInterval by remember(interval) { mutableIntStateOf(if (interval < 0) -interval else 0) }
-    // KMK <--
-    val defaultActionButtonColor = MaterialTheme.colorScheme.onSurface.copy(alpha = DISABLED_ALPHA)
-
-    val nextUpdateDays = remember(nextUpdate, selectedInterval, notSkipCompleted) {
-        return@remember if (nextUpdate != null &&
-            // KMK -->
-            notSkipCompleted
-            // KMK <--
-        ) {
-            val now = Instant.now()
-            now.until(nextUpdate, ChronoUnit.DAYS).toInt().coerceAtLeast(0)
-                // KMK -->
-                .takeIf { selectedInterval != FetchInterval.MANUAL_DISABLE }
-                ?: FetchInterval.MANUAL_DISABLE
-            // KMK <--
-        } else {
-            null
-        }
-    }
-
-    Row(modifier = modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp)) {
-        MangaActionButton(
-            title = if (favorite) {
-                stringResource(MR.strings.in_library)
-            } else {
-                stringResource(MR.strings.add_to_library)
-            },
-            icon = if (favorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
-            color = if (favorite) MaterialTheme.colorScheme.primary else defaultActionButtonColor,
-            onClick = onAddToLibraryClicked,
-            onLongClick = onEditCategory,
-        )
-        MangaActionButton(
-            title = when (nextUpdateDays) {
-                null -> stringResource(MR.strings.not_applicable)
-                0 -> stringResource(MR.strings.manga_interval_expected_update_soon)
-                // KMK -->
-                FetchInterval.MANUAL_DISABLE -> stringResource(MR.strings.disabled)
-                // Custom cadence: surface the user-set frequency instead of its countdown
-                else -> if (isUserIntervalMode && selectedInterval in 1..FetchInterval.MAX_INTERVAL) {
-                    stringResource(
-                        KMR.strings.manga_interval_every,
-                        pluralStringResource(MR.plurals.day, count = selectedInterval, selectedInterval),
-                    )
-                } else {
-                    pluralStringResource(
-                        MR.plurals.day,
-                        count = nextUpdateDays,
-                        nextUpdateDays,
-                    )
-                }
-                // KMK <--
-            },
-            icon = Icons.Default.HourglassEmpty
-                // KMK -->
-                .takeIf { nextUpdateDays != FetchInterval.MANUAL_DISABLE }
-                ?: Icons.Default.HourglassDisabled,
-            // KMK <--
-            color = if (isUserIntervalMode ||
-                // KMK -->
-                nextUpdateDays?.let { it <= 1 } == true
-                // KMK <--
-            ) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                defaultActionButtonColor
-            },
-            onClick = { onEditIntervalClicked?.invoke() },
-        )
-        MangaActionButton(
-            title = if (trackingCount == 0) {
-                stringResource(MR.strings.manga_tracking_tab)
-            } else {
-                pluralStringResource(MR.plurals.num_trackers, count = trackingCount, trackingCount)
-            },
-            icon = if (trackingCount == 0) Icons.Outlined.Sync else Icons.Outlined.Done,
-            color = if (trackingCount == 0) defaultActionButtonColor else MaterialTheme.colorScheme.primary,
-            onClick = onTrackingClicked,
-        )
-        // KMK --> Render this as a comic instead. Offered *before* the reader has been asked which it is:
-        // detection is a heuristic and art-book imports are exactly the case it is likeliest to get
-        // wrong, so the override has to be reachable without first opening the book and seeing the
-        // wrong thing.
-        if (onToggleEntryTypeClicked != null) {
-            MangaActionButton(
-                title = stringResource(KMR.strings.entry_type_render_as_comic),
-                icon = Icons.Outlined.MenuBook,
-                color = defaultActionButtonColor,
-                onClick = onToggleEntryTypeClicked,
-            )
-        }
-        // KMK <--
-        if (onRereadClicked != null && (isRereading || rereadCount > 0)) {
-            MangaActionButton(
-                title = if (isRereading) {
-                    stringResource(KMR.strings.rereading_label)
-                } else {
-                    stringResource(KMR.strings.manga_reread_count_button, rereadCount)
-                },
-                icon = Icons.Outlined.Refresh,
-                color = if (isRereading) MaterialTheme.colorScheme.primary else defaultActionButtonColor,
-                onClick = onRereadClicked,
-            )
-        }
-        if (onWebViewClicked != null) {
-            MangaActionButton(
-                title = stringResource(MR.strings.action_web_view),
-                icon = Icons.Outlined.Public,
-                color = MaterialTheme.colorScheme.primary, // KMK: defaultActionButtonColor
-                onClick = onWebViewClicked,
-                onLongClick = onWebViewLongClicked,
-            )
-        }
-        // SY -->
-        if (onMergeClicked != null) {
-            MangaActionButton(
-                title = stringResource(SYMR.strings.merge),
-                icon = Icons.AutoMirrored.Outlined.CallMerge,
-                color = MaterialTheme.colorScheme.primary, // KMK: defaultActionButtonColor
-                onClick = onMergeClicked,
-            )
-        }
-        // SY <--
-    }
-}
-
-@Composable
-fun ExpandableMangaDescription(
-    defaultExpandState: Boolean,
-    description: String?,
-    tagsProvider: () -> List<String>?,
-    notes: String,
-    onTagSearch: (String) -> Unit,
-    onCopyTagToClipboard: (tag: String) -> Unit,
-    onEditNotes: () -> Unit,
-    // SY -->
-    searchMetadataChips: SearchMetadataChips?,
-    doSearch: (query: String, global: Boolean) -> Unit,
-    // SY <--
-    modifier: Modifier = Modifier,
-    // KMK -->
-    isLewd: Boolean = false,
-    // KMK <--
-) {
-    // KMK -->
-    val uiPreferences = globalAppGraph.uiPreferences
-    val pureDarkMode = uiPreferences.themeDarkAmoled().get()
-    val censorEnabled by uiPreferences.censorLewdManga().collectAsState()
-    val shouldCensor = censorEnabled && isLewd
-    // KMK <--
-    Column(modifier = modifier) {
-        val (expanded, onExpanded) = rememberSaveable {
-            mutableStateOf(defaultExpandState)
-        }
-        val rawDesc = description.takeIf { !it.isNullOrBlank() }
-            ?: stringResource(MR.strings.description_placeholder)
-        val desc = if (shouldCensor) stringResource(KMR.strings.censored_description) else rawDesc
-
-        MangaSummary(
-            description = desc,
-            expanded = expanded,
-            notes = notes,
-            onEditNotesClicked = onEditNotes,
-            modifier = Modifier
-                .padding(top = 8.dp)
-                .padding(horizontal = 16.dp)
-                .then(if (shouldCensor) Modifier.blur(4.dp) else Modifier)
-                .clickableNoIndication { onExpanded(!expanded) },
-        )
-        val rawTags = tagsProvider()
-        val tags = if (shouldCensor) listOf(stringResource(KMR.strings.censored_tag)) else rawTags
-        val effectiveChips = if (shouldCensor) null else searchMetadataChips
-        if (!tags.isNullOrEmpty()) {
-            Box(
-                modifier = Modifier
-                    .padding(top = 8.dp)
-                    .padding(vertical = 12.dp)
-                    .animateContentSize(animationSpec = spring())
-                    .fillMaxWidth(),
-            ) {
-                var showMenu by remember { mutableStateOf(false) }
-                var tagSelected by remember { mutableStateOf("") }
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text(text = stringResource(MR.strings.action_search)) },
-                        onClick = {
-                            onTagSearch(tagSelected)
-                            showMenu = false
-                        },
-                    )
-                    // SY -->
-                    DropdownMenuItem(
-                        text = { Text(text = stringResource(MR.strings.action_global_search)) },
-                        onClick = {
-                            doSearch(tagSelected, true)
-                            showMenu = false
-                        },
-                    )
-                    // SY <--
-                    DropdownMenuItem(
-                        text = { Text(text = stringResource(MR.strings.action_copy_to_clipboard)) },
-                        onClick = {
-                            onCopyTagToClipboard(tagSelected)
-                            showMenu = false
-                        },
-                    )
-                }
-                if (expanded) {
-                    // SY -->
-                    if (effectiveChips != null) {
-                        NamespaceTags(
-                            tags = effectiveChips,
-                            onClick = {
-                                tagSelected = it
-                                showMenu = true
-                            },
-                            // KMK -->
-                            pureDarkMode = pureDarkMode,
-                            // KMK <--
-                        )
-                    } else {
-                        // SY <--
-                        FlowRow(
-                            modifier = Modifier.padding(horizontal = 16.dp),
-                            horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
-                        ) {
-                            tags.forEach {
-                                TagsChip(
-                                    modifier = DefaultTagChipModifier,
-                                    text = it,
-                                    onClick = {
-                                        tagSelected = it
-                                        showMenu = true
-                                    },
-                                    // KMK -->
-                                    pureDarkMode = pureDarkMode,
-                                    // KMK <--
-                                )
-                            }
-                        }
-                    }
-                } else {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = MaterialTheme.padding.medium),
-                        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
-                    ) {
-                        items(items = tags) {
-                            TagsChip(
-                                modifier = DefaultTagChipModifier,
-                                text = it,
-                                onClick = {
-                                    tagSelected = it
-                                    showMenu = true
-                                },
-                                // KMK -->
-                                pureDarkMode = pureDarkMode,
-                                // KMK <--
-                            )
-                        }
-                    }
-                }
             }
         }
     }
@@ -971,200 +614,6 @@ private fun ColumnScope.MangaContentInfo(
                 ),
                 overflow = TextOverflow.Ellipsis,
                 maxLines = 1,
-            )
-        }
-    }
-}
-
-@Composable
-private fun descriptionAnnotator(loadImages: Boolean, linkStyle: SpanStyle) = remember(loadImages, linkStyle) {
-    markdownAnnotator(
-        annotate = { content, child ->
-            if (!loadImages && child.type == MarkdownElementTypes.IMAGE) {
-                val inlineLink = child.findChildOfType(MarkdownElementTypes.INLINE_LINK)
-
-                val url = inlineLink?.findChildOfType(MarkdownElementTypes.LINK_DESTINATION)
-                    ?.getUnescapedTextInNode(content)
-                    ?: inlineLink?.findChildOfType(MarkdownElementTypes.AUTOLINK)
-                        ?.findChildOfType(MarkdownTokenTypes.AUTOLINK)
-                        ?.getUnescapedTextInNode(content)
-                    ?: return@markdownAnnotator false
-
-                val textNode = inlineLink?.findChildOfType(MarkdownElementTypes.LINK_TITLE)
-                    ?: inlineLink?.findChildOfType(MarkdownElementTypes.LINK_TEXT)
-                val altText = textNode?.findChildOfType(MarkdownTokenTypes.TEXT)
-                    ?.getUnescapedTextInNode(content).orEmpty()
-
-                withLink(LinkAnnotation.Url(url = url)) {
-                    pushStyle(linkStyle)
-                    appendInlineContent(MARKDOWN_INLINE_IMAGE_TAG)
-                    append(altText)
-                    pop()
-                }
-
-                return@markdownAnnotator true
-            }
-
-            if (child.type in DISALLOWED_MARKDOWN_TYPES) {
-                append(content.substring(child.startOffset, child.endOffset))
-                return@markdownAnnotator true
-            }
-
-            false
-        },
-        config = markdownAnnotatorConfig(
-            eolAsNewLine = true,
-        ),
-    )
-}
-
-/**
- * Work around an AndroidX crash (`IndexOutOfBoundsException` in `MultiSelectionLayout`): a text
- * selection snapshots the selectable nodes it was made against and refers to them by index, so
- * when a summary re-measures underneath a live selection, the next pointer to resolve it indexes
- * past the end of the live node list. Selecting with a finger and then clicking the same text with
- * a mouse is enough to hit it, so the selection is dropped before a non-touch press is handled.
- */
-internal fun Modifier.dismissSelectionOnNonTouchPress(state: SelectionState) = pointerInput(state) {
-    awaitPointerEventScope {
-        while (true) {
-            val event = awaitPointerEvent(PointerEventPass.Initial)
-            if (event.changes.any { it.changedToDown() && it.type != PointerType.Touch }) {
-                state.clear()
-            }
-        }
-    }
-}
-
-@Composable
-private fun MangaSummary(
-    description: String,
-    notes: String,
-    expanded: Boolean,
-    onEditNotesClicked: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val preferences = remember { globalAppGraph.uiPreferences }
-    val loadImages = remember { preferences.imagesInDescription().get() }
-    val animProgress by animateFloatAsState(
-        targetValue = if (expanded) 1f else 0f,
-        label = "summary",
-    )
-    var infoHeight by remember { mutableIntStateOf(0) }
-    val descriptionSelectionState = rememberSelectionState()
-    LaunchedEffect(infoHeight, description, notes) {
-        descriptionSelectionState.clear()
-    }
-    Layout(
-        modifier = modifier
-            .clipToBounds()
-            .dismissSelectionOnNonTouchPress(descriptionSelectionState),
-        contents = listOf(
-            {
-                // shrunk: calculate minimum size when shrunk
-                Text(
-                    // Shows at least 3 lines if no notes
-                    // when there are notes show 6
-                    text = if (notes.isBlank()) "\n\n" else "\n\n\n\n\n",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            },
-            {
-                // actual: the actual displayed content
-                Column(
-                    modifier = Modifier.onSizeChanged { size ->
-                        infoHeight = size.height
-                    },
-                ) {
-                    MangaNotesSection(
-                        content = notes,
-                        expanded = expanded,
-                        onEditNotes = onEditNotesClicked,
-                    )
-                    SelectionContainer(state = descriptionSelectionState) {
-                        MarkdownRender(
-                            content = description,
-                            modifier = Modifier.secondaryItemAlpha(),
-                            annotator = descriptionAnnotator(
-                                loadImages = loadImages,
-                                linkStyle = getMarkdownLinkStyle().toSpanStyle(),
-                            ),
-                            loadImages = loadImages,
-                        )
-                    }
-                }
-            },
-            {
-                // scrim
-                val colors = listOf(Color.Transparent, MaterialTheme.colorScheme.background)
-                Box(
-                    modifier = Modifier.background(Brush.verticalGradient(colors = colors)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    val image = AnimatedImageVector.animatedVectorResource(R.drawable.anim_caret_down)
-                    Icon(
-                        painter = rememberAnimatedVectorPainter(image, !expanded),
-                        contentDescription = stringResource(
-                            if (expanded) MR.strings.manga_info_collapse else MR.strings.manga_info_expand,
-                        ),
-                        // KMK -->
-                        tint = MaterialTheme.colorScheme.primary, // KMK: onBackground
-                        // KMK <--
-                        modifier = Modifier.background(Brush.radialGradient(colors = colors.asReversed())),
-                    )
-                }
-            },
-        ),
-    ) { (shrunk, actual, scrim), constraints ->
-        val shrunkHeight = shrunk.single()
-            .measure(constraints)
-            .height
-        val heightDelta = infoHeight - shrunkHeight
-        val scrimHeight = 24.dp.roundToPx()
-
-        val actualPlaceable = actual.single()
-            .measure(constraints)
-        val scrimPlaceable = scrim.single()
-            .measure(Constraints.fixed(width = constraints.maxWidth, height = scrimHeight))
-
-        val currentHeight = shrunkHeight + ((heightDelta + scrimHeight) * animProgress).roundToInt()
-        layout(constraints.maxWidth, currentHeight) {
-            actualPlaceable.place(0, 0)
-
-            val scrimY = currentHeight - scrimHeight
-            scrimPlaceable.place(0, scrimY)
-        }
-    }
-}
-
-private val DefaultTagChipModifier = Modifier.padding(vertical = 4.dp)
-
-@Composable
-private fun RowScope.MangaActionButton(
-    title: String,
-    icon: ImageVector,
-    color: Color,
-    onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null,
-) {
-    TextButton(
-        onClick = onClick,
-        modifier = Modifier.weight(1f),
-        onLongClick = onLongClick,
-    ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = color,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = title,
-                color = color,
-                fontSize = 12.sp,
-                textAlign = TextAlign.Center,
             )
         }
     }

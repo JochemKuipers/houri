@@ -395,7 +395,7 @@ fun LibraryTab() {
 
     val onDismissRequest = screenModel::closeDialog
     when (val dialog = state.dialog) {
-        is LibraryViewModel.Dialog.SettingsSheet -> run {
+        is LibraryDialog.SettingsSheet -> run {
             // KMK --> per-category item counts for the filter dialog
             val filterCounts = remember(state.libraryData.favorites) {
                 buildMap<Long, Int> {
@@ -419,7 +419,7 @@ fun LibraryTab() {
                 // KMK <--
             )
         }
-        is LibraryViewModel.Dialog.ChangeCategory -> {
+        is LibraryDialog.ChangeCategory -> {
             ChangeCategoryDialog(
                 initialSelection = dialog.initialSelection,
                 onDismissRequest = onDismissRequest,
@@ -436,7 +436,7 @@ fun LibraryTab() {
             )
         }
         // KMK -->
-        is LibraryViewModel.Dialog.CreateSubcategory -> {
+        is LibraryDialog.CreateSubcategory -> {
             CreateSubcategoryDialog(
                 onDismissRequest = onDismissRequest,
                 onCreate = { name, type ->
@@ -447,7 +447,7 @@ fun LibraryTab() {
             )
         }
         // KMK <--
-        is LibraryViewModel.Dialog.DeleteManga -> {
+        is LibraryDialog.DeleteManga -> {
             DeleteLibraryMangaDialog(
                 containsLocalManga = dialog.manga.any(Manga::isLocal),
                 onDismissRequest = onDismissRequest,
@@ -458,7 +458,7 @@ fun LibraryTab() {
             )
         }
         // SY -->
-        LibraryViewModel.Dialog.SyncFavoritesWarning -> {
+        LibraryDialog.SyncFavoritesWarning -> {
             SyncFavoritesWarningDialog(
                 onDismissRequest = onDismissRequest,
                 onAccept = {
@@ -467,7 +467,7 @@ fun LibraryTab() {
                 },
             )
         }
-        LibraryViewModel.Dialog.SyncFavoritesConfirm -> {
+        LibraryDialog.SyncFavoritesConfirm -> {
             SyncFavoritesConfirmDialog(
                 onDismissRequest = onDismissRequest,
                 onAccept = {
@@ -476,7 +476,7 @@ fun LibraryTab() {
                 },
             )
         }
-        is LibraryViewModel.Dialog.RecommendationSearchSheet -> {
+        is LibraryDialog.RecommendationSearchSheet -> {
             RecommendationSearchBottomSheetDialog(
                 onDismissRequest = onDismissRequest,
                 onSearchRequest = {

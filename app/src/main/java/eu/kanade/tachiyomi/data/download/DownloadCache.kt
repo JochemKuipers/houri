@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.data.download
 
 import android.content.Context
-import androidx.core.net.toUri
 import com.hippo.unifile.UniFile
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
@@ -31,15 +30,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.KSerializer
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.decodeFromByteArray
-import kotlinx.serialization.descriptors.PrimitiveKind
-import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
-import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encodeToByteArray
-import kotlinx.serialization.encoding.Decoder
-import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.protobuf.ProtoBuf
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
@@ -566,55 +558,6 @@ class DownloadCache(
     }
 }
 
-/**
- * Class to store the files under the root downloads directory.
- */
-@Serializable
-private class RootDirectory(
-    @Serializable(with = UniFileAsStringSerializer::class)
-    val dir: UniFile?,
-    var sourceDirs: Map<Long, SourceDirectory> = mapOf(),
-)
-
-/**
- * Class to store the files under a source directory.
- */
-@Serializable
-private class SourceDirectory(
-    @Serializable(with = UniFileAsStringSerializer::class)
-    val dir: UniFile?,
-    var mangaDirs: Map<String, MangaDirectory> = mapOf(),
-)
-
-/**
- * Class to store the files under a manga directory.
- */
-@Serializable
-private class MangaDirectory(
-    @Serializable(with = UniFileAsStringSerializer::class)
-    val dir: UniFile?,
-    var chapterDirs: MutableSet<String> = mutableSetOf(),
-)
-
-private object UniFileAsStringSerializer : KSerializer<UniFile?> {
-    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("UniFile", PrimitiveKind.STRING)
-
-    override fun serialize(encoder: Encoder, value: UniFile?) {
-        return if (value == null) {
-            encoder.encodeNull()
-        } else {
-            encoder.encodeString(value.uri.toString())
-        }
-    }
-
-    override fun deserialize(decoder: Decoder): UniFile? {
-        return if (decoder.decodeNotNullMark()) {
-            UniFile.fromUri(globalAppGraph.context, decoder.decodeString().toUri())
-        } else {
-            decoder.decodeNull()
-        }
-    }
-}
 
 // KMK -->
 /** One manga directory as seen in the download tree snapshot. */

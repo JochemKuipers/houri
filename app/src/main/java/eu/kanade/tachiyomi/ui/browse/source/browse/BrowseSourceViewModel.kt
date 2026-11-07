@@ -71,8 +71,6 @@ import mihon.domain.source.interactor.UpdateMangaFromRemote
 import tachiyomi.core.common.preference.CheckboxState
 import tachiyomi.core.common.preference.mapAsCheckboxState
 import tachiyomi.core.common.util.lang.launchIO
-import tachiyomi.core.common.util.lang.launchNonCancellable
-import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.category.interactor.SetMangaCategories
@@ -90,13 +88,10 @@ import tachiyomi.domain.source.interactor.DeleteSavedSearchById
 import tachiyomi.domain.source.interactor.GetRemoteManga
 import tachiyomi.domain.source.interactor.InsertSavedSearch
 import tachiyomi.domain.source.model.EXHSavedSearch
-import tachiyomi.domain.source.model.SavedSearch
 import tachiyomi.domain.source.model.StubSource
 import tachiyomi.domain.source.repository.SourcePagingSource
 import tachiyomi.domain.source.service.SourceManager
-import tachiyomi.i18n.sy.SYMR
 import tachiyomi.source.local.isLocal
-import xyz.nulldev.ts.api.http.serializer.FilterSerializer
 import java.time.Instant
 import kotlin.time.Duration.Companion.seconds
 import eu.kanade.tachiyomi.source.model.Filter as SourceModelFilter
@@ -168,47 +163,11 @@ open class BrowseSourceViewModel(
 
     val startExpanded by uiPreferences.expandFilters().asState(viewModelScope)
 
-    private val filterSerializer = FilterSerializer()
-
-    private fun loadSavedFilterList(): FilterList? {
-        if (!libraryPreferences.sourceLevelFiltering().get()) return null
-        try {
-            val defaultList = source.getFilterList()
-            val sortIndex = defaultList.filterIsInstance<SourceModelFilter.Sort>().firstOrNull()?.state?.index
-            if (sortIndex != null) {
-                val perSortJson = libraryPreferences.sourceFilterJsonForSort(sourceId, sortIndex).get()
-                if (perSortJson.isNotBlank()) {
-                    val arr = Json.decodeFromString<JsonArray>(perSortJson)
-                    val list = source.getFilterList()
-                    filterSerializer.deserialize(list, arr)
-                    return list
-                }
-            }
-        } catch (_: Exception) {
-        }
-        val baseJson = libraryPreferences.sourceFilterJson(sourceId).get()
-        if (baseJson.isBlank()) return null
-        return try {
-            val arr = Json.decodeFromString<JsonArray>(baseJson)
-            val list = source.getFilterList()
-            filterSerializer.deserialize(list, arr)
-            list
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun persistFilterList(filters: FilterList) {
-        if (!libraryPreferences.sourceLevelFiltering().get()) return
-        try {
-            val json = filterSerializer.serialize(filters)
-            val str = Json.encodeToString(json)
-            libraryPreferences.setSourceFilterJson(sourceId, str)
-            val sort = filters.filterIsInstance<SourceModelFilter.Sort>().firstOrNull()?.state
-            if (sort != null) libraryPreferences.setSourceFilterJsonForSort(sourceId, sort.index, str)
-        } catch (_: Exception) {
-        }
-    }
+    private val filterStore = BrowseSourceFilterStore(
+        provideSourceId = { sourceId },
+        provideSource = { source },
+        libraryPreferences = libraryPreferences,
+    )
     // SY <--
 
     // KMK -->
@@ -216,7 +175,7 @@ open class BrowseSourceViewModel(
     // KMK <--
 
     init {
-        val saved = loadSavedFilterList()
+        val saved = filterStore.loadSavedFilterList()
         mutableState.update {
             var query: String? = null
             var listing = it.listing
@@ -255,7 +214,7 @@ open class BrowseSourceViewModel(
                     // Deserialize into a fresh private filter tree and publish it atomically
                     // afterwards, so composition never observes a half-mutated list.
                     val restored = source.getFilterList()
-                    filterSerializer.deserialize(restored, filtersJson)
+                    filterStore.deserializeInto(restored, filtersJson)
                     search(filters = restored)
                 }
             }
@@ -400,7 +359,7 @@ open class BrowseSourceViewModel(
         // KMK <--
     ) {
         if (filters != null) {
-            if (savedSearchId == null) persistFilterList(filters)
+            if (savedSearchId == null) filterStore.persistFilterList(filters)
             setFilters(filters)
         }
         val input = state.value.listing as? Listing.Search
@@ -720,105 +679,40 @@ open class BrowseSourceViewModel(
         val isUserQuery get() = listing is Listing.Search && !listing.query.isNullOrEmpty()
     }
 
-    // KMK -->
-    private fun reloadSavedSearches() {
-        viewModelScope.launchIO {
-            getExhSavedSearch.await(source.id, source::getFilterList)
-                .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER, EXHSavedSearch::name))
-                .let { savedSearches ->
-                    mutableState.update { it.copy(savedSearches = savedSearches.toImmutableList()) }
-                }
-        }
-    }
-    // KMK <--
-
     // EXH -->
+    private val savedSearchController = BrowseSavedSearchController(
+        scope = viewModelScope,
+        getExhSavedSearch = getExhSavedSearch,
+        insertSavedSearch = insertSavedSearch,
+        deleteSavedSearchById = deleteSavedSearchById,
+        filterStore = filterStore,
+        provideSource = { source },
+        provideState = { state.value },
+        updateState = { mutableState.update(it) },
+        setDialog = { setDialog(it) },
+        resetFilters = { resetFilters() },
+    )
+
+    private fun reloadSavedSearches() = savedSearchController.reloadSavedSearches()
+
     /** Show a dialog to enter name for new saved search */
-    fun onSaveSearch() {
-        viewModelScope.launchIO {
-            val names = state.value.savedSearches.map { it.name }.toImmutableList()
-            mutableState.update { it.copy(dialog = Dialog.CreateSavedSearch(names)) }
-        }
-    }
+    fun onSaveSearch() = savedSearchController.onSaveSearch()
 
     /** Open a saved search */
     fun onSavedSearch(
-        // KMK -->
         loadedSearch: EXHSavedSearch,
-        // KMK <--
         onToast: (StringResource) -> Unit,
-    ) {
-        // KMK -->
-        resetFilters()
-        // KMK <--
-        viewModelScope.launchIO {
-            // KMK -->
-            val search = getExhSavedSearch.awaitOne(loadedSearch.id, source::getFilterList) ?: loadedSearch
-            // KMK <--
-
-            if (search.filterList == null && state.value.filters.isNotEmpty()) {
-                withUIContext {
-                    onToast(SYMR.strings.save_search_invalid)
-                }
-                return@launchIO
-            }
-
-            val allDefault = search.filterList != null && search.filterList == source.getFilterList()
-            setDialog(null)
-
-            val filters = search.filterList
-                ?.takeUnless { allDefault }
-                ?: source.getFilterList()
-
-            mutableState.update {
-                it.copy(
-                    listing = Listing.Search(
-                        query = search.query,
-                        filters = filters,
-                        // KMK -->
-                        savedSearchId = search.id,
-                        // KMK <--
-                    ),
-                    filters = filters,
-                    toolbarQuery = search.query,
-                )
-            }
-        }
-    }
+    ) = savedSearchController.onSavedSearch(loadedSearch, onToast)
 
     /** Show dialog to delete saved search */
-    fun onSavedSearchPress(search: EXHSavedSearch) {
-        mutableState.update { it.copy(dialog = Dialog.DeleteSavedSearch(search.id, search.name)) }
-    }
+    fun onSavedSearchPress(search: EXHSavedSearch) = savedSearchController.onSavedSearchPress(search)
 
     /** Save a search */
     fun saveSearch(
         name: String,
-    ) {
-        viewModelScope.launchNonCancellable {
-            val query = state.value.toolbarQuery?.takeUnless {
-                it.isBlank() || it == GetRemoteManga.QUERY_POPULAR || it == GetRemoteManga.QUERY_LATEST
-            }?.trim()
-            val filterList = state.value.filters.ifEmpty { source.getFilterList() }
-            insertSavedSearch.await(
-                SavedSearch(
-                    id = -1,
-                    source = source.id,
-                    name = name.trim(),
-                    query = query,
-                    filtersJson = runCatching {
-                        filterSerializer.serialize(filterList).ifEmpty { null }?.let { Json.encodeToString(it) }
-                    }.getOrNull(),
-                ),
-            )
-        }
-    }
+    ) = savedSearchController.saveSearch(name)
 
-    fun deleteSearch(savedSearchId: Long) {
-        viewModelScope.launchNonCancellable {
-            deleteSavedSearchById.await(savedSearchId)
-        }
-    }
+    fun deleteSearch(savedSearchId: Long) = savedSearchController.deleteSearch(savedSearchId)
 
     fun onMangaDexRandom(onRandomFound: (String) -> Unit) {
         viewModelScope.launchIO {

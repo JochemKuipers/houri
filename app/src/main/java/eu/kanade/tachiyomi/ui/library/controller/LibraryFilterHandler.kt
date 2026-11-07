@@ -1,7 +1,7 @@
-package eu.kanade.tachiyomi.ui.library.handler
+package eu.kanade.tachiyomi.ui.library.controller
 
 import androidx.compose.ui.util.fastAny
-import eu.kanade.core.util.fastFilterNot
+import androidx.compose.ui.util.fastFilterNot
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.ui.library.LibraryItem
@@ -15,13 +15,10 @@ import tachiyomi.domain.manga.model.applyFilter
 import tachiyomi.domain.track.model.Track
 
 /**
- * Single-responsibility handler extracted from [eu.kanade.tachiyomi.ui.library.LibraryViewModel.applyFilters]
- * (530 lines of filter lambdas inlined in the god-class ViewModel).
+ * Single-responsibility handler for the library's badge/track/category filters, extracted from
+ * [eu.kanade.tachiyomi.ui.library.LibraryViewModel]'s filtering pass.
  *
- * Previously `applyFilters` was a private extension on `List<LibraryItem>` inside
- * `LibraryViewModel`, coupling filtering to the ViewModel's 31 injected deps and
- * making it untestable. This handler owns only filtering concerns and is injectable /
- * unit-testable, enforcing modularity.
+ * Owns only filter concerns and is unit-testable independent of the ViewModel's dependencies.
  *
  * Efficiency: pre-fetches merged manga map once (fixes N+1), uses fast* collections,
  * and short-circuits tracked/lewd checks before expensive download lookups.
@@ -36,7 +33,7 @@ class LibraryFilterHandler(
         trackMap: Map<Long, List<Track>>,
         trackingFilter: Map<Long, TriState>,
         trackedOverall: TriState,
-        preferences: ItemPreferencesShim,
+        preferences: LibraryItemPreferences,
         includedCategories: ImmutableSet<Long>,
         excludedCategories: ImmutableSet<Long>,
     ): List<LibraryItem> {
@@ -140,22 +137,4 @@ class LibraryFilterHandler(
         val isIncluded = included.isEmpty() || included.all { it in cats }
         return !isExcluded && isIncluded
     }
-
-    /**
-     * Shim to avoid coupling this handler to LibraryPreferences' internal `ItemPreferences`
-     * data class (which lives inside LibraryViewModel). ViewModel maps its prefs to this shim
-     * before delegating, preserving layer isolation.
-     */
-    data class ItemPreferencesShim(
-        val filterDownloaded: TriState,
-        val filterUnread: TriState,
-        val filterStarted: TriState,
-        val filterBookmarked: TriState,
-        val filterCompleted: TriState,
-        val filterIntervalCustom: TriState,
-        val filterLewd: TriState,
-        val filterCategories: Boolean,
-        val globalFilterDownloaded: Boolean,
-        val skipOutsideReleasePeriod: Boolean,
-    )
 }

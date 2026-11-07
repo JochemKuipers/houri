@@ -16,13 +16,11 @@ import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.event.AppEvent
 import eu.kanade.tachiyomi.data.library.LibraryUpdateNotifier
 import eu.kanade.tachiyomi.data.notification.NotificationHandler
-import eu.kanade.tachiyomi.data.webhook.WebhookNotifier
 import eu.kanade.tachiyomi.extension.reportingSourceErrorsOrNull
 import eu.kanade.tachiyomi.source.UnmeteredSource
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.util.storage.DiskUtil
-import eu.kanade.tachiyomi.util.storage.DiskUtil.NOMEDIA_FILE
 import eu.kanade.tachiyomi.util.storage.saveTo
 import exh.log.xLogD
 import exh.source.isEhBasedSource
@@ -56,16 +54,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
-import mihon.core.archive.CbzCrypto
-import mihon.core.archive.ZipWriter
 import nl.adaptivity.xmlutil.serialization.XML
-import okhttp3.Response
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.storage.extension
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchNow
 import tachiyomi.core.common.util.lang.withIOContext
-import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.core.metadata.comicinfo.COMIC_INFO_FILE
 import tachiyomi.core.metadata.comicinfo.ComicInfo
@@ -106,6 +100,11 @@ class Downloader(
      * Store for persisting downloads across restarts.
      */
     private val store = DownloadStore(context)
+
+    /**
+     * File-level operations of the download pipeline (copy/split/verify/archive).
+     */
+    private val fileOps = DownloadFileOps(context, downloadPreferences)
 
     /**
      * Queue where active downloads are kept.
@@ -461,7 +460,7 @@ class Downloader(
 
             // Do after download completes
 
-            if (!isDownloadSuccessful(download, tmpDir)) {
+            if (!fileOps.isDownloadSuccessful(download, tmpDir)) {
                 download.status = Download.State.ERROR
                 return
             }
@@ -475,7 +474,7 @@ class Downloader(
 
             // Only rename the directory if it's downloaded
             if (downloadPreferences.saveChaptersAsCBZ().get()) {
-                archiveChapter(mangaDir, chapterDirname, tmpDir)
+                fileOps.archiveChapter(mangaDir, chapterDirname, tmpDir)
             } else {
                 tmpDir.renameTo(chapterDirname)
             }
@@ -555,12 +554,12 @@ class Downloader(
             val file = when {
                 imageFile != null -> imageFile
                 imageUrl != null && chapterCache.isImageInCache(imageUrl) ->
-                    copyImageFromCache(chapterCache.getImageFile(imageUrl), tmpDir, filename)
+                    fileOps.copyImageFromCache(chapterCache.getImageFile(imageUrl), tmpDir, filename)
                 else -> downloadImage(page, download.source, tmpDir, filename, dataSaver)
             }
 
             // When the page is ready, set page path, progress (just in case) and status
-            splitTallImageIfNeeded(page, tmpDir)
+            fileOps.splitTallImageIfNeeded(page, tmpDir)
 
             page.uri = file.uri
             page.progress = 100
@@ -596,7 +595,7 @@ class Downloader(
             val file = tmpDir.createFile("$filename.tmp")!!
             try {
                 response.body.source().saveTo(file.openOutputStream())
-                val extension = getImageExtension(response, file)
+                val extension = fileOps.getImageExtension(response, file)
                 file.renameTo("$filename.$extension")
             } catch (e: Exception) {
                 response.close()
@@ -620,113 +619,6 @@ class Downloader(
             .first()
     }
 
-    /**
-     * Copies the image from cache to file in tmpDir.
-     *
-     * @param cacheFile the file from cache.
-     * @param tmpDir the temporary directory of the download.
-     * @param filename the filename of the image.
-     */
-    private fun copyImageFromCache(cacheFile: File, tmpDir: UniFile, filename: String): UniFile {
-        val tmpFile = tmpDir.createFile("$filename.tmp")!!
-        cacheFile.inputStream().use { input ->
-            tmpFile.openOutputStream().use { output ->
-                input.copyTo(output)
-            }
-        }
-        val extension = ImageUtil.findImageType(cacheFile.inputStream()) ?: return tmpFile
-        tmpFile.renameTo("$filename.${extension.extension}")
-        cacheFile.delete()
-        return tmpFile
-    }
-
-    /**
-     * Returns the extension of the downloaded image from the network response, or if it's null,
-     * analyze the file. If everything fails, assume it's a jpg.
-     *
-     * @param response the network response of the image.
-     * @param file the file where the image is already downloaded.
-     */
-    private fun getImageExtension(response: Response, file: UniFile): String {
-        val mime = response.body.contentType()?.run { if (type == "image") "image/$subtype" else null }
-        return ImageUtil.getExtensionFromMimeType(mime) { file.openInputStream() }
-    }
-
-    private fun splitTallImageIfNeeded(page: Page, tmpDir: UniFile) {
-        if (!downloadPreferences.splitTallImages().get()) return
-
-        try {
-            val filenamePrefix = "%03d".format(Locale.ENGLISH, page.number)
-            val imageFile = tmpDir.listFiles()?.firstOrNull { it.name.orEmpty().startsWith(filenamePrefix) }
-                ?: error(context.stringResource(MR.strings.download_notifier_split_page_not_found, page.number))
-
-            // If the original page was previously split, then skip
-            if (imageFile.name.orEmpty().startsWith("${filenamePrefix}__")) return
-
-            ImageUtil.splitTallImage(
-                tmpDir,
-                imageFile,
-                filenamePrefix,
-            )
-        } catch (e: Exception) {
-            logcat(LogPriority.ERROR, e) { "Failed to split downloaded image" }
-        }
-    }
-
-    /**
-     * Checks if the download was successful.
-     *
-     * @param download the download to check.
-     * @param tmpDir the directory where the download is currently stored.
-     */
-    private fun isDownloadSuccessful(
-        download: Download,
-        tmpDir: UniFile,
-    ): Boolean {
-        // Page list hasn't been initialized
-        val downloadPageCount = download.pages?.size ?: return false
-
-        // Ensure that all pages have been downloaded
-        if (download.downloadedImages != downloadPageCount) {
-            return false
-        }
-
-        // Ensure that the chapter folder has all the pages
-        val downloadedImagesCount = tmpDir.listFiles().orEmpty().count {
-            val fileName = it.name.orEmpty()
-            when {
-                fileName in listOf(COMIC_INFO_FILE, NOMEDIA_FILE) -> false
-                fileName.endsWith(".tmp") -> false
-                // Only count the first split page and not the others
-                fileName.contains("__") && !fileName.endsWith("__001.jpg") -> false
-                else -> true
-            }
-        }
-        return downloadedImagesCount == downloadPageCount
-    }
-
-    /**
-     * Archive the chapter pages as a CBZ.
-     */
-    private fun archiveChapter(
-        mangaDir: UniFile,
-        dirname: String,
-        tmpDir: UniFile,
-    ) {
-        // SY -->
-        val encrypt = CbzCrypto.getPasswordProtectDlPref() && CbzCrypto.isPasswordSet()
-        // SY <--
-
-        val zip = mangaDir.createFile("$dirname.cbz$TMP_DIR_SUFFIX")
-        if (zip?.isFile != true) throw Exception("Failed to create CBZ file for downloaded chapter")
-        ZipWriter(context, zip, /* SY --> */ encrypt /* SY <-- */).use { writer ->
-            tmpDir.listFiles()?.forEach { file ->
-                writer.write(file)
-            }
-        }
-        zip.renameTo("$dirname.cbz")
-        tmpDir.delete()
-    }
 
     /**
      * Creates a ComicInfo.xml file inside the given directory.

@@ -62,39 +62,31 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.util.fastAll
 import androidx.compose.ui.util.fastAny
-import androidx.compose.ui.util.fastMap
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.domain.ui.UiPreferences
 import eu.kanade.presentation.browse.RelatedMangaTitle
-import eu.kanade.presentation.components.relativeDateText
 import eu.kanade.presentation.manga.components.BookmarkColorPickerDialog
 import eu.kanade.presentation.manga.components.ChapterDownloadAction
 import eu.kanade.presentation.manga.components.ChapterHeader
 import eu.kanade.presentation.manga.components.ExpandableMangaDescription
 import eu.kanade.presentation.manga.components.MangaActionRow
-import eu.kanade.presentation.manga.components.MangaBottomActionMenu
-import eu.kanade.presentation.manga.components.MangaChapterListItem
 import eu.kanade.presentation.manga.components.MangaInfoBox
 import eu.kanade.presentation.manga.components.MangaInfoButtons
 import eu.kanade.presentation.manga.components.MangaToolbar
-import eu.kanade.presentation.manga.components.MissingChapterCountListItem
 import eu.kanade.presentation.manga.components.OutlinedButtonWithArrow
 import eu.kanade.presentation.manga.components.PagePreviewItems
 import eu.kanade.presentation.manga.components.PagePreviews
@@ -102,7 +94,6 @@ import eu.kanade.presentation.manga.components.RelatedMangasRow
 import eu.kanade.presentation.manga.components.SearchMetadataChips
 import eu.kanade.presentation.manga.components.SequelPrequelRow
 import eu.kanade.presentation.manga.components.rememberReadButtonColors
-import eu.kanade.presentation.util.formatChapterNumber
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.getNameForMangaInfo
@@ -121,7 +112,6 @@ import eu.kanade.tachiyomi.ui.manga.MangaViewModel
 import eu.kanade.tachiyomi.ui.manga.MergedMangaData
 import eu.kanade.tachiyomi.ui.manga.PagePreviewState
 import eu.kanade.tachiyomi.util.system.copyToClipboard
-import exh.metadata.MetadataUtil
 import exh.source.getMainSource
 import exh.source.isEhBasedManga
 import exh.source.isMergedSourceId
@@ -153,10 +143,7 @@ import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import tachiyomi.presentation.core.util.shouldExpandFAB
-import tachiyomi.source.local.isLocal
 import java.time.Instant
-import java.time.ZoneId
-import java.time.ZonedDateTime
 import kotlin.math.roundToInt
 
 @Composable
@@ -1592,411 +1579,6 @@ private fun MangaScreenLargeImpl(
     }
 }
 
-@Composable
-private fun SharedMangaBottomActionMenu(
-    selected: List<ChapterList.Item>,
-    onMultiBookmarkClicked: (List<Chapter>, bookmarked: Boolean) -> Unit,
-    onMultiMarkAsReadClicked: (List<Chapter>, markAsRead: Boolean) -> Unit,
-    onMarkPreviousAsReadClicked: (Chapter) -> Unit,
-    onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
-    onMultiDeleteClicked: (List<Chapter>) -> Unit,
-    // KMK -->
-    onBlacklistClicked: (List<Chapter>) -> Unit,
-    onBookmarkColorClicked: ((List<Chapter>) -> Unit)? = null,
-    // KMK <--
-    fillFraction: Float,
-    modifier: Modifier = Modifier,
-) {
-    MangaBottomActionMenu(
-        visible = selected.isNotEmpty(),
-        modifier = modifier.fillMaxWidth(fillFraction),
-        onBookmarkClicked = {
-            onMultiBookmarkClicked.invoke(selected.fastMap { it.chapter }, true)
-        }.takeIf { selected.fastAny { !it.chapter.bookmark } },
-        onRemoveBookmarkClicked = {
-            onMultiBookmarkClicked.invoke(selected.fastMap { it.chapter }, false)
-        }.takeIf { selected.fastAll { it.chapter.bookmark } },
-        onMarkAsReadClicked = {
-            onMultiMarkAsReadClicked(selected.fastMap { it.chapter }, true)
-        }.takeIf { selected.fastAny { !it.chapter.read } },
-        onMarkAsUnreadClicked = {
-            onMultiMarkAsReadClicked(selected.fastMap { it.chapter }, false)
-        }.takeIf { selected.fastAny { it.chapter.read || it.chapter.lastPageRead > 0L } },
-        onMarkPreviousAsReadClicked = {
-            onMarkPreviousAsReadClicked(selected[0].chapter)
-        }.takeIf { selected.size == 1 },
-        onDownloadClicked = {
-            onDownloadChapter!!(selected.toList(), ChapterDownloadAction.START)
-        }.takeIf {
-            onDownloadChapter != null && selected.fastAny { it.downloadState != Download.State.DOWNLOADED }
-        },
-        onDeleteClicked = {
-            onMultiDeleteClicked(selected.fastMap { it.chapter })
-        }.takeIf {
-            selected.fastAny { it.downloadState == Download.State.DOWNLOADED }
-        },
-        // KMK -->
-        onBlacklistClicked = {
-            onBlacklistClicked(selected.fastMap { it.chapter })
-        },
-        onBookmarkColorClicked = onBookmarkColorClicked?.let { handler ->
-            { handler(selected.fastMap { it.chapter }) }
-        }.takeIf { onBookmarkColorClicked != null && selected.fastAll { it.chapter.bookmark } },
-        // KMK <--
-    )
-}
-
-private fun LazyListScope.sharedChapterItems(
-    manga: Manga,
-    mergedData: MergedMangaData?,
-    chapters: List<ChapterList>,
-    isAnyChapterSelected: Boolean,
-    chapterSwipeStartAction: LibraryPreferences.ChapterSwipeAction,
-    chapterSwipeEndAction: LibraryPreferences.ChapterSwipeAction,
-    // SY -->
-    alwaysShowReadingProgress: Boolean,
-    // SY <--
-    onChapterClicked: (Chapter) -> Unit,
-    onDownloadChapter: ((List<ChapterList.Item>, ChapterDownloadAction) -> Unit)?,
-    onChapterSelected: (ChapterList.Item, Boolean, Boolean) -> Unit,
-    onChapterSwipe: (ChapterList.Item, LibraryPreferences.ChapterSwipeAction) -> Unit,
-) {
-    items(
-        items = chapters,
-        key = { item ->
-            when (item) {
-                is ChapterList.MissingCount -> "missing-count-${manga.id}-${item.count}-${item.hashCode()}"
-                is ChapterList.Item -> "chapter-${manga.id}-${item.id}"
-            }
-        },
-        contentType = { MangaScreenItem.CHAPTER },
-    ) { item ->
-        val haptic = LocalHapticFeedback.current
-
-        when (item) {
-            is ChapterList.MissingCount -> {
-                MissingChapterCountListItem(count = item.count)
-            }
-            is ChapterList.Item -> {
-                MangaChapterListItem(
-                    title = if (manga.displayMode == Manga.CHAPTER_DISPLAY_NUMBER) {
-                        stringResource(
-                            MR.strings.display_mode_chapter,
-                            formatChapterNumber(item.chapter.chapterNumber),
-                        )
-                    } else {
-                        item.chapter.name
-                    },
-                    date = item.chapter.dateUpload
-                        .takeIf { it > 0L }
-                        ?.let {
-                            // SY -->
-                            if (manga.isEhBasedManga()) {
-                                MetadataUtil.EX_DATE_FORMAT
-                                    .format(ZonedDateTime.ofInstant(Instant.ofEpochMilli(it), ZoneId.systemDefault()))
-                            } else {
-                                relativeDateText(item.chapter.dateUpload)
-                            }
-                            // SY <--
-                        },
-                    readProgress = item.chapter.lastPageRead
-                        .takeIf {
-                            /* SY --> */(!item.chapter.read || alwaysShowReadingProgress)/* SY <-- */ && it > 0L
-                        }
-                        ?.let {
-                            stringResource(
-                                MR.strings.chapter_progress,
-                                it + 1,
-                            )
-                        },
-                    scanlator = item.chapter.scanlator.takeIf {
-                        !it.isNullOrBlank() /* SY --> */ && item.showScanlator /* SY <-- */
-                    },
-                    // SY -->
-                    sourceName = item.sourceName,
-                    // SY <--
-                    read = item.chapter.read,
-                    bookmark = item.chapter.bookmark,
-                    // KMK -->
-                    bookmarkColor = item.chapter.bookmarkColor,
-                    // KMK <--
-                    selected = item.selected,
-                    downloadIndicatorEnabled =
-                    !isAnyChapterSelected && !(mergedData?.manga?.get(item.chapter.mangaId) ?: manga).isLocal(),
-                    downloadStateProvider = { item.downloadState },
-                    downloadProgressProvider = { item.downloadProgress },
-                    chapterSwipeStartAction = chapterSwipeStartAction,
-                    chapterSwipeEndAction = chapterSwipeEndAction,
-                    onLongClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onChapterSelected(item, !item.selected, true)
-                    },
-                    onClick = {
-                        onChapterItemClick(
-                            chapterItem = item,
-                            isAnyChapterSelected = isAnyChapterSelected,
-                            onToggleSelection = { onChapterSelected(item, !item.selected, false) },
-                            onChapterClicked = onChapterClicked,
-                        )
-                    },
-                    onDownloadClick = if (onDownloadChapter != null) {
-                        { onDownloadChapter(listOf(item), it) }
-                    } else {
-                        null
-                    },
-                    onChapterSwipe = {
-                        onChapterSwipe(item, it)
-                    },
-                    // KMK -->
-                    translationProgress = item.translationProgress,
-                    isTranslating = item.isTranslating,
-                    isTranslationError = item.isTranslationError,
-                    // KMK <--
-                )
-            }
-        }
-    }
-}
-
-private fun onChapterItemClick(
-    chapterItem: ChapterList.Item,
-    isAnyChapterSelected: Boolean,
-    onToggleSelection: (Boolean) -> Unit,
-    onChapterClicked: (Chapter) -> Unit,
-) {
-    when {
-        chapterItem.selected -> onToggleSelection(false)
-        isAnyChapterSelected -> onToggleSelection(true)
-        else -> onChapterClicked(chapterItem.chapter)
-    }
-}
-
-@Composable
-fun TranslateMangaToggle(manga: tachiyomi.domain.manga.model.Manga) {
-    val manager = androidx.compose.runtime.remember { mihon.app.di.globalAppGraph.mtlController }
-    val store = androidx.compose.runtime.remember(manga.id) { mihon.app.di.globalAppGraph.translateMangaStore }
-    val prefs = androidx.compose.runtime.remember { mihon.app.di.globalAppGraph.translationPreferences }
-    val preferenceStore = androidx.compose.runtime.remember { mihon.app.di.globalAppGraph.preferenceStore }
-    val globalEnabled by prefs.enabled().collectAsState()
-    val perMangaEnabled by store.getPreference(manga.id).collectAsState()
-    // Gate UI when incognito/censor is on — still show row but disabled with hint
-    val incognito by preferenceStore.getBoolean(tachiyomi.core.common.preference.Preference.appStateKey("incognito_mode"), false).collectAsState()
-    val censor by preferenceStore.getBoolean("pref_censor_lewd_manga", false).collectAsState()
-    val isGated = manager.isGated() && (incognito || censor)
-    // When global MTL is off, hide the per-manga toggle entirely.
-    if (!globalEnabled) return
-    val subtitle = if (isGated) {
-        stringResource(tachiyomi.i18n.kmk.KMR.strings.pref_yakuyomi_enabled_summary)
-    } else {
-        stringResource(tachiyomi.i18n.kmk.KMR.strings.pref_translate_manga_summary)
-    }
-    androidx.compose.foundation.layout.Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.SpaceBetween,
-    ) {
-        androidx.compose.foundation.layout.Column(modifier = Modifier.weight(1f)) {
-            androidx.compose.material3.Text(
-                text = stringResource(tachiyomi.i18n.kmk.KMR.strings.pref_translate_manga),
-                style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
-            )
-            androidx.compose.material3.Text(
-                text = subtitle,
-                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
-                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        androidx.compose.material3.Switch(
-            checked = perMangaEnabled,
-            enabled = globalEnabled && !isGated,
-            onCheckedChange = {
-                manager.setPerMangaEnabled(manga.id, it)
-            },
-        )
-    }
-}
-
-// KMK --> Integrated manga-details metadata translation (spec 2026-09-23).
-// Display-value selectors: the translated title/description replace the normal displayed
-// values only while Translated + showTranslated; every other state keeps the originals.
-
-private fun mangaInfoDisplayTitle(uiState: MangaInfoUiState): String? {
-    val translated = uiState as? MangaInfoUiState.Translated ?: return null
-    if (!translated.showTranslated) return null
-    return translated.title.takeIf { it.isNotBlank() }
-}
-
-private fun mangaInfoDisplayDescription(manga: Manga, uiState: MangaInfoUiState): String? {
-    val translated = uiState as? MangaInfoUiState.Translated ?: return manga.description
-    if (!translated.showTranslated) return manga.description
-    return translated.description?.takeIf { it.isNotBlank() } ?: manga.description
-}
-
-@Composable
-fun MangaInfoTranslationControl(
-    uiState: MangaInfoUiState,
-    onEnabledChange: (Boolean) -> Unit,
-    onShowTranslatedChange: (Boolean) -> Unit,
-    onRefresh: () -> Unit,
-    onRetry: () -> Unit,
-    onReset: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    when (uiState) {
-        MangaInfoUiState.Unresolved -> Unit
-        MangaInfoUiState.Hidden -> Unit
-        MangaInfoUiState.Disabled -> {
-            Row(
-                modifier = modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(KMR.strings.pref_translate_manga_info),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        text = stringResource(KMR.strings.pref_translate_manga_info_summary),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Switch(
-                    checked = false,
-                    onCheckedChange = { if (it) onEnabledChange(true) },
-                )
-            }
-        }
-        MangaInfoUiState.Translating -> {
-            Row(
-                modifier = modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(KMR.strings.pref_translate_manga_info),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Text(
-                            text = stringResource(KMR.strings.mtl_info_translating),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                Switch(
-                    checked = true,
-                    onCheckedChange = { if (!it) onEnabledChange(false) },
-                )
-            }
-        }
-        is MangaInfoUiState.Translated -> {
-            Column(
-                modifier = modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        text = stringResource(KMR.strings.pref_translate_manga_info),
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(
-                        checked = true,
-                        onCheckedChange = { if (!it) onEnabledChange(false) },
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(
-                        enabled = uiState.showTranslated,
-                        onClick = { onShowTranslatedChange(false) },
-                    ) {
-                        Text(stringResource(KMR.strings.mtl_info_show_original))
-                    }
-                    TextButton(
-                        enabled = !uiState.showTranslated,
-                        onClick = { onShowTranslatedChange(true) },
-                    ) {
-                        Text(stringResource(KMR.strings.mtl_info_show_translated))
-                    }
-                    Spacer(modifier = Modifier.weight(1f))
-                    IconButton(onClick = onRefresh) {
-                        Icon(
-                            imageVector = Icons.Outlined.Refresh,
-                            contentDescription = stringResource(KMR.strings.mtl_info_refresh),
-                        )
-                    }
-                }
-            }
-        }
-        is MangaInfoUiState.Error -> {
-            val message = when (uiState.kind) {
-                MangaInfoErrorKind.ProviderNotReady -> stringResource(KMR.strings.mtl_info_error_provider_not_ready)
-                MangaInfoErrorKind.MangaTranslatorUnsupported -> stringResource(KMR.strings.mtl_info_error_unsupported)
-                MangaInfoErrorKind.Failed -> stringResource(KMR.strings.mtl_info_failed)
-            }
-            Column(
-                modifier = modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        text = stringResource(KMR.strings.pref_translate_manga_info),
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(
-                        checked = true,
-                        onCheckedChange = { if (!it) onEnabledChange(false) },
-                    )
-                }
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(onClick = onRetry) {
-                        Text(stringResource(KMR.strings.mtl_retry))
-                    }
-                    TextButton(onClick = onReset) {
-                        Text(stringResource(KMR.strings.mtl_info_reset))
-                    }
-                }
-            }
-        }
-    }
-}
-// KMK <--
 
 @Composable
 fun UpscaleMangaToggle(manga: tachiyomi.domain.manga.model.Manga) {
