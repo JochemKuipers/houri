@@ -75,25 +75,43 @@ COMPILER_CP="$COMPILER:$STDLIB:$REFLECT:$COROUTINES:$ANNOTATIONS"
 
 [ $# -gt 0 ] || die "no input files given; pass at least one .kt file or directory"
 
-# Real jars that are cached and worth linking: kotlinx-serialization for @Serializable on the
-# extension API models, metro-common for @Inject/@SingleIn on DI-annotated classes, okhttp/okio
-# for the mtl.* providers' HTTP layer.
-EXTRA_CP=""
-for spec in "org.jetbrains.kotlinx/kotlinx-serialization-core-jvm:kotlinx-serialization-core" \
-            "org.jetbrains.kotlinx/kotlinx-serialization-json-jvm:kotlinx-serialization-json" \
-            "dev.zacsweers.metro/metro-common:metro-common" \
-            "com.squareup.okhttp3/okhttp-jvm:okht" \
-            "com.squareup.okio/okio-jvm:okio-jvm"; do
-    dir="${spec%%:*}"; name="${spec##*:}"
-    jar=$(find "$CACHE/$dir" -name "*.jar" 2>/dev/null | grep -v -- '-sources' | sort -V | tail -1)
-    [ -n "$jar" ] && EXTRA_CP="$EXTRA_CP:$jar"
-done
-
 OUT=$(mktemp -d)
 trap 'rm -rf "$OUT"' EXIT
 
 STUBS=$(find "$STUB_DIR" -name '*.kt' 2>/dev/null)
 [ -n "$STUBS" ] || die "no stubs found in $STUB_DIR"
+
+# Real jars that are cached and worth linking: kotlinx-serialization for @Serializable on the
+# extension API models, metro-common for @Inject/@SingleIn on DI-annotated classes, okhttp/okio
+# for the mtl.* providers' HTTP layer. Entries are dir:artifact[:kind]; kind "aar" extracts
+# classes.jar out of the cached .aar (logcat for the spine's logcat{} calls, onnxruntime for
+# upscale/native/OrtUpscaleSession.kt).
+aar_classes() {
+    local aar="$1"
+    local out="$OUT/$(basename "${aar%.aar}").jar"
+    unzip -o -q "$aar" classes.jar -d "$OUT" 2>/dev/null || return 0
+    mv "$OUT/classes.jar" "$out" 2>/dev/null || return 0
+    echo "$out"
+}
+
+EXTRA_CP=""
+for spec in "org.jetbrains.kotlinx/kotlinx-serialization-core-jvm:kotlinx-serialization-core" \
+            "org.jetbrains.kotlinx/kotlinx-serialization-json-jvm:kotlinx-serialization-json" \
+            "dev.zacsweers.metro/metro-common:metro-common" \
+            "dev.zacsweers.metro/runtime-jvm:metro-runtime" \
+            "com.squareup.okhttp3/okhttp-jvm:okht" \
+            "com.squareup.okio/okio-jvm:okio-jvm" \
+            "com.microsoft.onnxruntime/onnxruntime-android:onnxruntime:aar"; do
+    dir="${spec%%:*}"; rest="${spec#*:}"; name="${rest%%:*}"; kind="${rest#*:}"
+    if [ "$kind" = "aar" ]; then
+        aar=$(find "$CACHE/$dir" -name "*.aar" 2>/dev/null | grep -v -- '-sources' | sort -V | tail -1)
+        [ -n "$aar" ] || continue
+        jar=$(aar_classes "$aar")
+    else
+        jar=$(find "$CACHE/$dir" -name "*.jar" 2>/dev/null | grep -v -- '-sources' | sort -V | tail -1)
+    fi
+    [ -n "$jar" ] && EXTRA_CP="$EXTRA_CP:$jar"
+done
 
 # -nowarn keeps the output readable; grep then drops the residual
 # unresolved-reference cascade that comes from a missing project classpath.

@@ -90,10 +90,7 @@ import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.setting.NovelTypographyPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import eu.kanade.tachiyomi.ui.reader.setting.UpscaleEngine
-import eu.kanade.tachiyomi.ui.reader.setting.UpscaleMangaStore
-import eu.kanade.tachiyomi.ui.reader.setting.UpscaleModelManager
-import eu.kanade.tachiyomi.ui.reader.setting.UpscalePreferences
+import upscale.app.UpscaleBootstrap
 import eu.kanade.tachiyomi.ui.setting.track.BaseOAuthLoginActivity
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.CrashLogUtil
@@ -112,6 +109,7 @@ import exh.yakuyomi.YakuyomiEngine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
 import mihon.app.mtl.MtlBindings
+import upscale.app.UpscaleBindings
 import mihon.core.concurrency.AppDispatchers
 import mihon.domain.chapter.interactor.FilterChaptersForDownload
 import mihon.domain.extension.interactor.AddExtensionStore
@@ -245,7 +243,7 @@ import tachiyomi.source.local.io.LocalSourceFileSystem
 
 @DependencyGraph(
     scope = AppScope::class,
-    bindingContainers = [AppBindings::class, MtlBindings::class, mtl.provider.MtlComponentsContainer::class],
+    bindingContainers = [AppBindings::class, MtlBindings::class, UpscaleBindings::class, mtl.provider.MtlComponentsContainer::class],
 )
 interface AppGraph : ViewModelGraph {
     fun inject(app: App)
@@ -334,10 +332,10 @@ interface AppGraph : ViewModelGraph {
     val rotatingAchievementPool: tachiyomi.domain.achievement.service.RotatingAchievementPool
     val achievementSoundPlayer: eu.kanade.tachiyomi.data.achievement.AchievementSoundPlayer
     val achievementNotifier: eu.kanade.tachiyomi.data.achievement.AchievementNotifier
-    val upscalePreferences: UpscalePreferences
-    val upscaleEngine: UpscaleEngine
-    val upscaleMangaStore: UpscaleMangaStore
-    val upscaleModelManager: UpscaleModelManager
+    val upscalePreferences: upscale.app.UpscalePreferences
+    val upscaleController: upscale.UpscaleController
+    val upscaleStatus: upscale.status.UpscaleStatusHub
+    val upscaleMangaStore: upscale.app.UpscaleMangaStore
     // KMK <--
 
     // Domain

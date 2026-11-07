@@ -9,7 +9,7 @@ import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
-import eu.kanade.tachiyomi.ui.reader.setting.UpscaleReaderHook
+import upscale.app.UpscaleReaderBridge
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderTranslation
@@ -206,7 +206,12 @@ class PagerPageHolder(
                 // Display-time upscale of the original bytes (translation below keeps the
                 // originals). Null falls back to the untouched stream.
                 val displayBytes: ByteArray? = translationBytes?.let { bytes ->
-                    UpscaleReaderHook.upscaleDisplayBytes(mangaId, bytes)
+                    UpscaleReaderBridge.upscaleDisplayBytes(
+                        mangaId = mangaId,
+                        chapterId = page.chapter.chapter.id,
+                        pageIndex = page.index,
+                        bytes = bytes,
+                    )
                 }
                 // Reuse the captured bytes when we have them, so the source is never read twice.
                 val byteSource: okio.BufferedSource = when {

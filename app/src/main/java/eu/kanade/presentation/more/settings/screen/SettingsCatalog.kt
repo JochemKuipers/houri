@@ -25,12 +25,10 @@ object SettingsCatalog {
      * Filtered out of [searchableScreens] rather than branched around, so search cannot reach a
      * screen the settings hub hides on that flavor.
      *
-     * [SettingsUpscalerRoute] is deliberately *not* in this set: the no-MTL build forces the
-     * upscaler into Simple mode (`UpscalePreferences.isSimpleMode` is flavor-true there), which
-     * needs no MTL runtime and no downloaded weights, and the screen gates its native-only rows
-     * off themselves (`mode` selector hidden, model rows `mtlOnly`). Hiding a screen nothing
-     * depends on a missing runtime for would only strand the per-manga Upscale toggle, which
-     * MangaScreen offers on every flavor.
+     * [SettingsUpscalerRoute] is deliberately *not* in this set: upscaling is decoupled from
+     * translation (the spine has no MTL gate), so native mode works on the no-MTL flavor too.
+     * Hiding it there would strand the per-manga Upscale toggle, which MangaScreen offers on
+     * every flavor.
      */
     private val aiScreens: Set<SearchableSettings> = setOf(
         SettingsYakuyomiRoute,

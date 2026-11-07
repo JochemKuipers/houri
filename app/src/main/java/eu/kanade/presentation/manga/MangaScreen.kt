@@ -1582,31 +1582,15 @@ private fun MangaScreenLargeImpl(
 
 @Composable
 fun UpscaleMangaToggle(manga: tachiyomi.domain.manga.model.Manga) {
-    val upscalePrefs = androidx.compose.runtime.remember { mihon.app.di.globalAppGraph.upscalePreferences }
+    val prefs = androidx.compose.runtime.remember { mihon.app.di.globalAppGraph.upscalePreferences }
     val store = androidx.compose.runtime.remember(manga.id) { mihon.app.di.globalAppGraph.upscaleMangaStore }
-    val globalEnabled by upscalePrefs.enabled().collectAsState()
+    val globalEnabled by prefs.enabled().collectAsState()
     val perMangaEnabled by store.getPreference(manga.id).collectAsState()
-    val isSimple = try {
-        upscalePrefs.isSimpleMode()
-    } catch (_: Exception) {
-        true
-    }
-    val mtlOk = try {
-        upscalePrefs.isMtlEnabled()
-    } catch (_: Exception) {
-        false
-    }
-    val show = when {
-        !globalEnabled -> false
-        !isSimple && !mtlOk -> false
-        else -> true
-    }
+    // Decoupled from MTL: upscaling is its own feature; the spine owns the rest of the ladder
+    // (categories, new-entry default) and re-checks it per page anyway.
+    val show = globalEnabled
     if (!show) return
-    val subtitle = if (!isSimple && !mtlOk) {
-        stringResource(tachiyomi.i18n.kmk.KMR.strings.pref_yakuyomi_enabled_summary)
-    } else {
-        stringResource(tachiyomi.i18n.kmk.KMR.strings.pref_upscale_manga_summary)
-    }
+    val subtitle = stringResource(tachiyomi.i18n.kmk.KMR.strings.pref_upscale_manga_summary)
     androidx.compose.foundation.layout.Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1627,7 +1611,7 @@ fun UpscaleMangaToggle(manga: tachiyomi.domain.manga.model.Manga) {
         }
         androidx.compose.material3.Switch(
             checked = perMangaEnabled,
-            enabled = globalEnabled && (isSimple || mtlOk),
+            enabled = globalEnabled,
             onCheckedChange = {
                 store.setEnabled(manga.id, it)
             },

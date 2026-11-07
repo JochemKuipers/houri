@@ -27,6 +27,14 @@ class Bitmap private constructor() {
     fun copy(config: Config, isMutable: Boolean): Bitmap? = null
     fun recycle() { }
     fun compress(format: CompressFormat, quality: Int, stream: java.io.OutputStream): Boolean = false
+    fun getPixels(pixels: IntArray, offset: Int, stride: Int, x: Int, y: Int, width: Int, height: Int) { }
+
+    companion object {
+        @JvmStatic
+        fun createScaledBitmap(src: Bitmap, dstWidth: Int, dstHeight: Int, filter: Boolean): Bitmap = Bitmap()
+        @JvmStatic
+        fun createBitmap(colors: IntArray, width: Int, height: Int, config: Config): Bitmap = Bitmap()
+    }
 }
 
 /** Offline stub for check.sh: only the surface the mtl.* render path touches. */

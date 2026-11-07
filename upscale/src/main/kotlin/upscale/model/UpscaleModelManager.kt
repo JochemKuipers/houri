@@ -1,9 +1,5 @@
-package eu.kanade.tachiyomi.ui.reader.setting
+package upscale.model
 
-import android.content.Context
-import dev.zacsweers.metro.AppScope
-import dev.zacsweers.metro.Inject
-import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,7 +10,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import logcat.LogPriority
 import okhttp3.Call
@@ -26,70 +21,24 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import kotlin.math.abs
 
-/** A single backend-specific model file in the upscaler manifest. */
-@Serializable
-data class UpscaleArtifact(
-    val format: String,
-    val role: String,
-    val name: String,
-    val url: String,
-    val size: Long,
-    val sha256: String,
-    val inputOrder: Int? = null,
-    val outputOrder: Int? = null,
-)
-
-/** A logical upscaler model and the metadata needed to run it safely. */
-@Serializable
-data class UpscaleModelSpec(
-    val id: String,
-    val family: String,
-    val label: String,
-    val nativeScale: Int,
-    val tileSize: Int = 128,
-    val padding: Int = 16,
-    val inputOrder: Int = 0,
-    val outputOrder: Int = 1,
-    val artifacts: List<UpscaleArtifact> = emptyList(),
-)
-
-@Serializable
-private data class UpscaleManifest(
-    val version: Int = 0,
-    val models: List<UpscaleModelSpec> = emptyList(),
-)
-
-enum class UpscaleModelFormat {
-    NCNN,
-    ONNX,
-}
-
-data class ResolvedUpscaleModel(
-    val spec: UpscaleModelSpec,
-    val format: UpscaleModelFormat,
-    val artifacts: List<UpscaleArtifact>,
-) {
-    val id: String get() = spec.id
-    val family: String get() = spec.family
-    val nativeScale: Int get() = spec.nativeScale
-    val tileSize: Int get() = spec.tileSize
-    val padding: Int get() = spec.padding
-
-    val inputOrder: Int
-        get() = artifacts.firstOrNull { it.inputOrder != null }?.inputOrder ?: spec.inputOrder
-
-    val outputOrder: Int
-        get() = artifacts.firstOrNull { it.outputOrder != null }?.outputOrder ?: spec.outputOrder
-
-    fun artifact(role: String): UpscaleArtifact? = artifacts.firstOrNull { it.role == role }
-}
-
-/** Downloads and verifies the model artifacts consumed by the native/ORT upscalers. */
-@SingleIn(AppScope::class)
-@Inject
+/**
+ * Downloads and verifies the model artifacts consumed by the native/ORT upscalers.
+ *
+ * Ported from `UpscaleModelManager` with the on-disk contract intact (`filesDir/upscale_models`,
+ * same artifact names, same verification). The Android `Context` is injected as its two reads —
+ * the manifest asset and the models directory — so the class is constructible off-device.
+ *
+ * Additions over the old manager:
+ * - per-model readiness ([modelStates]) for the settings UI's per-model rows,
+ * - user-imported ONNX models ([importOnnx]), validated by probing a real ORT session load,
+ * - auto-download ([maybeAutoDownload]) so the first native enable fetches what it needs.
+ */
 class UpscaleModelManager(
-    private val context: Context,
+    private val manifestAssetReader: (String) -> ByteArray?,
+    private val modelsDir: File,
     private val client: OkHttpClient,
+    /** Opens an ORT session for the import probe; non-null + closable means loadable. */
+    private val ortProbe: (path: String) -> AutoCloseable?,
 ) {
     enum class State { NOT_INSTALLED, DOWNLOADING, READY, ERROR }
 
@@ -105,16 +54,18 @@ class UpscaleModelManager(
             get() = if (totalBytes > 0L) (downloadedBytes.toFloat() / totalBytes).coerceIn(0f, 1f) else 0f
     }
 
-    private companion object {
-        const val MANIFEST_ASSET = "upscale_models.json"
-        const val MAX_MANIFEST_MODELS = 32
-        const val MAX_ARTIFACT_BYTES = 512L * 1024L * 1024L
-        const val MIN_ARTIFACT_BYTES = 256L
-        const val VERIFY_INTERVAL_MS = 6L * 60 * 60 * 1000
-        val json = Json { ignoreUnknownKeys = true }
-    }
+    /** Per-model readiness for the settings UI: which formats are installed, what's missing. */
+    data class ModelReadiness(
+        val modelId: String,
+        val label: String,
+        val family: String,
+        val nativeScale: Int,
+        val readyFormats: List<UpscaleModelFormat>,
+        val totalBytes: Long,
+        val installedBytes: Long,
+        val imported: Boolean,
+    )
 
-    private val modelsDir: File = File(context.filesDir, "upscale_models").apply { mkdirs() }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var downloadJob: Job? = null
 
@@ -129,6 +80,7 @@ class UpscaleModelManager(
     private var manifestVersionValue: Int = 0
     private var manifestError: String? = null
 
+    private val importedDir = File(modelsDir, "imported").apply { mkdirs() }
     private val _status = MutableStateFlow(Status(State.NOT_INSTALLED))
     val status: StateFlow<Status> = _status.asStateFlow()
 
@@ -147,22 +99,36 @@ class UpscaleModelManager(
     fun isReady(): Boolean = readyModels().isNotEmpty()
 
     fun isModelReady(modelId: String, format: UpscaleModelFormat? = null): Boolean {
-        val spec = models.firstOrNull { it.id == modelId } ?: return false
+        val spec = findSpec(modelId) ?: return false
         val artifacts = artifactsFor(spec, format)
         return artifacts.isNotEmpty() && artifacts.all { hasValidSize(it) }
     }
 
-    fun isModelReady(role: String): Boolean {
-        val normalized = role.trim().uppercase()
-        return models.asSequence()
+    fun isFamilyReady(family: String): Boolean {
+        val normalized = family.trim().uppercase()
+        return allSpecs().asSequence()
             .filter { it.family.uppercase() == normalized }
             .any { spec -> formatsFor(spec).any { format -> isModelReady(spec.id, format) } }
     }
 
-    fun installedBytes(): Long = models.asSequence()
+    fun installedBytes(): Long = allSpecs().asSequence()
         .flatMap { it.artifacts.asSequence() }
         .filter { hasValidSize(it) }
         .sumOf { file(it).length() }
+
+    /** Ready-state summary per model, catalog + imports merged, stable order. */
+    fun modelStates(): List<ModelReadiness> = allSpecs().map { spec ->
+        ModelReadiness(
+            modelId = spec.id,
+            label = spec.label,
+            family = spec.family,
+            nativeScale = spec.nativeScale,
+            readyFormats = formatsFor(spec).filter { isModelReady(spec.id, it) },
+            totalBytes = spec.artifacts.sumOf { it.size },
+            installedBytes = spec.artifacts.filter { hasValidSize(it) }.sumOf { file(it).length() },
+            imported = spec.imported,
+        )
+    }
 
     fun resolvedModel(
         family: String,
@@ -171,7 +137,7 @@ class UpscaleModelManager(
     ): ResolvedUpscaleModel? {
         val normalizedFamily = family.trim().uppercase()
         val wantedScale = targetScale.takeIf { it.isFinite() }?.coerceIn(1f, 4f) ?: 2f
-        return models.asSequence()
+        return allSpecs().asSequence()
             .filter { it.family.uppercase() == normalizedFamily }
             .filter { formatsFor(it).contains(format) }
             .sortedWith(
@@ -182,11 +148,31 @@ class UpscaleModelManager(
             .firstOrNull()
     }
 
+    /** Exact-id resolution for a policy-chosen model. */
+    fun resolvedModelById(modelId: String, format: UpscaleModelFormat): ResolvedUpscaleModel? {
+        val spec = findSpec(modelId) ?: return null
+        return resolve(spec, format)?.takeIf { isResolvedReady(it) }
+    }
+
+    /**
+     * Installable (ready) candidates for a family/format, nearest [wantedScale] first, lower
+     * scale breaking ties — the ordering the old `resolvedModel` owned, exposed for the policy.
+     */
+    fun candidateModels(
+        family: String,
+        format: UpscaleModelFormat,
+        wantedScale: Float,
+    ): List<Pair<String, Int>> = allSpecs().asSequence()
+        .filter { it.family.equals(family, ignoreCase = true) && format in formatsFor(it) }
+        .sortedWith(compareBy({ abs(it.nativeScale - wantedScale) }, { it.nativeScale }))
+        .map { it.id to it.nativeScale }
+        .toList()
+
     fun resolvedModels(family: String, format: UpscaleModelFormat): List<ResolvedUpscaleModel> {
         val normalizedFamily = family.trim().uppercase()
-        return models.asSequence()
+        return allSpecs().asSequence()
             .filter { it.family.uppercase() == normalizedFamily }
-            .mapNotNull { resolve(it, format)?.takeIf { isResolvedReady(it) } }
+            .mapNotNull { resolve(it, format)?.takeIf { m -> isResolvedReady(m) } }
             .toList()
     }
 
@@ -257,6 +243,19 @@ class UpscaleModelManager(
         }
     }
 
+    /**
+     * Fetches the models a native enable needs, exactly once per trigger. Called when the mode
+     * or family moves to something that requires weights; a no-op when everything the family can
+     * use is already installed or a download is running. An unknown family downloads everything.
+     */
+    fun maybeAutoDownload(family: String? = null) {
+        val targets = selectSpecs(modelId = null, format = null, family = family)
+        val missing = targets.flatMap { spec -> artifactsFor(spec, null) }.filterNot { hasValidSize(it) }
+        if (missing.isEmpty()) return
+        if (downloadJob?.isActive == true) return
+        startDownload(modelId = null, format = null)
+    }
+
     fun cancelDownload() {
         downloadJob?.cancel()
         runCatching { activeCall?.cancel() }
@@ -274,10 +273,103 @@ class UpscaleModelManager(
         refresh()
     }
 
+    // ---- user-imported ONNX ----
+
+    /** Outcome of [importOnnx]. */
+    sealed interface ImportResult {
+        data class Ok(val modelId: String) : ImportResult
+        data class Rejected(val reason: String) : ImportResult
+    }
+
+    /**
+     * Imports a user-supplied ONNX model. Validation is a real probe: the file is written under a
+     * temp name, opened by an actual ORT session, and only promoted to `imported-<name>` when the
+     * session loads — a file ORT cannot read is never offered to the policy.
+     */
+    fun importOnnx(name: String, bytes: ByteArray): ImportResult {
+        val safeName = name.trim().removeSuffix(".onnx")
+            .replace(Regex("[^A-Za-z0-9._-]"), "_").take(64)
+        if (safeName.isBlank()) return ImportResult.Rejected("Invalid model name")
+        if (bytes.size !in MIN_ARTIFACT_BYTES..MAX_IMPORT_BYTES) {
+            return ImportResult.Rejected("Model must be between 256 B and ${MAX_IMPORT_BYTES / (1024 * 1024)} MB")
+        }
+        val tmp = File(importedDir, "$safeName.importing")
+        val target = File(importedDir, "imported-$safeName.onnx")
+        return try {
+            tmp.writeBytes(bytes)
+            // The probe: if ORT cannot open it, the import never happens.
+            val probe = ortProbe(tmp.absolutePath)
+            if (probe == null) {
+                tmp.delete()
+                return ImportResult.Rejected("ONNX Runtime could not load this model")
+            }
+            runCatching { probe.close() }
+            if (target.exists()) target.delete()
+            if (!tmp.renameTo(target)) {
+                tmp.copyTo(target, overwrite = true)
+                tmp.delete()
+            }
+            logcat(LogPriority.INFO) { "Upscaler model imported: ${target.name} (${bytes.size} B)" }
+            importedCache = null
+            refresh()
+            ImportResult.Ok(target.name.removeSuffix(".onnx"))
+        } catch (e: Exception) {
+            runCatching { tmp.delete() }
+            ImportResult.Rejected(e.message ?: "Import failed")
+        }
+    }
+
+    fun deleteImported(modelId: String) {
+        val spec = findSpec(modelId) ?: return
+        if (!spec.imported) return
+        spec.artifacts.forEach { runCatching { file(it).delete() } }
+        importedCache = null
+        refresh()
+    }
+
+    @Volatile
+    private var importedCache: List<UpscaleModelSpec>? = null
+
+    private fun importedSpecs(): List<UpscaleModelSpec> {
+        importedCache?.let { return it }
+        val specs = importedDir.listFiles()
+            ?.filter { it.isFile && it.extension == "onnx" }
+            ?.map { file ->
+                UpscaleModelSpec(
+                    id = file.name.removeSuffix(".onnx"),
+                    family = FAMILY_IMPORTED,
+                    label = file.name.removeSuffix(".onnx").removePrefix("imported-"),
+                    nativeScale = 2, // unknown; the policy's scale target rescales afterwards
+                    outputOrder = 0,
+                    artifacts = listOf(
+                        UpscaleArtifact(
+                            format = "ONNX",
+                            role = "model",
+                            // Relative to modelsDir so hasValidSize/file() resolve like manifest artifacts.
+                            name = "imported/${file.name}",
+                            url = "",
+                            size = file.length(),
+                            sha256 = "",
+                        ),
+                    ),
+                    imported = true,
+                )
+            }
+            .orEmpty()
+        importedCache = specs
+        return specs
+    }
+
+    private fun allSpecs(): List<UpscaleModelSpec> = models + importedSpecs()
+
+    private fun findSpec(modelId: String): UpscaleModelSpec? =
+        allSpecs().firstOrNull { it.id == modelId }
+
     private fun loadManifest(): List<UpscaleModelSpec> {
         val raw = runCatching {
-            context.assets.open(MANIFEST_ASSET).bufferedReader().use { it.readText() }
-        }.getOrElse {
+            manifestAssetReader(MANIFEST_ASSET)?.let { String(it) }
+        }.getOrNull()
+        if (raw == null) {
             manifestError = "Unable to read $MANIFEST_ASSET"
             return emptyList()
         }
@@ -334,11 +426,15 @@ class UpscaleModelManager(
         return ResolvedUpscaleModel(spec, format, artifactsFor(spec, format))
     }
 
-    private fun selectSpecs(modelId: String?, format: UpscaleModelFormat?): List<UpscaleModelSpec> =
-        models.filter { spec ->
-            (modelId == null || spec.id == modelId) &&
-                (format == null || format in formatsFor(spec))
-        }
+    private fun selectSpecs(
+        modelId: String?,
+        format: UpscaleModelFormat?,
+        family: String? = null,
+    ): List<UpscaleModelSpec> = models.filter { spec ->
+        (modelId == null || spec.id == modelId) &&
+            (format == null || format in formatsFor(spec)) &&
+            (family == null || spec.family.equals(family, ignoreCase = true))
+    }
 
     private fun readyModels(): List<ResolvedUpscaleModel> = models.flatMap { spec ->
         formatsFor(spec).mapNotNull { format -> resolve(spec, format)?.takeIf { isResolvedReady(it) } }
@@ -471,5 +567,16 @@ class UpscaleModelManager(
             }
         }
         return digest.digest().joinToString("") { "%02x".format(it) }
+    }
+
+    companion object {
+        const val FAMILY_IMPORTED = "IMPORTED"
+        private const val MANIFEST_ASSET = "upscale_models.json"
+        private const val MAX_MANIFEST_MODELS = 32
+        private const val MAX_ARTIFACT_BYTES = 512L * 1024L * 1024L
+        private const val MIN_ARTIFACT_BYTES = 256L
+        private const val MAX_IMPORT_BYTES = 64L * 1024L * 1024L
+        private const val VERIFY_INTERVAL_MS = 6L * 60 * 60 * 1000
+        private val json = Json { ignoreUnknownKeys = true }
     }
 }

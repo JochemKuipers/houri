@@ -1,7 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer
 
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
-import eu.kanade.tachiyomi.ui.reader.setting.UpscaleReaderHook
+import upscale.app.UpscaleReaderBridge
 import kotlinx.coroutines.CoroutineScope
 import mihon.app.di.globalAppGraph
 import mtl.sched.PageOutcome
@@ -37,7 +37,7 @@ object ReaderTranslation : PageTranslator {
     suspend fun needsOriginalBytes(page: ReaderPage): Boolean {
         val mangaId = page.chapter.chapter.manga_id ?: 0L
         if (globalAppGraph.mtlController.isEnabledForManga(mangaId)) return true
-        return UpscaleReaderHook.isUpscaleActive(mangaId)
+        return UpscaleReaderBridge.isUpscaleActive(mangaId)
     }
 
     /**

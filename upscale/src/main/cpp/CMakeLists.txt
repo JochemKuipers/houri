@@ -4,9 +4,8 @@ project(upscale_ncnn)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Reuse the ARM NCNN archives already shipped by the yakuyomi-engine submodule.
-# Keeping the bridge in the root module avoids a second checkout/branch for native
-# upscaling while still avoiding a second NCNN build.
+# Reuse the ARM NCNN archives shipped by the external/yakuyomi-engine submodule
+# (upscaling no longer builds inside the MTL engine, but there is still only one NCNN).
 set(NCNN_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../external/yakuyomi-engine/engine/src/main/cpp/ncnn")
 set(ncnn_DIR "${NCNN_ROOT}/${ANDROID_ABI}/lib/cmake/ncnn")
 
