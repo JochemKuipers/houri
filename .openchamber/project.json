@@ -8,7 +8,11 @@
       "id": "ee8e75e2-0336-4472-9159-b19378d449b1",
       "name": "Compile",
       "command": "./gradlew spotlessApply spotlessCheck compileDebugUnitTestKotlin app:assembleDebug",
-      "icon": "play"
+      "icon": "play",
+      "platforms": [
+        "linux",
+        "windows"
+      ]
     },
     {
       "id": "f457c77e-0a1b-4785-98ef-6e1276f84c87",
@@ -20,7 +24,20 @@
       "id": "f1946c9e-0d46-43b5-b5ea-2d8f01eb7d82",
       "name": "Wipe ImageDecoder Cache",
       "command": "rm -rf external/imagedecoder-houri/library/.cxx",
-      "icon": "play"
+      "icon": "play",
+      "platforms": [
+        "linux"
+      ]
+    },
+    {
+      "id": "4fcf63c4-b2a5-4bf6-9a5b-9f0d49de56f3",
+      "name": "Run Tests",
+      "command": "./gradlew test",
+      "icon": "play",
+      "platforms": [
+        "windows",
+        "linux"
+      ]
     }
   ]
 }
