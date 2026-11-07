@@ -152,3 +152,10 @@ Every configure now prints what it probed, so a miss is a one-glance diagnosis:
 - `PackageManager.FEATURE_VULKAN` was **removed in API 36**; use
   `FEATURE_VULKAN_HARDWARE_COMPUTE` (API 31+), see `exh.yakuyomi.LocalLlmAccelerator`.
 - Stripped size: 6.6 MB/ABI CPU-only, 64.2 MB/ABI with Vulkan (ggml embeds its SPIR-V).
+- **Host switches leave stale staging output in `src/main/jniLibs/<abi>/`.** The Windows path
+  packages from that dir; the Linux path builds the same lib via CMake, and a leftover staged
+  copy (a *different* configuration) fails `MergeNativeLibsTask` with
+  `2 files found with path 'lib/<abi>/libllama_jni.so'`. Handled automatically since this was
+  hit in practice (2026-11-06): on a Linux/WSL host `merge*JniLibFolders` is forced
+  never-up-to-date and its `doFirst` deletes any stale staging file. `wslNativeBuild`
+  restages the files on the next Windows-host build, so nothing is lost.

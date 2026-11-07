@@ -260,3 +260,45 @@ if (hostIsWindows) {
         dependsOn(wslNativeBuild)
     }
 }
+
+// The split above leaves a residue: a Windows-host build stages ready-made libs into
+// src/main/jniLibs/<abi>/, and those files outlive the host that built them — the directory
+// is gitignored task output, but nothing ever cleans it. On this (Linux/WSL) path they are
+// dead weight, and worse: they are a *different* configuration than the fresh CMake output
+// (e.g. the Oct 29 Vulkan staging vs whatever is built today), so letting either copy win
+// would package the wrong lib. The collision is exactly what MergeNativeLibsTask reports
+// when the same path arrives from both jniLibs and an externalNativeBuild target:
+//
+//     > 2 files found with path 'lib/arm64-v8a/libllama_jni.so' from inputs:
+//     - .../merged_jni_libs/debug/mergeDebugJniLibFolders/out/arm64-v8a/libllama_jni.so
+//     - .../cxx/Debug/<hash>/obj/arm64-v8a/libllama_jni.so
+//
+// The ordering makes the two obvious fixes fail. A doFirst on MergeNativeLibsTask is too
+// late — MergeJniLibFolders runs first and has already copied the stale file into its own
+// output. And a doFirst on MergeJniLibFolders runs only when the task itself is not up to
+// date, which it usually is: its output still containing the stale copy satisfies the
+// check. So on this host, force MergeJniLibFolders to never be up to date (a handful of
+// file copies — the rerun cost is negligible) and delete any stale staging file right
+// before it scans src/main/jniLibs. [wslNativeBuild] simply restages the files on the next
+// Windows-host build, so nothing is lost.
+if (!hostIsWindows) {
+    tasks.matching {
+        val n = it.name
+        n.contains("JniLibFolders")
+    }.configureEach {
+        outputs.upToDateWhen { false }
+        doFirst {
+            nativeAbis.forEach { abi ->
+                val stale = File(wslJniLibsDir, "$abi/libllama_jni.so")
+                if (stale.isFile) {
+                    logger.lifecycle(
+                        "llamatik-native: removing stale WSL staging output " +
+                            "src/main/jniLibs/$abi/libllama_jni.so — AGP's externalNativeBuild " +
+                            "builds libllama_jni for this ABI itself on a Linux/WSL host.",
+                    )
+                    stale.delete()
+                }
+            }
+        }
+    }
+}

@@ -152,6 +152,18 @@ works from either host (`/mnt/c/x` ↔ `C:/x`), and a path still rooted at `/` o
 host is rejected — that filesystem is only readable from WSL. Use `-Pmtl.wslVulkanHeaders` to
 point the WSL build at a non-default staging root.
 
+**Switching hosts leaves the staging output behind.** `src/main/jniLibs/<abi>/libllama_jni.so`
+is packaging input only on a Windows host. On a Linux/WSL host it is dead weight — and worse,
+`MergeNativeLibsTask` fails with `2 files found with path 'lib/<abi>/libllama_jni.so'`: the
+fresh CMake output competing with the stale copy. The staged files carry a different
+configuration (they were built on a different day, presumably with different knobs), so
+`packaging.jniLibs.pickFirst` would silently package the wrong one — deleting the staged
+copies is the correct resolution, and `build.gradle.kts` does it automatically: on a
+Linux/WSL host `merge*JniLibFolders` is forced never-up-to-date and its `doFirst` deletes any
+stale staging file before it scans. Deleting the files by hand alone is not enough — a
+satisfied up-to-date check keeps serving the stale copy out of `MergeJniLibFolders`' cached
+output. `wslNativeBuild` restages everything on the next Windows-host build.
+
 ### 2.6 Vulkan is compiled for 64-bit ABIs only
 
 `ggml-vulkan` does not compile for 32-bit ABIs at this llama.cpp revision. It relies on
