@@ -68,6 +68,30 @@ Nav3 route + screen composable in `ui/`, Metro `ViewModel` in `ui/`, content com
 - `MangaScreen.kt` → `MangaViewModel.kt` → `presentation/manga/`
 - `ReaderActivity` uses `ReaderViewModel` (AndroidX ViewModel)
 
+## Controller delegation (2026-11 structural rewrite)
+
+State-heavy ViewModels hold state, thin intent methods, and wire **controllers**; business logic
+lives in the controller, which takes scope + dependencies + accessor lambdas and never an Android
+Context of its own beyond what the concern needs. Conventions the splits established:
+
+- Controllers sit beside their VM (`ui/library/controller/`, or flat in the same package:
+  `ui/manga/ChapterActionsController.kt`, `ui/reader/ReaderImageActions.kt`,
+  `data/download/DownloadFileOps.kt`); class + moved top-level helpers are `internal`.
+- The VM constructs the controller once with `provide* = { … }` accessors for its own state,
+  an `updateState`/`sendEvent` lambda for writes, and keeps public intent methods as one-line
+  delegations so the screen-facing API never changes.
+- Result types moved out of a VM become top-level in the controller's file and keep the old
+  public visibility (interface members cannot be `internal`): `ReaderSetAsCoverResult`,
+  `ReaderSaveImageResult`.
+- Large composables split the same way by concern into co-located section files
+  (`TrackInfoDialogHomeItems.kt`, `MangaScreenActions.kt`, `SettingsEhDialogs.kt`,
+  `NovelFontPickerDialog.kt`): helpers become `internal`, marker islands (`// KMK`, `// SY`)
+  move WHOLE — never cut an island open.
+- Files assessed-and-left deliberately: `ReaderActivity`/`NovelWebViewer` (already
+  concern-separated per their AGENTS.md, private-member coupling), `App.kt` (bootstrap
+  linearity is the structure), DI assembly (`AppGraph`).
+
+
 ## Settings framework
 
 Modular preferences with automatic UI wiring — full guide:

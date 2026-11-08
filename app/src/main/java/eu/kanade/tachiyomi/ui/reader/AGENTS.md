@@ -17,7 +17,7 @@ Fullscreen reading surface. Deliberately a classic `Activity`, NOT a Nav3 route 
 | `loader/` | `PageLoaderFactory` → `PageLoader`: `HttpPageLoader`, `ArchivePageLoader`, `DirectoryPageLoader`, `DownloadPageLoader`, `EpubPageLoader` |
 | `model/` | `ReaderChapter`, `ReaderPage`, `ReaderItem`, `ViewerChapters`, `ChapterTransition`, `InsertPage` |
 | `setting/` | `ReaderPreferences`, `ReadingMode`, `ReaderSettingsScreenModel`, `ReaderOrientation`, `ReaderBottomButton` |
-| `setting/Upscale*.kt` | On-device upscale stack (MTL-gated): `UpscaleReaderHook` → `UpscaleEngine` (+ `UpscaleBackendDetector`), `UpscaleModelManager`, `UpscaleCacheManager`, `UpscaleMangaStore`, `UpscalePreferences` |
+| `setting/Upscale*.kt` | *(moved)* — the upscaling stack now lives in `:upscale` (see `upscale/AGENTS.md`); the reader only touches it through `upscale.app.UpscaleReaderBridge` and the WebGPU tile gate in `WebGpuConfig` |
 | `chapter/`, `loader/` | `ReaderChapterItem`, chapter loading pipeline |
 
 ## WebGPU viewer (`viewer/webgpu/`)
@@ -595,7 +595,7 @@ spellings are read out of the OPF is in `core/archive/AGENTS.md`.
 
 - Reader stays an `Activity` — do not migrate it into Nav3.
 - State in `ReaderViewModel` (AndroidX); inner models extend `mihon.core.viewmodel.StateViewModel` or plain `ViewModel`.
-- Upscale changes stay behind the MTL gate; per-series toggles via `UpscaleMangaStore`.
+- Upscaling is decoupled from MTL: `UpscaleReaderBridge.upscaleDisplayBytes(...)` (suspend) is the only byte seam, wired in PagerPageHolder, WebtoonPageHolder and the WebGPU UpscaleExtension; `ReaderTranslation.needsOriginalBytes` consults `UpscaleReaderBridge.isUpscaleActive`. Prefetch warms the cache from `ReaderViewModel.onPageSelected`.
 - Logging: `xLogE()` / `xLog()` from `exh.log` for KMK code; `logcat {}` for Mihon code.
 
 ## Anti-patterns

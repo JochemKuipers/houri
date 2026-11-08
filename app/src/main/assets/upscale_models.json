@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "models": [
     {
       "id": "realcugan-2x",
@@ -148,6 +148,32 @@
           "sha256": "abc844ad58683d2ac2b0b575c43016f1771c1d6b3a95924550f328205f167e3b",
           "inputOrder": 0,
           "outputOrder": 0
+        }
+      ]
+    },
+    {
+      "id": "realcugan-3x",
+      "family": "REAL_CUGAN",
+      "label": "Real-CUGAN SE 3x",
+      "nativeScale": 3,
+      "tileSize": 128,
+      "padding": 16,
+      "artifacts": [
+        {
+          "format": "NCNN",
+          "role": "param",
+          "name": "realcugan-3x.ncnn.param",
+          "url": "https://raw.githubusercontent.com/HaoweiLi97/mihon_img_upscale/65e3f190058d27c52a148447acfd6b15a2f0f814/app/src/main/assets/realcugan-models/up3x-denoise3x.param",
+          "size": 4761,
+          "sha256": "4e8b144dd34e558f530231026d229bedb0eb8877233bf5d9b457bf1bfa4558c1"
+        },
+        {
+          "format": "NCNN",
+          "role": "bin",
+          "name": "realcugan-3x.ncnn.bin",
+          "url": "https://raw.githubusercontent.com/HaoweiLi97/mihon_img_upscale/65e3f190058d27c52a148447acfd6b15a2f0f814/app/src/main/assets/realcugan-models/up3x-denoise3x.bin",
+          "size": 2577104,
+          "sha256": "fdb269034f7d6bf59be8fe1c03c43a75671af464e045a13870b24b649d64f1f6"
         }
       ]
     }

@@ -270,6 +270,10 @@ dependencies {
     implementation(projects.presentationCore)
     implementation(projects.presentationWidget)
     implementation(projects.telemetry)
+    // KMK --> the upscaling spine + native backends; NOT flavor-gated — the nomtl APK
+    // gets native upscaling too, since it shares nothing with the MTL engine any more.
+    implementation(projects.upscale)
+    // KMK <--
     add("mtlImplementation", projects.yakuyomi)
     add("nomtlImplementation", projects.yakuyomiStub)
 

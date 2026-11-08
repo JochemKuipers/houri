@@ -101,9 +101,9 @@ import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
 import eu.kanade.tachiyomi.ui.main.MainActivity
-import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.AddToLibraryFirst
-import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Error
-import eu.kanade.tachiyomi.ui.reader.ReaderViewModel.SetAsCoverResult.Success
+import eu.kanade.tachiyomi.ui.reader.ReaderSetAsCoverResult.AddToLibraryFirst
+import eu.kanade.tachiyomi.ui.reader.ReaderSetAsCoverResult.Error
+import eu.kanade.tachiyomi.ui.reader.ReaderSetAsCoverResult.Success
 import eu.kanade.tachiyomi.ui.reader.loader.HttpPageLoader
 import eu.kanade.tachiyomi.ui.reader.loader.TextPageLoader
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
@@ -1820,12 +1820,12 @@ class ReaderActivity : BaseActivity() {
      * Called from the presenter when a page is saved or fails. It shows a message or logs the
      * event depending on the [result].
      */
-    private fun onSaveImageResult(result: ReaderViewModel.SaveImageResult) {
+    private fun onSaveImageResult(result: ReaderSaveImageResult) {
         when (result) {
-            is ReaderViewModel.SaveImageResult.Success -> {
+            is ReaderSaveImageResult.Success -> {
                 toast(MR.strings.picture_saved)
             }
-            is ReaderViewModel.SaveImageResult.Error -> {
+            is ReaderSaveImageResult.Error -> {
                 logcat(LogPriority.ERROR, result.error)
             }
         }
@@ -1835,7 +1835,7 @@ class ReaderActivity : BaseActivity() {
      * Called from the presenter when a page is set as cover or fails. It shows a different message
      * depending on the [result].
      */
-    private fun onSetAsCoverResult(result: ReaderViewModel.SetAsCoverResult) {
+    private fun onSetAsCoverResult(result: ReaderSetAsCoverResult) {
         toast(
             when (result) {
                 Success -> MR.strings.cover_updated

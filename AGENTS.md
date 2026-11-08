@@ -13,7 +13,7 @@ Houri (`applicationId app.houri`) — Android manga reader (min SDK 26, target 3
 | Guide | Covers |
 |-------|--------|
 | `app/AGENTS.md` | app module: package roots, Metro DI, screens, backup/restore, theme |
-| `app/.../tachiyomi/ui/reader/AGENTS.md` | ReaderActivity, viewers (pager/webtoon), loaders, upscale, MTL hookup |
+| `app/.../tachiyomi/ui/reader/AGENTS.md` | ReaderActivity, viewers (pager/webtoon), loaders, upscale bridge, MTL hookup |
 | `app/.../tachiyomi/ui/reader/viewer/webgpu/AGENTS.md` | WebGPU reader pipeline: threads, page state machine, stuck-page ladder, device recovery, symptom→cause table — **update it whenever a new observation is made** |
 | `app/.../tachiyomi/data/track/AGENTS.md` | Tracker services + framework (add/remove: `track/core/README.md`) |
 | `app/.../exh/AGENTS.md` | E-Hentai/MangaDex/delegated sources, metadata, recommendations |
@@ -145,6 +145,7 @@ Before `git push`, confirm the working tree contains only the intended changes (
 | `presentation-core/` | Shared Compose components |
 | `presentation-widget/` | Home-screen Glance widget |
 | `mtl-spine/` (`:mtl-spine`) | Pure MTL orchestration spine (`mtl.*`) shared verbatim by both MTL flavors |
+| `upscale/` (`:upscale`) | Standalone upscaling pipeline (NOT flavor-gated): pure spine (`upscale.*` policy/identity/status/models/prefetch) + NCNN JNI/ONNX/simple backends in `upscale/src/main/cpp`; app adapter in `app/.../upscale/app/` (prefs, config source, bootstrap, bindings, reader bridge) |
 | `yakuyomi-engine/` (`:yakuyomi`) | Komikku-side MTL wrapper (`exh.yakuyomi.*`: native pipeline sessions, Ichigo service, local LLM; `flavor/` = mtl-only providers) |
 | `yakuyomi-stub/` (`:yakuyomi-stub`) | No-op MTL stub compiled by the `nomtl` flavor |
 | `llamatik-native/` (`:llamatik-native`) | Vendored llamatik/llama.cpp native runtime + Kotlin wrapper (replaces the `com.llamatik:library` AAR, which is CPU-only) |

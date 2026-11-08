@@ -1,12 +1,12 @@
 package eu.kanade.tachiyomi.ui.reader.viewer
 
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
-import eu.kanade.tachiyomi.ui.reader.setting.UpscaleReaderHook
 import kotlinx.coroutines.CoroutineScope
 import mihon.app.di.globalAppGraph
 import mtl.sched.PageOutcome
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withUIContext
+import upscale.app.UpscaleReaderBridge
 
 /**
  * Shared entry point for MTL translation in the non-WebGPU readers (pager + webtoon).
@@ -37,7 +37,7 @@ object ReaderTranslation : PageTranslator {
     suspend fun needsOriginalBytes(page: ReaderPage): Boolean {
         val mangaId = page.chapter.chapter.manga_id ?: 0L
         if (globalAppGraph.mtlController.isEnabledForManga(mangaId)) return true
-        return UpscaleReaderHook.isUpscaleActive(mangaId)
+        return UpscaleReaderBridge.isUpscaleActive(mangaId)
     }
 
     /**

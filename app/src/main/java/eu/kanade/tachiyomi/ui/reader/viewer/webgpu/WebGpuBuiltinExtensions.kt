@@ -1,11 +1,11 @@
 // KMK -->
 package eu.kanade.tachiyomi.ui.reader.viewer.webgpu
 
-import eu.kanade.tachiyomi.ui.reader.setting.UpscaleReaderHook
+import upscale.app.UpscaleReaderBridge
 
 // The reader's own extensions, installed so they are present before any viewer can ask for them.
 //
-// Both are adapters over code that already works and is not going anywhere: [UpscaleReaderHook] is
+// Both are adapters over code that already works and is not going anywhere: [UpscaleReaderBridge] is
 // shared with the pager and webtoon readers, and translation is driven by the mtl spine (MtlController)
 // with its own caching and gating. Moving them in means the reader stops knowing they exist; it does
 // not mean reimplementing them, and the behaviour a user gets is byte-for-byte what it was.
@@ -29,7 +29,13 @@ internal object UpscaleExtension : WebGpuExtension {
     override val order: Int = 0
 
     override suspend fun transformBytes(context: WebGpuPageContext, bytes: ByteArray): ByteArray? =
-        UpscaleReaderHook.upscaleDisplayBytes(context.mangaId.takeIf { it > 0 }, bytes)
+        UpscaleReaderBridge.upscaleDisplayBytes(
+            mangaId = context.mangaId.takeIf { it > 0 },
+            chapterId = context.chapterId,
+            pageIndex = context.pageIndex,
+            bytes = bytes,
+            readerKind = upscale.core.ReaderKind.WEBGPU,
+        )
 }
 
 /**

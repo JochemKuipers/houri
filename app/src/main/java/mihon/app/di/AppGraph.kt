@@ -90,10 +90,6 @@ import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.setting.NovelTypographyPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import eu.kanade.tachiyomi.ui.reader.setting.UpscaleEngine
-import eu.kanade.tachiyomi.ui.reader.setting.UpscaleMangaStore
-import eu.kanade.tachiyomi.ui.reader.setting.UpscaleModelManager
-import eu.kanade.tachiyomi.ui.reader.setting.UpscalePreferences
 import eu.kanade.tachiyomi.ui.setting.track.BaseOAuthLoginActivity
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.CrashLogUtil
@@ -242,10 +238,12 @@ import tachiyomi.domain.updates.interactor.GetUpdates
 import tachiyomi.domain.updates.service.UpdatesPreferences
 import tachiyomi.source.local.image.LocalCoverManager
 import tachiyomi.source.local.io.LocalSourceFileSystem
+import upscale.app.UpscaleBindings
+import upscale.app.UpscaleBootstrap
 
 @DependencyGraph(
     scope = AppScope::class,
-    bindingContainers = [AppBindings::class, MtlBindings::class, mtl.provider.MtlComponentsContainer::class],
+    bindingContainers = [AppBindings::class, MtlBindings::class, UpscaleBindings::class, mtl.provider.MtlComponentsContainer::class],
 )
 interface AppGraph : ViewModelGraph {
     fun inject(app: App)
@@ -334,10 +332,10 @@ interface AppGraph : ViewModelGraph {
     val rotatingAchievementPool: tachiyomi.domain.achievement.service.RotatingAchievementPool
     val achievementSoundPlayer: eu.kanade.tachiyomi.data.achievement.AchievementSoundPlayer
     val achievementNotifier: eu.kanade.tachiyomi.data.achievement.AchievementNotifier
-    val upscalePreferences: UpscalePreferences
-    val upscaleEngine: UpscaleEngine
-    val upscaleMangaStore: UpscaleMangaStore
-    val upscaleModelManager: UpscaleModelManager
+    val upscalePreferences: upscale.app.UpscalePreferences
+    val upscaleController: upscale.UpscaleController
+    val upscaleStatus: upscale.status.UpscaleStatusHub
+    val upscaleMangaStore: upscale.app.UpscaleMangaStore
     // KMK <--
 
     // Domain

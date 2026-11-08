@@ -20,8 +20,19 @@ files moved. See .github/scripts/release_notes.py.
 - **Highlights and selection actions in books**: select any text to get four pen colours, a copy action and a look-up (the system web search, or ColorDict/GoldenDict when installed). Highlights persist per chapter, survive font changes and reflow, and re-mark themselves on every page. Tap inside a highlight to remove it. Toggleable in Reading appearance.
 - **Read-aloud for books**: the window's text is spoken by the system text-to-speech engine, in order, with an adjustable rate — and it chains across the book, turning the page itself when a document is spoken out (works in continuous and paged modes). Reading appearance → Read-aloud.
 - **Ignore publisher styles** for books (Reading appearance): drops the book's own stylesheets and keeps the reader's — the escape hatch for books that hardcode pixel font sizes, page-width boxes or paper-tuned letter-spacing. Your typography settings win from the first page, and flipping it back restores the book's styling instantly.
+- **Upscale new entries by default and per category**: the AI upscaler's per-manga toggle gains two wider controls - a category default (on/off per library category, with the per-manga toggle still winning) and an opt-in default for newly added entries - so whole collections can be upscaled without touching each entry.
+- **Prefetch upscaling ahead of the page you read**: the next pages are upscaled into the cache while you read, so turning the page shows the sharpened image instantly. Depth is adjustable (0-5) in the upscaler settings.
+- **Import your own ONNX upscaler models**: pick any .onnx file; it is validated by the runtime before acceptance and usable as the NPU/CPU engine's model.
+- **Live upscaler status**: the upscaler settings screen now shows what actually happened - served pages, cache hits, fallbacks, failures, average inference time and per-backend readiness.
+- **AI upscaling for everyone**: native model upscaling (Real-CUGAN / Real-ESRGAN / Waifu2x) no longer requires AI Translation — every build and device can now upscale, falling back to a plain resample when models are not installed.
+- **Upscale category defaults**: choose per category whether its entries get upscaled (on, off, or no override), with the per-manga toggle still winning over everything.
+- **Prefetch pages ahead while reading**: the next pages are upscaled in the background before you reach them, memory-gated so low-RAM devices keep the page turn smooth.
+- **Bring your own upscaler**: import your own ONNX super-resolution models from storage — they are probed by the runtime before acceptance and join the fallback chain like the built-in ones.
 
 ### Improve
+
+- **Upscaling no longer requires AI Translation**: the upscaler was rebuilt as its own pipeline (like the translation rewrite) — the no-MTL build now gets native model inference too, the mode gains an Auto option that falls back to simple resampling when a model or backend is unavailable, and existing per-manga opt-ins and the page cache carry over untouched.
+- **Real-CUGAN 3x model added**: the upscaler catalog now offers a 3x Real-CUGAN alongside 2x/4x options, with 3x/4x artifacts verified by hash.
 - **Reworked the translation pipeline from the ground up** — the on-device translation engine was rebuilt for faster startup, more reliable translations when providers change or go offline, and a smarter cache that reuses translated pages until the source or provider settings change.
 - **Title and description translations no longer show stale results** — cached translations are now validated against the manga's current metadata and your provider settings, so edited entries re-translate instead of showing outdated text.
 - **Clearer provider status in translation settings** — the Gemini Nano device status row now reflects the actual on-device availability reported by the engine.

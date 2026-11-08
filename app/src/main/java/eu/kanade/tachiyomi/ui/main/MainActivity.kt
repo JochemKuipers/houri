@@ -1,7 +1,6 @@
 package eu.kanade.tachiyomi.ui.main
 
 import android.animation.ValueAnimator
-import android.app.SearchManager
 import android.app.assist.AssistContent
 import android.content.Context
 import android.content.Intent
@@ -89,18 +88,14 @@ import eu.kanade.tachiyomi.data.coil.MangaCoverMetadata
 import eu.kanade.tachiyomi.data.connections.discord.DiscordRPCService
 import eu.kanade.tachiyomi.data.download.DownloadCache
 import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
-import eu.kanade.tachiyomi.data.notification.NotificationReceiver
 import eu.kanade.tachiyomi.data.updater.AppUpdateChecker
 import eu.kanade.tachiyomi.data.updater.RELEASE_URL
-import eu.kanade.tachiyomi.extension.ExtensionErrorReport
 import eu.kanade.tachiyomi.extension.api.ExtensionApi
 import eu.kanade.tachiyomi.extension.copyExtensionErrorToClipboard
 import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.network.interceptor.CloudflareBypassStatus
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
-import eu.kanade.tachiyomi.ui.home.TabEvent
 import eu.kanade.tachiyomi.ui.home.TopLevelRoute
-import eu.kanade.tachiyomi.ui.setting.addSettingsRoute
 import eu.kanade.tachiyomi.util.system.dpToPx
 import eu.kanade.tachiyomi.util.system.isDebugBuildType
 import eu.kanade.tachiyomi.util.system.isNavigationBarNeedsScrim
@@ -122,23 +117,16 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import mihon.core.migration.Migrator
-import mihon.core.migration.Migrator.scope
 import mihon.core.navigation.AssistContentRoute
 import mihon.core.navigation.BrowseSourceRoute
-import mihon.core.navigation.DeepLinkRoute
-import mihon.core.navigation.ExtensionStoresRoute
-import mihon.core.navigation.GlobalSearchRoute
 import mihon.core.navigation.HomeRoute
 import mihon.core.navigation.MangaRoute
 import mihon.core.navigation.NewUpdateRoute
 import mihon.core.navigation.OnboardingRoute
-import mihon.core.navigation.RestoreBackupRoute
-import mihon.core.navigation.SettingsRoute
 import mihon.core.navigation.SourceFeedRoute
 import mihon.core.navigation.appEntries
 import mihon.core.navigation.util.AssistContentManager
@@ -153,7 +141,6 @@ import mihon.presentation.core.util.isTabletUi
 import soup.compose.material.motion.animation.materialSharedAxisXIn
 import soup.compose.material.motion.animation.materialSharedAxisXOut
 import soup.compose.material.motion.animation.rememberSlideDistance
-import tachiyomi.core.common.Constants
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.util.lang.launchIO
@@ -860,107 +847,6 @@ class MainActivity : BaseActivity() {
             activityAnim.start()
             splashAnim.start()
         }
-    }
-
-    private fun handleIntentAction(
-        intent: Intent,
-        backStack: NavBackStack<NavKey>,
-        resultEventBus: ResultEventBus,
-        isTabletUi: Boolean,
-    ): Boolean {
-        // KMK --> Release the splash as soon as launch-intent routing runs. Every exit
-        // from this function - a deep link, a shortcut, or the plain launcher MAIN
-        // intent that matches no branch below - has decided the start destination, so
-        // the splash has nothing left to wait for. Without this, the unmatched action
-        // left `ready` false and the keepOnScreen condition pinned the splash for the
-        // full SPLASH_MAX_DURATION (+ the 900ms exit animation) on every ordinary
-        // cold start - ~6s of splash before the app became visible.
-        ready = true
-        // KMK <--
-        val notificationId = intent.getIntExtra("notificationId", -1)
-        if (notificationId > -1) {
-            NotificationReceiver.dismissNotification(
-                applicationContext,
-                notificationId,
-                intent.getIntExtra("groupId", 0),
-            )
-        }
-
-        val tabToOpen = when (intent.action) {
-            Constants.SHORTCUT_LIBRARY -> TabEvent.Library()
-            Constants.SHORTCUT_MANGA -> {
-                val idToOpen = intent.extras?.getLong(Constants.MANGA_EXTRA) ?: return false
-                backStack.popUntilRoot()
-                TabEvent.Library(idToOpen)
-            }
-            Constants.SHORTCUT_UPDATES -> TabEvent.Updates
-            Constants.SHORTCUT_HISTORY -> TabEvent.History
-            Constants.SHORTCUT_SOURCES -> TabEvent.Browse(false)
-            Constants.SHORTCUT_EXTENSIONS -> TabEvent.Browse(true)
-            Constants.SHORTCUT_DOWNLOADS -> {
-                backStack.popUntilRoot()
-                TabEvent.More(toDownloads = true)
-            }
-            // KMK -->
-            Constants.SHORTCUT_LIBRARY_UPDATE_ERRORS -> {
-                backStack.popUntilRoot()
-                TabEvent.More(toDownloads = false, toLibraryUpdateErrors = true)
-            }
-            // KMK <--
-            Intent.ACTION_APPLICATION_PREFERENCES -> {
-                backStack.popUntilRoot()
-                backStack.addSettingsRoute(SettingsRoute(), isTabletUi)
-                null
-            }
-            Intent.ACTION_SEARCH, Intent.ACTION_SEND, "com.google.android.gms.actions.SEARCH_ACTION" -> {
-                // If the intent match the "standard" Android search intent
-                // or the Google-specific search intent (triggered by saying or typing "search *query* on *Tachiyomi*" in Google Search/Google Assistant)
-
-                // Get the search query provided in extras, and if not null, perform a global search with it.
-                val query = intent.getStringExtra(SearchManager.QUERY) ?: intent.getStringExtra(Intent.EXTRA_TEXT)
-                if (!query.isNullOrEmpty()) {
-                    backStack.popUntilRoot()
-                    backStack.add(DeepLinkRoute(query))
-                }
-                null
-            }
-            INTENT_SEARCH -> {
-                val query = intent.getStringExtra(INTENT_SEARCH_QUERY)
-                if (!query.isNullOrEmpty()) {
-                    val filter = intent.getStringExtra(INTENT_SEARCH_FILTER)
-                    backStack.popUntilRoot()
-                    backStack.add(GlobalSearchRoute(query, filter))
-                }
-                null
-            }
-            Intent.ACTION_VIEW -> {
-                // Handling opening of backup files
-                if (intent.data.toString().endsWith(".tachibk")) {
-                    backStack.popUntilRoot()
-                    backStack.add(RestoreBackupRoute(intent.data.toString()))
-                }
-                // Deep link to add extension store
-                else if (intent.isAddExtensionStoreIntent()) {
-                    intent.data?.getQueryParameter("url")?.let { repoUrl ->
-                        backStack.popUntilRoot()
-                        backStack.add(ExtensionStoresRoute(repoUrl))
-                    }
-                }
-                null
-            }
-            else -> return false
-        }
-
-        if (tabToOpen != null) {
-            resultEventBus.sendResult(tabToOpen)
-        }
-
-        return true
-    }
-
-    private fun Intent.isAddExtensionStoreIntent(): Boolean {
-        return (scheme == "tachiyomi" && data?.host == "add-repo") ||
-            (scheme == "mihon" && data?.host == "extension-store")
     }
 
     companion object {

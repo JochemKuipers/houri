@@ -40,9 +40,9 @@ data object SettingsYakuyomiModelsRoute : NavKey, SearchableRoute {
         val isMangatranslator = provider == "mangatranslator"
 
         val groups = listOfNotNull(
-            SettingsYakuyomiRoute.getLocalLlmGroup().takeIf { !isNomtl && !isMangatranslator },
-            SettingsYakuyomiRoute.getModelGroup(modelManager).takeIf { !isNomtl && !isMangatranslator },
-            SettingsYakuyomiRoute.getRemoteModelGroup(prefs, modelManager).takeIf { !isMangatranslator && !isNomtl },
+            getLocalLlmGroup().takeIf { !isNomtl && !isMangatranslator },
+            getModelGroup(modelManager).takeIf { !isNomtl && !isMangatranslator },
+            getRemoteModelGroup(prefs, modelManager).takeIf { !isMangatranslator && !isNomtl },
             SettingsYakuyomiRoute.getAdvancedGroup(prefs).takeIf { !isNomtl && !isMangatranslator },
         )
         // KMK --> Gate first, then decide whether the page is empty: getModelGroup is
