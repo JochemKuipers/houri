@@ -3,18 +3,19 @@ package eu.kanade.tachiyomi.data.download
 import android.content.Context
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.data.download.Downloader.Companion.TMP_DIR_SUFFIX
+import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.util.storage.DiskUtil.NOMEDIA_FILE
 import logcat.LogPriority
 import mihon.core.archive.CbzCrypto
 import mihon.core.archive.ZipWriter
 import okhttp3.Response
+import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.core.metadata.comicinfo.COMIC_INFO_FILE
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.i18n.MR
-import tachiyomi.presentation.core.i18n.stringResource
 import java.io.File
 import java.util.Locale
 

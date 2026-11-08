@@ -678,7 +678,7 @@ class EHentai(
         val censorshipQuery = filters.firstNotNullOfOrNull { (it as? CensorshipFilter)?.query()?.nullIfBlank() }
         return listOf(
             query.trim(),
-            combineQuery(filters),
+            EHentaiFilters.combineQuery(filters),
             censorshipQuery.orEmpty(),
         ).filter { it.isNotBlank() }
             .joinToString(" ")
@@ -1184,7 +1184,6 @@ class EHentai(
             Filter.Header("or Jump by number of days/weeks/months/years: 7d, 4w, 12m, 10y"),
         )
     }
-
 
     override val name = if (exh) {
         "ExHentai"

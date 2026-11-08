@@ -360,5 +360,3 @@ internal fun getModelGroup(modelManager: exh.yakuyomi.ModelManager): Preference.
         }.toPersistentList(),
     )
 }
-
-

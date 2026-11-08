@@ -75,12 +75,15 @@ class PrefsUpscaleConfigSource(
             return (cached as? Boolean)
         }
         return try {
-            val categories = categoryRepository.getCategoriesForManga(mangaId)
+            val categories = categoryRepository.getCategoriesByMangaId(mangaId)
             var explicitFalse = false
             var result: Boolean? = null
             for (category in categories) {
                 when (store.categoryOverride(category.id)) {
-                    true -> { result = true; break }
+                    true -> {
+                        result = true
+                        break
+                    }
                     false -> explicitFalse = true
                     null -> {}
                 }

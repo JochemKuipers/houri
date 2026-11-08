@@ -1,6 +1,6 @@
 package upscale.core
 
-/**
+/*
  * The spine's persisted value types. Every enum here is string-stable: the app stores
  * `name` in preferences and the spine parses with [parseOrNull], falling back to a
  * documented default. Renaming a constant silently resets users — never do it.

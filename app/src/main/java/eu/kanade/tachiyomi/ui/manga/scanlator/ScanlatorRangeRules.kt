@@ -205,4 +205,3 @@ internal fun RangeRuleDialog(
 
 internal fun Double.asChapterLabel(): String =
     if (this % 1.0 == 0.0) toInt().toString() else toString()
-

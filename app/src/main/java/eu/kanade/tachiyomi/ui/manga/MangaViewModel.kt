@@ -296,6 +296,9 @@ class MangaViewModel(
     private val allChapters: List<ChapterList.Item>?
         get() = successState?.chapters
 
+    private val allDomainChapters: List<Chapter>
+        get() = successState?.allChapters.orEmpty()
+
     private val filteredChapters: List<ChapterList.Item>?
         get() = successState?.processedChapters
 
@@ -400,7 +403,7 @@ class MangaViewModel(
         setExcludedScanlators = setExcludedScanlators,
         updateManga = updateManga,
         provideMangaId = { mangaId },
-        provideAllChapters = { allChapters },
+        provideAllChapters = { allDomainChapters },
         provideBlacklistedChapters = { successState?.manga?.blacklistedChapters.orEmpty() },
     )
 
@@ -1230,7 +1233,6 @@ class MangaViewModel(
 
     // Related-manga + sequel/prequel subsystem extracted to RelatedMangaController.
     private val relatedMangaController = RelatedMangaController(
-        scope = viewModelScope,
         uiPreferences = uiPreferences,
         sourcePreferences = sourcePreferences,
         trackPreferences = trackPreferences,

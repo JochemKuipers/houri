@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.ui.manga.track
 
-
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.collectAsState
@@ -292,4 +291,3 @@ class TrackScoreSelectorViewModel(
         val selection: String,
     )
 }
-

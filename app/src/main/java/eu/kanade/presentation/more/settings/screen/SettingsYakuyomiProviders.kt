@@ -291,7 +291,6 @@ internal fun getProviderGroup(prefs: exh.yakuyomi.TranslationPreferences): Prefe
     )
 }
 
-
 @Composable
 internal fun getRemoteModelGroup(
     prefs: exh.yakuyomi.TranslationPreferences,
@@ -394,8 +393,7 @@ internal fun getMangaTranslatorGroup(prefs: exh.yakuyomi.TranslationPreferences)
     )
 }
 
-
-private fun providerDisplayName(provider: String): String = when (provider) {
+internal fun providerDisplayName(provider: String): String = when (provider) {
     "openrouter" -> "OpenRouter"
     "gemini" -> "Gemini"
     "opencode_zen" -> "OpenCode Zen"
@@ -405,4 +403,3 @@ private fun providerDisplayName(provider: String): String = when (provider) {
     "mangatranslator" -> "MangaTranslator"
     else -> provider.ifBlank { "openrouter" }
 }
-

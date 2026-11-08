@@ -2,21 +2,22 @@ package eu.kanade.tachiyomi.ui.library.controller
 
 import android.content.Context
 import androidx.compose.ui.util.fastFilter
+import androidx.compose.ui.util.fastMap
 import androidx.compose.ui.util.fastMapNotNull
 import eu.kanade.tachiyomi.data.track.TrackStatus
 import eu.kanade.tachiyomi.data.track.TrackerManager
+import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.ui.library.LibraryItem
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.domain.category.model.Category
+import tachiyomi.domain.category.model.Category.Companion.UNCATEGORIZED_ID
 import tachiyomi.domain.category.service.CategoryTreeHandler
 import tachiyomi.domain.library.model.LibraryGroup
-import tachiyomi.domain.manga.interactor.GetTracks
 import tachiyomi.domain.source.service.SourceManager
-import tachiyomi.domain.category.model.Category.Companion.UNCATEGORIZED_ID
+import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.sy.SYMR
 import tachiyomi.source.local.LocalSource
-import eu.kanade.tachiyomi.source.model.SManga
 
 /**
  * Builds the library's category groups, extracted from [eu.kanade.tachiyomi.ui.library.LibraryViewModel].

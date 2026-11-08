@@ -935,7 +935,7 @@ private fun FloatSliderItem(
 private fun decimal(value: Float): String = String.format(Locale.ROOT, "%.2f", value)
 
 /** What the OpenDocument picker first offers: the `font` MIME prefix first, then the types providers mislabel. */
-private val FONT_PICK_MIME_TYPES = arrayOf(
+internal val FONT_PICK_MIME_TYPES = arrayOf(
     "font/*",
     "application/x-font-ttf",
     "application/x-font-otf",

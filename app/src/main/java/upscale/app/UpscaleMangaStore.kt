@@ -75,5 +75,11 @@ class UpscaleMangaStore(
     }
 
     fun categoryOverrideFlow(categoryId: Long): Flow<Boolean?> = categoryPref(categoryId).changes()
-        .map { when (it) { "true" -> true; "false" -> false; else -> null } }
+        .map {
+            when (it) {
+                "true" -> true
+                "false" -> false
+                else -> null
+            }
+        }
 }

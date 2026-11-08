@@ -1,30 +1,31 @@
 package eu.kanade.tachiyomi.ui.library.controller
 
 import androidx.compose.ui.util.fastFilter
-import androidx.compose.ui.util.fastFilterNot
 import androidx.compose.ui.util.fastForEach
+import eu.kanade.core.util.fastFilterNot
+import eu.kanade.domain.chapter.interactor.SetReadStatus
+import eu.kanade.domain.manga.interactor.MergeMangaBySmartSearch
 import eu.kanade.domain.manga.interactor.UpdateManga
+import eu.kanade.domain.source.service.SourcePreferences
+import eu.kanade.tachiyomi.data.cache.CoverCache
+import eu.kanade.tachiyomi.data.download.DownloadManager
+import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.source.online.all.MergedSource
+import eu.kanade.tachiyomi.util.retainCovers
 import exh.md.utils.FollowStatus
 import exh.md.utils.MdUtil
-import exh.source.ExhPreferences
 import exh.source.isEhBasedManga
+import exh.source.isMergedSourceId
 import exh.source.mangaDexSourceIds
 import exh.source.nHentaiSourceIds
 import exh.util.nullIfBlank
-import tachiyomi.domain.chapter.interactor.SetReadStatus
+import kotlinx.collections.immutable.PersistentList
 import tachiyomi.domain.manga.interactor.GetMergedMangaById
 import tachiyomi.domain.manga.interactor.SetCustomMangaInfo
 import tachiyomi.domain.manga.model.CustomMangaInfo
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MangaUpdate
 import tachiyomi.domain.source.service.SourceManager
-import eu.kanade.tachiyomi.data.cache.CoverCache
-import eu.kanade.tachiyomi.data.download.DownloadManager
-import eu.kanade.tachiyomi.source.online.HttpSource
-import eu.kanade.tachiyomi.source.online.all.MergedSource
-import eu.kanade.tachiyomi.util.retainCovers
-import tachiyomi.domain.manga.interactor.MergeMangaBySmartSearch
-import kotlinx.collections.immutable.PersistentList
 import tachiyomi.domain.category.interactor.SetMangaCategories as SetMangaCategoriesInteractor
 
 /**
@@ -40,7 +41,7 @@ class LibrarySelectionController(
     private val updateManga: UpdateManga,
     private val setMangaCategories: SetMangaCategoriesInteractor,
     // SY -->
-    private val sourcePreferences: ExhPreferences,
+    private val sourcePreferences: SourcePreferences,
     // SY <--
     private val coverCache: CoverCache,
     private val sourceManager: SourceManager,

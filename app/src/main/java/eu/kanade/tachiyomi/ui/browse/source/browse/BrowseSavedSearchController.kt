@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.ui.browse.source.browse
 
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.domain.source.interactor.GetExhSavedSearch
+import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.FilterList
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
@@ -9,11 +10,10 @@ import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.domain.source.interactor.DeleteSavedSearchById
-import tachiyomi.domain.source.interactor.InsertSavedSearch
 import tachiyomi.domain.source.interactor.GetRemoteManga
+import tachiyomi.domain.source.interactor.InsertSavedSearch
 import tachiyomi.domain.source.model.EXHSavedSearch
 import tachiyomi.domain.source.model.SavedSearch
-import tachiyomi.domain.source.model.Source
 import tachiyomi.i18n.sy.SYMR
 
 /**

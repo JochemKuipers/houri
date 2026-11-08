@@ -1,7 +1,7 @@
 package eu.kanade.tachiyomi.ui.library.controller
 
 import androidx.compose.ui.util.fastAny
-import androidx.compose.ui.util.fastFilterNot
+import eu.kanade.core.util.fastFilterNot
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.ui.library.LibraryItem
@@ -28,7 +28,7 @@ class LibraryFilterHandler(
     private val getMergedMangaById: tachiyomi.domain.manga.interactor.GetMergedMangaById,
 ) {
 
-    suspend fun filter(
+    internal suspend fun filter(
         items: List<LibraryItem>,
         trackMap: Map<Long, List<Track>>,
         trackingFilter: Map<Long, TriState>,

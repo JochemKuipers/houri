@@ -56,7 +56,6 @@ import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 import kotlin.time.Duration.Companion.seconds
 
-
 @Composable
 fun CategoryCreateDialog(
     // KMK --> type-aware subcategory creation passes [onCreateWithSubcategoryType] instead.

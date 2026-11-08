@@ -7,6 +7,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -24,8 +25,11 @@ import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import mihon.app.di.globalAppGraph
+import tachiyomi.domain.category.model.Category
 import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
+import tachiyomi.presentation.core.util.collectAsState
 import androidx.compose.runtime.collectAsState as flowCollectAsState
 
 /**
@@ -79,7 +83,11 @@ data object SettingsUpscalerRoute : NavKey, SearchableRoute {
             formatCacheSummary(cacheBytes, cacheCount)
         }
 
-        val categories = remember { runCatching { globalAppGraph.getCategories.await() }.getOrDefault(emptyList()) }
+        val categoriesState = remember { mutableStateOf<List<Category>>(emptyList()) }
+        LaunchedEffect(Unit) {
+            categoriesState.value = runCatching { globalAppGraph.getCategories.await() }.getOrDefault(emptyList())
+        }
+        val categories = categoriesState.value
         val categoryVersion by store.categoryOverridesVersion.flowCollectAsState()
         val categoryStates = remember(categories, categoryVersion) {
             categories.map { it.id to store.categoryOverride(it.id) }
@@ -234,7 +242,9 @@ data object SettingsUpscalerRoute : NavKey, SearchableRoute {
                 Preference.PreferenceItem.SliderPreference(
                     value = prefetchDepth,
                     title = stringResource(KMR.strings.pref_upscale_prefetch),
-                    subtitle = if (prefetchDepth == 0) stringResource(KMR.strings.pref_upscale_prefetch_off) else {
+                    subtitle = if (prefetchDepth == 0) {
+                        stringResource(KMR.strings.pref_upscale_prefetch_off)
+                    } else {
                         "Warms the cache for the next $prefetchDepth page(s)"
                     },
                     valueString = if (prefetchDepth == 0) "Off" else "$prefetchDepth",
@@ -508,11 +518,13 @@ data object SettingsUpscalerRoute : NavKey, SearchableRoute {
         backend: String,
     ): String = when (backend) {
         "AUTO" -> ""
-        else -> statuses[when (backend) {
-            "VULKAN" -> "ncnn"
-            "NPU" -> "ort"
-            else -> "simple"
-        }]?.value?.let { readiness0 ->
+        else -> statuses[
+            when (backend) {
+                "VULKAN" -> "ncnn"
+                "NPU" -> "ort"
+                else -> "simple"
+            },
+        ]?.value?.let { readiness0 ->
             when (readiness0) {
                 is upscale.core.Readiness.Ready -> " (ready)"
                 is upscale.core.Readiness.Unavailable -> " (unavailable)"

@@ -9,7 +9,6 @@ import eu.kanade.presentation.util.formattedMessage
 import eu.kanade.tachiyomi.databinding.ReaderErrorBinding
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
-import upscale.app.UpscaleReaderBridge
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderPageImageView
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderTranslation
@@ -31,6 +30,7 @@ import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
+import upscale.app.UpscaleReaderBridge
 
 /**
  * View of the ViewPager that contains a page of a chapter.
@@ -206,9 +206,10 @@ class PagerPageHolder(
                 // Display-time upscale of the original bytes (translation below keeps the
                 // originals). Null falls back to the untouched stream.
                 val displayBytes: ByteArray? = translationBytes?.let { bytes ->
+                    val chapterId = page.chapter.chapter.id ?: return@let bytes
                     UpscaleReaderBridge.upscaleDisplayBytes(
                         mangaId = mangaId,
-                        chapterId = page.chapter.chapter.id,
+                        chapterId = chapterId,
                         pageIndex = page.index,
                         bytes = bytes,
                     )

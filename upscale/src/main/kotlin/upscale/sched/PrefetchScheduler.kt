@@ -46,7 +46,7 @@ class PrefetchScheduler(
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
-                logcat(tachiyomi.core.common.util.system.LogPriority.DEBUG) {
+                logcat(LogPriority.DEBUG) {
                     "Prefetch failed for ${work.key}: ${e.message}"
                 }
             } finally {

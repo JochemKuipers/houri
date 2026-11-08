@@ -437,7 +437,6 @@ data object SettingsEhRoute : NavKey, SearchableRoute {
         )
     }
 
-
     @Composable
     fun settingsLanguages(
         exhPreferences: ExhPreferences,
@@ -463,36 +462,6 @@ data object SettingsEhRoute : NavKey, SearchableRoute {
             },
         )
     }
-
-    class FrontPageCategoriesDialogState(
-        preference: String,
-    ) {
-        private val enabledCategories = preference.split(",").map { !it.toBoolean() }
-        var doujinshi by mutableStateOf(enabledCategories[0])
-        var manga by mutableStateOf(enabledCategories[1])
-        var artistCg by mutableStateOf(enabledCategories[2])
-        var gameCg by mutableStateOf(enabledCategories[3])
-        var western by mutableStateOf(enabledCategories[4])
-        var nonH by mutableStateOf(enabledCategories[5])
-        var imageSet by mutableStateOf(enabledCategories[6])
-        var cosplay by mutableStateOf(enabledCategories[7])
-        var asianPorn by mutableStateOf(enabledCategories[8])
-        var misc by mutableStateOf(enabledCategories[9])
-
-        fun toPreference() = listOf(
-            doujinshi,
-            manga,
-            artistCg,
-            gameCg,
-            western,
-            nonH,
-            imageSet,
-            cosplay,
-            asianPorn,
-            misc,
-        ).joinToString(separator = ",") { (!it).toString() }
-    }
-
 
     @Composable
     fun enabledCategories(
@@ -594,7 +563,6 @@ data object SettingsEhRoute : NavKey, SearchableRoute {
             subtitle = stringResource(SYMR.strings.ignore_sync_errors_summary),
         )
     }
-
 
     @Composable
     fun forceSyncReset(deleteFavoriteEntries: DeleteFavoriteEntries): Preference.PreferenceItem.TextPreference {
@@ -700,8 +668,6 @@ data object SettingsEhRoute : NavKey, SearchableRoute {
             },
         )
     }
-
-
 
     @Composable
     fun updaterStatistics(

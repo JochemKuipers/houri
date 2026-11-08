@@ -432,4 +432,3 @@ internal fun getAutomaticSyncGroup(syncPreferences: SyncPreferences): Preference
     )
 }
 // SY <--
-

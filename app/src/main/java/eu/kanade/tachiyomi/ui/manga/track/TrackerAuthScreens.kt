@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.ui.manga.track
 
-
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column

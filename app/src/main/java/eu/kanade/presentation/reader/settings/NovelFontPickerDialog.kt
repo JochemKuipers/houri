@@ -55,37 +55,37 @@ import tachiyomi.presentation.core.i18n.stringResource
  */
 @Composable
 internal fun FontRow(family: String, onClick: () -> Unit) {
-Row(
-    modifier = Modifier
-        .clickable(onClick = onClick)
-        .fillMaxWidth()
-        .padding(
-            horizontal = SettingsItemsPaddings.Horizontal,
-            vertical = SettingsItemsPaddings.Vertical,
-        ),
-    horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.large),
-    verticalAlignment = Alignment.CenterVertically,
-) {
-    Column(modifier = Modifier.weight(1f)) {
-        Text(
-            text = stringResource(KMR.strings.pref_novel_font_family),
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(
-            text = familyLabel(family),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+    Row(
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .fillMaxWidth()
+            .padding(
+                horizontal = SettingsItemsPaddings.Horizontal,
+                vertical = SettingsItemsPaddings.Vertical,
+            ),
+        horizontalArrangement = Arrangement.spacedBy(MaterialTheme.padding.large),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(KMR.strings.pref_novel_font_family),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                text = familyLabel(family),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // The dropdown affordance: the row opens a list, and without it the row reads as a label.
+        Icon(
+            imageVector = Icons.Outlined.ArrowDropDown,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    // The dropdown affordance: the row opens a list, and without it the row reads as a label.
-    Icon(
-        imageVector = Icons.Outlined.ArrowDropDown,
-        contentDescription = null,
-        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
 }
 
 /**
@@ -97,7 +97,7 @@ Row(
  * labels the old dropdown offered anyway.
  */
 internal fun familyLabel(family: String): String =
-family.removePrefix(NovelBuiltinFonts.PREFIX).removePrefix(NovelFonts.PREFIX)
+    family.removePrefix(NovelBuiltinFonts.PREFIX).removePrefix(NovelFonts.PREFIX)
 
 /**
  * One family in the picker: what is stored to select it, what is displayed, and what face the label
@@ -108,15 +108,15 @@ family.removePrefix(NovelBuiltinFonts.PREFIX).removePrefix(NovelFonts.PREFIX)
  * specimen sheet rather than names to be taken on trust.
  */
 internal data class FontChoice(
-val value: String,
-val label: String,
-val preview: FontFamily,
-val deletable: Boolean = false,
+    val value: String,
+    val label: String,
+    val preview: FontFamily,
+    val deletable: Boolean = false,
 )
 
 internal sealed interface FontRow {
-data class Group(val label: StringResource) : FontRow
-data class Choice(val choice: FontChoice) : FontRow
+    data class Group(val label: StringResource) : FontRow
+    data class Choice(val choice: FontChoice) : FontRow
 }
 
 /**
@@ -147,110 +147,110 @@ data class Choice(val choice: FontChoice) : FontRow
  */
 @Composable
 internal fun NovelFontPickerDialog(
-context: Context,
-version: Int,
-selected: String,
-onSelect: (String) -> Unit,
-onDelete: (String) -> Unit,
-onChanged: () -> Unit,
-onDismiss: () -> Unit,
+    context: Context,
+    version: Int,
+    selected: String,
+    onSelect: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onChanged: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
-val rows = remember(version) { pickerRows(context) }
-var pendingDelete by remember { mutableStateOf<String?>(null) }
+    val rows = remember(version) { pickerRows(context) }
+    var pendingDelete by remember { mutableStateOf<String?>(null) }
 
-val importLauncher = rememberLauncherForActivityResult(
-    ActivityResultContracts.OpenDocument(),
-) { uri ->
-    if (uri != null) {
-        context.toast(
-            when (NovelFonts.import(context, uri)) {
-                ImportResult.Success -> KMR.strings.novel_font_added
-                ImportResult.NotAFont -> KMR.strings.novel_font_invalid
-                ImportResult.TooLarge -> KMR.strings.novel_font_too_large
-                ImportResult.Unreadable -> KMR.strings.novel_font_add_failed
-            },
-        )
-        onChanged()
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            context.toast(
+                when (NovelFonts.import(context, uri)) {
+                    ImportResult.Success -> KMR.strings.novel_font_added
+                    ImportResult.NotAFont -> KMR.strings.novel_font_invalid
+                    ImportResult.TooLarge -> KMR.strings.novel_font_too_large
+                    ImportResult.Unreadable -> KMR.strings.novel_font_add_failed
+                },
+            )
+            onChanged()
+        }
     }
-}
 
-AlertDialog(
-    onDismissRequest = onDismiss,
-    title = { Text(stringResource(KMR.strings.pref_novel_font_family)) },
-    text = {
-        LazyColumn(
-            modifier = Modifier.heightIn(max = 420.dp),
-            verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
-        ) {
-            // Import first: a reader who has their own file in hand should not scroll past
-            // three hundred families to offer it.
-            item {
-                Row(
-                    modifier = Modifier
-                        .clickable { importLauncher.launch(FONT_PICK_MIME_TYPES) }
-                        .fillMaxWidth()
-                        .padding(
-                            horizontal = SettingsItemsPaddings.Horizontal,
-                            vertical = SettingsItemsPaddings.Vertical,
-                        ),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.UploadFile,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Text(
-                        text = stringResource(KMR.strings.novel_font_add),
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(KMR.strings.pref_novel_font_family)) },
+        text = {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
+            ) {
+                // Import first: a reader who has their own file in hand should not scroll past
+                // three hundred families to offer it.
+                item {
+                    Row(
                         modifier = Modifier
-                            .padding(start = MaterialTheme.padding.large)
-                            .weight(1f, fill = false),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-            }
-            rows.forEach { row ->
-                when (row) {
-                    is FontRow.Group -> item { FontDialogHeader(stringResource(row.label)) }
-                    is FontRow.Choice -> item {
-                        FontChoiceRow(
-                            choice = row.choice,
-                            selected = selected,
-                            onSelect = onSelect,
-                            onRemove = { pendingDelete = row.choice.value },
+                            .clickable { importLauncher.launch(FONT_PICK_MIME_TYPES) }
+                            .fillMaxWidth()
+                            .padding(
+                                horizontal = SettingsItemsPaddings.Horizontal,
+                                vertical = SettingsItemsPaddings.Vertical,
+                            ),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.UploadFile,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            text = stringResource(KMR.strings.novel_font_add),
+                            modifier = Modifier
+                                .padding(start = MaterialTheme.padding.large)
+                                .weight(1f, fill = false),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                     }
                 }
+                rows.forEach { row ->
+                    when (row) {
+                        is FontRow.Group -> item { FontDialogHeader(stringResource(row.label)) }
+                        is FontRow.Choice -> item {
+                            FontChoiceRow(
+                                choice = row.choice,
+                                selected = selected,
+                                onSelect = onSelect,
+                                onRemove = { pendingDelete = row.choice.value },
+                            )
+                        }
+                    }
+                }
             }
-        }
-    },
-    confirmButton = {
-        TextButton(onClick = onDismiss) { Text(stringResource(MR.strings.action_ok)) }
-    },
-)
-
-val deleteTarget = pendingDelete
-if (deleteTarget != null) {
-    AlertDialog(
-        onDismissRequest = { pendingDelete = null },
-        title = { Text(stringResource(KMR.strings.novel_font_remove)) },
-        text = { Text(stringResource(KMR.strings.novel_font_remove_confirm)) },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    onDelete(deleteTarget)
-                    pendingDelete = null
-                },
-            ) { Text(stringResource(MR.strings.action_ok)) }
         },
-        dismissButton = {
-            TextButton(onClick = { pendingDelete = null }) {
-                Text(stringResource(MR.strings.action_cancel))
-            }
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(MR.strings.action_ok)) }
         },
     )
-}
+
+    val deleteTarget = pendingDelete
+    if (deleteTarget != null) {
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text(stringResource(KMR.strings.novel_font_remove)) },
+            text = { Text(stringResource(KMR.strings.novel_font_remove_confirm)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDelete(deleteTarget)
+                        pendingDelete = null
+                    },
+                ) { Text(stringResource(MR.strings.action_ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) {
+                    Text(stringResource(MR.strings.action_cancel))
+                }
+            },
+        )
+    }
 }
 
 /**
@@ -258,16 +258,16 @@ if (deleteTarget != null) {
  */
 @Composable
 internal fun FontDialogHeader(text: String) {
-Text(
-    text = text,
-    style = MaterialTheme.typography.labelLarge,
-    color = MaterialTheme.colorScheme.primary,
-    modifier = Modifier.padding(
-        start = SettingsItemsPaddings.Horizontal,
-        end = SettingsItemsPaddings.Horizontal,
-        top = MaterialTheme.padding.small,
-    ),
-)
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(
+            start = SettingsItemsPaddings.Horizontal,
+            end = SettingsItemsPaddings.Horizontal,
+            top = MaterialTheme.padding.small,
+        ),
+    )
 }
 
 /**
@@ -280,48 +280,48 @@ Text(
  */
 @Composable
 internal fun FontChoiceRow(
-choice: FontChoice,
-selected: String,
-onSelect: (String) -> Unit,
-onRemove: () -> Unit,
+    choice: FontChoice,
+    selected: String,
+    onSelect: (String) -> Unit,
+    onRemove: () -> Unit,
 ) {
-val isChosen = choice.value == selected
-Row(
-    modifier = Modifier
-        .clickable { onSelect(choice.value) }
-        .fillMaxWidth()
-        .padding(
-            horizontal = SettingsItemsPaddings.Horizontal,
-            vertical = SettingsItemsPaddings.Vertical,
-        ),
-    verticalAlignment = Alignment.CenterVertically,
-) {
-    Text(
-        text = choice.label,
-        modifier = Modifier.weight(1f, fill = false),
-        style = MaterialTheme.typography.bodyLarge
-            .copy(fontFamily = choice.preview, fontSize = 20.sp),
-        color = if (isChosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
-    if (choice.deletable) {
-        IconButton(onClick = onRemove) {
+    val isChosen = choice.value == selected
+    Row(
+        modifier = Modifier
+            .clickable { onSelect(choice.value) }
+            .fillMaxWidth()
+            .padding(
+                horizontal = SettingsItemsPaddings.Horizontal,
+                vertical = SettingsItemsPaddings.Vertical,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = choice.label,
+            modifier = Modifier.weight(1f, fill = false),
+            style = MaterialTheme.typography.bodyLarge
+                .copy(fontFamily = choice.preview, fontSize = 20.sp),
+            color = if (isChosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (choice.deletable) {
+            IconButton(onClick = onRemove) {
+                Icon(
+                    imageVector = Icons.Outlined.Delete,
+                    contentDescription = stringResource(KMR.strings.novel_font_remove),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (isChosen) {
             Icon(
-                imageVector = Icons.Outlined.Delete,
-                contentDescription = stringResource(KMR.strings.novel_font_remove),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                imageVector = Icons.Outlined.Check,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
             )
         }
     }
-    if (isChosen) {
-        Icon(
-            imageVector = Icons.Outlined.Check,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-        )
-    }
-}
 }
 
 /**
@@ -334,22 +334,22 @@ Row(
  * only when there are any: an empty "Your fonts" header describing nothing is a UI bug.
  */
 internal fun pickerRows(context: Context): List<FontRow> = buildList {
-add(FontRow.Group(KMR.strings.novel_font_group_generic))
-GENERIC_FAMILIES.forEach { add(FontRow.Choice(it)) }
+    add(FontRow.Group(KMR.strings.novel_font_group_generic))
+    GENERIC_FAMILIES.forEach { add(FontRow.Choice(it)) }
 
-add(FontRow.Group(KMR.strings.novel_font_built_in))
-NovelBuiltinFonts.Category.entries.forEach { category ->
-    add(FontRow.Group(categoryLabel(category)))
-    NovelBuiltinFonts.all
-        .filter { it.category == category }
-        .forEach { family -> add(FontRow.Choice(builtinChoice(context, family))) }
-}
+    add(FontRow.Group(KMR.strings.novel_font_built_in))
+    NovelBuiltinFonts.Category.entries.forEach { category ->
+        add(FontRow.Group(categoryLabel(category)))
+        NovelBuiltinFonts.all
+            .filter { it.category == category }
+            .forEach { family -> add(FontRow.Choice(builtinChoice(context, family))) }
+    }
 
-val user = NovelFonts.list(context)
-if (user.isNotEmpty()) {
-    add(FontRow.Group(KMR.strings.novel_font_user))
-    user.forEach { value -> add(FontRow.Choice(userChoice(context, value))) }
-}
+    val user = NovelFonts.list(context)
+    if (user.isNotEmpty()) {
+        add(FontRow.Group(KMR.strings.novel_font_user))
+        user.forEach { value -> add(FontRow.Choice(userChoice(context, value))) }
+    }
 }
 
 /**
@@ -360,17 +360,17 @@ if (user.isNotEmpty()) {
  * that gets stored one and the same string, exactly as the old dropdown did.
  */
 private val GENERIC_FAMILIES = listOf(
-FontChoice("serif", "serif", FontFamily.Serif),
-FontChoice("sans-serif", "sans-serif", FontFamily.SansSerif),
-FontChoice("monospace", "monospace", FontFamily.Monospace),
-FontChoice("cursive", "cursive", FontFamily.Cursive),
+    FontChoice("serif", "serif", FontFamily.Serif),
+    FontChoice("sans-serif", "sans-serif", FontFamily.SansSerif),
+    FontChoice("monospace", "monospace", FontFamily.Monospace),
+    FontChoice("cursive", "cursive", FontFamily.Cursive),
 )
 
 internal fun categoryLabel(category: NovelBuiltinFonts.Category): StringResource = when (category) {
-NovelBuiltinFonts.Category.Serif -> KMR.strings.novel_font_group_serif
-NovelBuiltinFonts.Category.Sans -> KMR.strings.novel_font_group_sans
-NovelBuiltinFonts.Category.Mono -> KMR.strings.novel_font_group_mono
-NovelBuiltinFonts.Category.Handwriting -> KMR.strings.novel_font_group_handwriting
+    NovelBuiltinFonts.Category.Serif -> KMR.strings.novel_font_group_serif
+    NovelBuiltinFonts.Category.Sans -> KMR.strings.novel_font_group_sans
+    NovelBuiltinFonts.Category.Mono -> KMR.strings.novel_font_group_mono
+    NovelBuiltinFonts.Category.Handwriting -> KMR.strings.novel_font_group_handwriting
 }
 
 /**
@@ -380,16 +380,16 @@ NovelBuiltinFonts.Category.Handwriting -> KMR.strings.novel_font_group_handwriti
  * selectable, which matters more than it being typographically correct.
  */
 internal fun builtinChoice(context: Context, family: NovelBuiltinFonts.Family): FontChoice {
-val preview = try {
-    FontFamily(Typeface.createFromAsset(context.assets, family.asset))
-} catch (_: Exception) {
-    previewFallback(family.category)
-}
-return FontChoice(
-    value = NovelBuiltinFonts.PREFIX + family.name,
-    label = family.name,
-    preview = preview,
-)
+    val preview = try {
+        FontFamily(Typeface.createFromAsset(context.assets, family.asset))
+    } catch (_: Exception) {
+        previewFallback(family.category)
+    }
+    return FontChoice(
+        value = NovelBuiltinFonts.PREFIX + family.name,
+        label = family.name,
+        preview = preview,
+    )
 }
 
 /**
@@ -400,37 +400,24 @@ return FontChoice(
  * would happily offer a font the surface then cannot set.
  */
 internal fun userChoice(context: Context, value: String): FontChoice {
-val preview = NovelFonts.userFile(context, value)?.let { file ->
-    try {
-        FontFamily(Typeface.createFromFile(file))
-    } catch (_: Exception) {
-        null
-    }
-} ?: previewFallback(NovelBuiltinFonts.Category.Sans)
-return FontChoice(
-    value = value,
-    label = familyLabel(value),
-    preview = preview,
-    deletable = true,
-)
+    val preview = NovelFonts.userFile(context, value)?.let { file ->
+        try {
+            FontFamily(Typeface.createFromFile(file))
+        } catch (_: Exception) {
+            null
+        }
+    } ?: previewFallback(NovelBuiltinFonts.Category.Sans)
+    return FontChoice(
+        value = value,
+        label = familyLabel(value),
+        preview = preview,
+        deletable = true,
+    )
 }
 
 internal fun previewFallback(category: NovelBuiltinFonts.Category): FontFamily = when (category) {
-NovelBuiltinFonts.Category.Serif -> FontFamily.Serif
-NovelBuiltinFonts.Category.Sans -> FontFamily.SansSerif
-NovelBuiltinFonts.Category.Mono -> FontFamily.Monospace
-NovelBuiltinFonts.Category.Handwriting -> FontFamily.Cursive
+    NovelBuiltinFonts.Category.Serif -> FontFamily.Serif
+    NovelBuiltinFonts.Category.Sans -> FontFamily.SansSerif
+    NovelBuiltinFonts.Category.Mono -> FontFamily.Monospace
+    NovelBuiltinFonts.Category.Handwriting -> FontFamily.Cursive
 }
-
-/**
- * The custom hex entry: one field, validated against the same grammar the stylesheet reads, with the
- * OK button answering only a colour.
- *
- * Disabling OK rather than showing an error toast is the cheaper interface for a two-character
- * grammar — the field is *right there*, and the reader fixes it before ever leaving the dialog. The
- * hint states the expected shape so the disabled state is not a riddle.
- *
- * [initial] is prefilled so re-entering the dialog shows the colour already in use: a reader who
- * picked a colour and wants to nudge it must not be handed an empty field and the question of what
- * it was they had picked.
- */

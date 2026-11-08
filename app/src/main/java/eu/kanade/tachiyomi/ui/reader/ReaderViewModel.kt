@@ -917,10 +917,11 @@ class ReaderViewModel(
         // Prefetch-warm the upscaling cache for the pages ahead. The scheduler dedups and
         // memory-gates; providers only materialize bytes when the prefetch actually runs.
         runCatching {
-            val mangaId = selectedChapter.chapter.manga_id
-            if (mangaId == null || mangaId <= 0L) return@runCatching
+            val mangaId = selectedChapter.chapter.manga_id ?: return@runCatching
+            if (mangaId <= 0L) return@runCatching
+            val chapterId = selectedChapter.chapter.id ?: return@runCatching
             val controller = mihon.app.di.globalAppGraph.upscaleController
-            val providers = buildMap {
+            val providers = buildMap<Int, suspend () -> ByteArray?> {
                 pages.filter { it.index > page.index }.forEach { aheadPage ->
                     val streamFn = aheadPage.stream ?: return@forEach
                     put(aheadPage.index) {
@@ -934,7 +935,7 @@ class ReaderViewModel(
             }
             controller.prefetch(
                 mangaId = mangaId,
-                chapterId = selectedChapter.chapter.id,
+                chapterId = chapterId,
                 pageIndex = page.index,
                 providers = providers,
             )
@@ -1589,7 +1590,6 @@ class ReaderViewModel(
         }
     }
     // SY <--
-
 
     fun showMenus(visible: Boolean) {
         mutableState.update { it.copy(menuVisible = visible) }

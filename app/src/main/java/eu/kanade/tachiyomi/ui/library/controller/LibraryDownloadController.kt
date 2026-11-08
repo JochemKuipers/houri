@@ -1,12 +1,12 @@
 package eu.kanade.tachiyomi.ui.library.controller
 
 import androidx.compose.ui.util.fastAny
-import androidx.compose.ui.util.fastFilterNot
+import eu.kanade.core.util.fastFilterNot
 import eu.kanade.presentation.manga.DownloadAction
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import exh.source.isMergedSourceId
 import tachiyomi.domain.chapter.interactor.GetBookmarkedChaptersByMangaId
-import tachiyomi.domain.chapter.interactor.GetNextChapters
+import tachiyomi.domain.history.interactor.GetNextChapters
 import tachiyomi.domain.manga.interactor.GetMergedMangaById
 import tachiyomi.domain.manga.model.Manga
 

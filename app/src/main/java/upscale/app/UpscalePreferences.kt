@@ -6,18 +6,11 @@ import tachiyomi.core.common.preference.PreferenceStore
  * Preference store for the upscaling stack. Keys are **byte-identical** to the pre-rewrite
  * stack so every existing opt-in survives the cutover; only NEW settings get new keys.
  *
- * The spine never reads this class — [PrefsUpscaleConfigSource] translates it into a
- * [upscale.policy.UpscaleConfig] snapshot. Enums here mirror the spine's
- * [upscale.core] value names; `parseStable`-style fallbacks keep unknown values harmless.
- */
-/**
- * Preference store for the upscaling stack. Keys are **byte-identical** to the pre-rewrite
- * stack so every existing opt-in survives the cutover; only NEW settings get new keys.
- *
  * Provided only through [UpscaleBindings] (with its manga store), so this is not @Inject.
  *
  * The spine never reads this class — [PrefsUpscaleConfigSource] translates it into a
  * [upscale.policy.UpscaleConfig] snapshot.
+ * Enums here mirror the spine's [upscale.core] value names; `parseStable`-style fallbacks keep unknown values harmless.
  */
 class UpscalePreferences(
     private val preferenceStore: PreferenceStore,
@@ -63,7 +56,7 @@ class UpscalePreferences(
                 .toSet()
                 .forEach { mangaId ->
                     try {
-                        upscaleMangaStore.setEnabled(mangaId, true)
+                        mangaStore.setEnabled(mangaId, true)
                     } catch (_: Exception) {}
                 }
             try {

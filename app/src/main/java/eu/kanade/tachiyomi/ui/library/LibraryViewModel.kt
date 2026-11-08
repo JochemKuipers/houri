@@ -186,7 +186,7 @@ class LibraryViewModel(
         updateManga = updateManga,
         setMangaCategories = setMangaCategories,
         // SY -->
-        sourcePreferences = exhPreferences,
+        sourcePreferences = sourcePreferences,
         // SY <--
         coverCache = coverCache,
         sourceManager = sourceManager,

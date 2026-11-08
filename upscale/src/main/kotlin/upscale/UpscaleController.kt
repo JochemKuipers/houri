@@ -42,7 +42,7 @@ class UpscaleController(
     private val cache: UpscalePageCache,
     val models: UpscaleModelManager,
     private val probe: DeviceProbe,
-    private val status: UpscaleStatusHub,
+    val status: UpscaleStatusHub,
     /** BYTE backends; the simple one must carry id "simple", native ones "ncnn"/"ort". */
     byteBackends: List<UpscalerBackend>,
     /** RENDER_TILE backends (the WebGPU ArtCNN bridge); registered for status, never executed. */

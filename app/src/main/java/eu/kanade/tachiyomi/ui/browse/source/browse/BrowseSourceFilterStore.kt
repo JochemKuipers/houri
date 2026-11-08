@@ -1,12 +1,12 @@
 package eu.kanade.tachiyomi.ui.browse.source.browse
 
-import eu.kanade.tachiyomi.source.model.Filter as SourceModelFilter
+import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.FilterList
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import tachiyomi.domain.library.service.LibraryPreferences
-import tachiyomi.domain.source.model.Source
 import xyz.nulldev.ts.api.http.serializer.FilterSerializer
+import eu.kanade.tachiyomi.source.model.Filter as SourceModelFilter
 
 /**
  * Source-level filter persistence for [BrowseSourceViewModel], extracted from the VM (SY block):

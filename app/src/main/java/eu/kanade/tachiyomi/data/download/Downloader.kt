@@ -619,7 +619,6 @@ class Downloader(
             .first()
     }
 
-
     /**
      * Creates a ComicInfo.xml file inside the given directory.
      */

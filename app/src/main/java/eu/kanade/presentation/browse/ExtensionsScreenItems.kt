@@ -296,5 +296,3 @@ internal fun ExtensionItemActions(
         }
     }
 }
-
-

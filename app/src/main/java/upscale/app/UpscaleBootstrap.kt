@@ -84,6 +84,11 @@ class UpscaleBootstrap(
     )
 
     init {
+        // Achievement hooks subscribe here rather than in their own constructor: the hub above
+        // does not exist until this class's properties are initialized, and a constructor edge
+        // from the observer to the hub would be a DI dependency cycle (see the observer's KDoc).
+        achievementObserver.attach(status)
+
         // Model/artifact changes invalidate the probe's device snapshot and every cached
         // inference session — same reaction the old engine had, now at the assembly.
         modelManager.status

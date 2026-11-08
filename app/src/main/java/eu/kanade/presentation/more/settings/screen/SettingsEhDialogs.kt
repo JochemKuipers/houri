@@ -255,6 +255,35 @@ internal fun FrontPageCategoriesDialogRow(
     }
 }
 
+class FrontPageCategoriesDialogState(
+    preference: String,
+) {
+    private val enabledCategories = preference.split(",").map { !it.toBoolean() }
+    var doujinshi by mutableStateOf(enabledCategories[0])
+    var manga by mutableStateOf(enabledCategories[1])
+    var artistCg by mutableStateOf(enabledCategories[2])
+    var gameCg by mutableStateOf(enabledCategories[3])
+    var western by mutableStateOf(enabledCategories[4])
+    var nonH by mutableStateOf(enabledCategories[5])
+    var imageSet by mutableStateOf(enabledCategories[6])
+    var cosplay by mutableStateOf(enabledCategories[7])
+    var asianPorn by mutableStateOf(enabledCategories[8])
+    var misc by mutableStateOf(enabledCategories[9])
+
+    fun toPreference() = listOf(
+        doujinshi,
+        manga,
+        artistCg,
+        gameCg,
+        western,
+        nonH,
+        imageSet,
+        cosplay,
+        asianPorn,
+        misc,
+    ).joinToString(separator = ",") { (!it).toString() }
+}
+
 @Composable
 internal fun FrontPageCategoriesDialog(
     onDismissRequest: () -> Unit,
@@ -506,4 +535,3 @@ internal data class RelativeTime(
     var seconds: Long? = null,
     var milliseconds: Long? = null,
 )
-

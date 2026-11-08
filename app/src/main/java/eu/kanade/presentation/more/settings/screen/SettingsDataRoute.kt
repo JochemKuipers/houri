@@ -656,5 +656,4 @@ data object SettingsDataRoute : NavKey, SearchableRoute {
         )
     }
     // KMK <--
-
 }

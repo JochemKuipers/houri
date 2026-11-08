@@ -40,7 +40,7 @@ import tachiyomi.presentation.core.util.collectAsState
 
 // The spine's Gemini Nano provider id — the status row probes the controller by id.
 // Kept in sync with mtl/provider/GeminiNanoProvider.kt.
-private const val SETTINGS_NANO_ID = "gemini-nano"
+internal const val SETTINGS_NANO_ID = "gemini-nano"
 
 @Serializable
 data object SettingsYakuyomiRoute : NavKey, SearchableRoute {
@@ -502,7 +502,6 @@ data object SettingsYakuyomiRoute : NavKey, SearchableRoute {
         )
     }
 
-
     @Composable
     private fun getSessionsGroup(): Preference.PreferenceGroup {
         val backStack = LocalBackStack.current
@@ -522,7 +521,7 @@ data object SettingsYakuyomiRoute : NavKey, SearchableRoute {
 // 6-digit (RRGGBB) or 8-digit (AARRGGBB) hex color, no '#'.
 private val HEX_COLOR_REGEX = Regex("^[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
 
-private fun formatEta(seconds: Long): String = when {
+internal fun formatEta(seconds: Long): String = when {
     seconds < 60 -> "${seconds}s"
     seconds < 3600 -> "${seconds / 60}m ${seconds % 60}s"
     else -> "${seconds / 3600}h ${(seconds % 3600) / 60}m"

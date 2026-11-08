@@ -3,12 +3,13 @@ package eu.kanade.tachiyomi.ui.library.controller
 import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.ui.library.LibraryItem
 import exh.util.removeArticles
-import java.text.CollationKey
 import tachiyomi.core.common.util.lang.toCollationKey
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.library.model.LibrarySort
+import tachiyomi.domain.library.model.sort
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.domain.track.model.Track
+import java.text.CollationKey
 import kotlin.random.Random
 
 /**

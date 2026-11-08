@@ -6,7 +6,9 @@ import dev.zacsweers.metro.SingleIn
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
+import upscale.UpscaleController
 import upscale.core.Readiness
 import upscale.core.UpscaleOutcome
 import upscale.core.UpscaleRequest
@@ -50,7 +52,7 @@ class UpscaleGpuBridge(
     }
 
     override suspend fun process(request: UpscaleRequest): UpscaleOutcome {
-        logcat(tachiyomi.core.common.util.system.LogPriority.WARN) {
+        logcat(LogPriority.WARN) {
             "RENDER_TILE backend must not be executed via process(); consult useGpuTileSampler()"
         }
         return UpscaleOutcome.Passed("render-tile backend is not a byte producer")

@@ -112,41 +112,43 @@ internal open class PageOption(name: String, private val queryKey: String) : Fil
     }
 }
 
-internal fun combineQuery(filters: FilterList): String {
-    val stringBuilder = StringBuilder()
-    val advSearch = filters.filterIsInstance<Filter.AutoComplete>().flatMap { filter ->
-        filter.state.trimAll().dropBlank().mapNotNull { tag ->
-            val split = tag.split(":").filterNot { it.isBlank() }
-            if (split.size > 1) {
-                val namespace = split[0].removePrefix("-").removePrefix("~")
-                val exclude = split[0].startsWith("-")
-                val or = split[0].startsWith("~")
+internal object EHentaiFilters {
+    fun combineQuery(filters: FilterList): String {
+        val stringBuilder = StringBuilder()
+        val advSearch = filters.filterIsInstance<Filter.AutoComplete>().flatMap { filter ->
+            filter.state.trimAll().dropBlank().mapNotNull { tag ->
+                val split = tag.split(":").filterNot { it.isBlank() }
+                if (split.size > 1) {
+                    val namespace = split[0].removePrefix("-").removePrefix("~")
+                    val exclude = split[0].startsWith("-")
+                    val or = split[0].startsWith("~")
 
-                AdvSearchEntry(namespace to split[1], exclude, or)
-            } else if (split.size == 1) {
-                val item = split.first()
-                val exclude = item.startsWith("-")
-                val or = item.startsWith("~")
-                AdvSearchEntry(null to item, exclude, or)
-            } else {
-                null
+                    AdvSearchEntry(namespace to split[1], exclude, or)
+                } else if (split.size == 1) {
+                    val item = split.first()
+                    val exclude = item.startsWith("-")
+                    val or = item.startsWith("~")
+                    AdvSearchEntry(null to item, exclude, or)
+                } else {
+                    null
+                }
             }
         }
-    }
 
-    advSearch.forEach { entry ->
-        if (entry.exclude) stringBuilder.append("-")
-        if (entry.or) stringBuilder.append("~")
-        val namespace = entry.search.first?.let { "$it:" }.orEmpty()
-        if (entry.search.second.contains(" ")) {
-            stringBuilder.append(("""$namespace"${entry.search.second}$""""))
-        } else {
-            stringBuilder.append("$namespace${entry.search.second}$")
+        advSearch.forEach { entry ->
+            if (entry.exclude) stringBuilder.append("-")
+            if (entry.or) stringBuilder.append("~")
+            val namespace = entry.search.first?.let { "$it:" }.orEmpty()
+            if (entry.search.second.contains(" ")) {
+                stringBuilder.append(("""$namespace"${entry.search.second}$""""))
+            } else {
+                stringBuilder.append("$namespace${entry.search.second}$")
+            }
+            stringBuilder.append(" ")
         }
-        stringBuilder.append(" ")
-    }
 
-    return stringBuilder.toString().trim().also { xLogD(it) }
+        return stringBuilder.toString().trim().also { xLogD(it) }
+    }
 }
 
 internal data class AdvSearchEntry(val search: Pair<String?, String>, val exclude: Boolean, val or: Boolean)

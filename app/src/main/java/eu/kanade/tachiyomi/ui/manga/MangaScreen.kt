@@ -755,4 +755,3 @@ private fun MangaDetailContent(
         )
     }
 }
-

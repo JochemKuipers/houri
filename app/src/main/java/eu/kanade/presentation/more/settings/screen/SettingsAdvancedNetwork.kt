@@ -49,8 +49,10 @@ import exh.util.toAnnotatedString
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import mihon.core.navigation.util.LocalBackStack
@@ -68,6 +70,7 @@ import tachiyomi.presentation.core.components.LabeledCheckbox
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
 import java.io.File
+import tachiyomi.core.common.preference.Preference as BasePreference
 
 @Composable
 internal fun getNetworkGroup(
@@ -113,7 +116,7 @@ internal fun getNetworkGroup(
                         }
                         context.toast(MR.strings.webview_data_deleted)
                     } catch (e: Throwable) {
-                        logcat(LogPriority.ERROR, e)
+                        context.logcat(LogPriority.ERROR, e)
                         context.toast(MR.strings.cache_delete_error)
                     }
                 },
@@ -196,6 +199,31 @@ internal fun getNetworkGroup(
         ),
     )
 }
+
+// KMK --> FlareSolverr, ported from jobobby04/TachiyomiSY#1124.
+
+internal suspend fun testFlareSolverrAndUpdateUserAgent(
+    userAgentPref: BasePreference<String>,
+    context: android.content.Context,
+) {
+    try {
+        val response = withContext(Dispatchers.IO) {
+            globalAppGraph.flareSolverr.request(url = "https://www.google.com/")
+        }
+        val solution = response.solution
+        if (response.status == "ok" && solution != null) {
+            userAgentPref.set(solution.userAgent)
+            context.toast(KMR.strings.flare_solver_user_agent_update_success)
+        } else {
+            context.logcat(LogPriority.ERROR, tag = "FlareSolverr") { "FlareSolverr test failed: ${response.message}" }
+            context.toast(KMR.strings.flare_solver_update_user_agent_failed)
+        }
+    } catch (e: Exception) {
+        context.logcat(LogPriority.ERROR, e, tag = "FlareSolverr") { "Failed to contact FlareSolverr" }
+        context.toast(KMR.strings.flare_solver_error)
+    }
+}
+// KMK <--
 
 // SY -->
 @Composable
@@ -556,4 +584,3 @@ internal fun getDeveloperToolsGroup(): Preference.PreferenceGroup {
 
 private var job: Job? = null
 // SY <--
-

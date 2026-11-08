@@ -1579,7 +1579,6 @@ private fun MangaScreenLargeImpl(
     }
 }
 
-
 @Composable
 fun UpscaleMangaToggle(manga: tachiyomi.domain.manga.model.Manga) {
     val prefs = androidx.compose.runtime.remember { mihon.app.di.globalAppGraph.upscalePreferences }

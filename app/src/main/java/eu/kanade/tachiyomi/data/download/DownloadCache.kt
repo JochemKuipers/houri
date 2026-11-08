@@ -558,7 +558,6 @@ class DownloadCache(
     }
 }
 
-
 // KMK -->
 /** One manga directory as seen in the download tree snapshot. */
 data class DownloadedMangaDir(

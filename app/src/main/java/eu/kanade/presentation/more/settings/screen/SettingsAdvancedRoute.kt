@@ -37,11 +37,8 @@ import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toImmutableMap
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
-import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import mihon.core.navigation.ClearDatabaseRoute
 import mihon.core.navigation.DebugInfoRoute
@@ -242,31 +239,6 @@ data object SettingsAdvancedRoute : NavKey, SearchableRoute {
             ),
         )
     }
-
-    // KMK --> FlareSolverr, ported from jobobby04/TachiyomiSY#1124.
-    private suspend fun testFlareSolverrAndUpdateUserAgent(
-        userAgentPref: BasePreference<String>,
-        context: android.content.Context,
-    ) {
-        try {
-            val response = withContext(Dispatchers.IO) {
-                globalAppGraph.flareSolverr.request(url = "https://www.google.com/")
-            }
-            val solution = response.solution
-            if (response.status == "ok" && solution != null) {
-                userAgentPref.set(solution.userAgent)
-                context.toast(KMR.strings.flare_solver_user_agent_update_success)
-            } else {
-                logcat(LogPriority.ERROR, tag = "FlareSolverr") { "FlareSolverr test failed: ${response.message}" }
-                context.toast(KMR.strings.flare_solver_update_user_agent_failed)
-            }
-        } catch (e: Exception) {
-            logcat(LogPriority.ERROR, e, tag = "FlareSolverr") { "Failed to contact FlareSolverr" }
-            context.toast(KMR.strings.flare_solver_error)
-        }
-    }
-    // KMK <--
-
 
     @Composable
     private fun getLibraryGroup(
@@ -538,5 +510,4 @@ data object SettingsAdvancedRoute : NavKey, SearchableRoute {
             ),
         )
     }
-
 }

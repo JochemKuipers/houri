@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import eu.kanade.domain.chapter.interactor.SetReadStatus
 import eu.kanade.domain.track.interactor.TrackChapter
 import eu.kanade.domain.track.model.AutoTrackState
 import eu.kanade.tachiyomi.data.download.DownloadManager
+import eu.kanade.tachiyomi.util.system.toast
 import exh.source.isMergedSourceId
 import kotlinx.coroutines.CoroutineScope
 import logcat.LogPriority
@@ -15,8 +17,6 @@ import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.logcat
-import eu.kanade.tachiyomi.util.system.toast
-import eu.kanade.domain.chapter.interactor.SetReadStatus
 import tachiyomi.domain.chapter.interactor.DeleteChapters
 import tachiyomi.domain.chapter.interactor.UpdateChapter
 import tachiyomi.domain.chapter.model.BookmarkColor
@@ -26,7 +26,6 @@ import tachiyomi.domain.chapter.model.toChapterUpdate
 import tachiyomi.domain.track.interactor.GetTracks
 import tachiyomi.i18n.MR
 import tachiyomi.source.local.isLocal
-import eu.kanade.domain.chapter.interactor.SetReadStatus
 
 /**
  * Chapter mutations on the manga details screen, extracted from [MangaViewModel] following the

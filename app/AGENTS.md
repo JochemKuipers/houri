@@ -84,7 +84,7 @@ Context of its own beyond what the concern needs. Conventions the splits establi
   public visibility (interface members cannot be `internal`): `ReaderSetAsCoverResult`,
   `ReaderSaveImageResult`.
 - Large composables split the same way by concern into co-located section files
-  (`MangaScreenChapters.kt`, `TrackInfoDialogHomeItems.kt`, `SettingsEhDialogs.kt`,
+  (`TrackInfoDialogHomeItems.kt`, `MangaScreenActions.kt`, `SettingsEhDialogs.kt`,
   `NovelFontPickerDialog.kt`): helpers become `internal`, marker islands (`// KMK`, `// SY`)
   move WHOLE — never cut an island open.
 - Files assessed-and-left deliberately: `ReaderActivity`/`NovelWebViewer` (already

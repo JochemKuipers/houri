@@ -3,7 +3,7 @@ package eu.kanade.tachiyomi.ui.manga
 import eu.kanade.domain.manga.interactor.SetExcludedScanlators
 import eu.kanade.domain.manga.interactor.UpdateManga
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.launch
+import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.chapter.service.scanlatorBlacklistKey
 import tachiyomi.domain.manga.model.MangaUpdate
@@ -22,7 +22,7 @@ internal class MangaScanlatorController(
     private val setExcludedScanlators: SetExcludedScanlators,
     private val updateManga: UpdateManga,
     private val provideMangaId: () -> Long,
-    private val provideAllChapters: () -> List<ChapterList.Item>?,
+    private val provideAllChapters: () -> List<Chapter>?,
     private val provideBlacklistedChapters: () -> List<String>,
 ) {
     fun setExcludedScanlators(excludedScanlators: Set<String>) {

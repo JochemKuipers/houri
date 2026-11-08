@@ -12,34 +12,44 @@ import kotlinx.coroutines.flow.onEach
 import tachiyomi.domain.achievement.service.AchievementManager
 import tachiyomi.domain.achievement.service.AchievementPreferences
 import tachiyomi.domain.achievement.service.RotatingAchievementPool
+import upscale.status.UpscaleStatusHub
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Moves the achievement hooks OUT of the upscaling engine: the spine reports events on its
  * status hub, and this observer turns them into unlocks. Ported from the old
  * `UpscaleEngine.reportUpscaleServed` with identical thresholds and ids.
+ *
+ * The hub is NOT a constructor dependency: it is produced by [UpscaleBootstrap], which in turn
+ * receives this observer — a constructor edge here would be a DI cycle
+ * (Hub -> Bootstrap -> Observer -> Hub). [UpscaleBootstrap] instead calls [attach] from its own
+ * init, once its hub exists; the subscription still starts the moment the spine is assembled.
  */
 @SingleIn(AppScope::class)
 @Inject
 class UpscaleAchievementObserver(
-    status: UpscaleStatusHub,
     private val achievementManager: AchievementManager,
     private val achievementPrefs: AchievementPreferences,
     private val rotatingPool: RotatingAchievementPool,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    init {
-        status.events
-            .onEach { event: upscale.status.UpscaleStatusHub.Event ->
+    private val attached = AtomicBoolean(false)
+
+    /** Subscribes to [hub]'s events exactly once; idempotent by design. */
+    fun attach(hub: UpscaleStatusHub) {
+        if (!attached.compareAndSet(false, true)) return
+        hub.events
+            .onEach { event: UpscaleStatusHub.Event ->
                 when (event) {
-                    is upscale.status.UpscaleStatusHub.Event.Served -> onServed(event)
-                    is upscale.status.UpscaleStatusHub.Event.Failed -> {}
+                    is UpscaleStatusHub.Event.Served -> onServed(event)
+                    is UpscaleStatusHub.Event.Failed -> {}
                 }
             }
             .launchIn(scope)
     }
 
-    private fun onServed(event: upscale.status.UpscaleStatusHub.Event.Served) {
+    private fun onServed(event: UpscaleStatusHub.Event.Served) {
         if (event.prefetched) return
         try {
             achievementManager.tryUnlockDirect("upscale_first")

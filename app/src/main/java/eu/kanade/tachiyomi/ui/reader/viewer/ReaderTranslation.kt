@@ -1,12 +1,12 @@
 package eu.kanade.tachiyomi.ui.reader.viewer
 
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
-import upscale.app.UpscaleReaderBridge
 import kotlinx.coroutines.CoroutineScope
 import mihon.app.di.globalAppGraph
 import mtl.sched.PageOutcome
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.lang.withUIContext
+import upscale.app.UpscaleReaderBridge
 
 /**
  * Shared entry point for MTL translation in the non-WebGPU readers (pager + webtoon).

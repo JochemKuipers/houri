@@ -90,7 +90,6 @@ import eu.kanade.tachiyomi.ui.main.MainActivity
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.setting.NovelTypographyPreferences
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
-import upscale.app.UpscaleBootstrap
 import eu.kanade.tachiyomi.ui.setting.track.BaseOAuthLoginActivity
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.CrashLogUtil
@@ -109,7 +108,6 @@ import exh.yakuyomi.YakuyomiEngine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.protobuf.ProtoBuf
 import mihon.app.mtl.MtlBindings
-import upscale.app.UpscaleBindings
 import mihon.core.concurrency.AppDispatchers
 import mihon.domain.chapter.interactor.FilterChaptersForDownload
 import mihon.domain.extension.interactor.AddExtensionStore
@@ -240,6 +238,8 @@ import tachiyomi.domain.updates.interactor.GetUpdates
 import tachiyomi.domain.updates.service.UpdatesPreferences
 import tachiyomi.source.local.image.LocalCoverManager
 import tachiyomi.source.local.io.LocalSourceFileSystem
+import upscale.app.UpscaleBindings
+import upscale.app.UpscaleBootstrap
 
 @DependencyGraph(
     scope = AppScope::class,

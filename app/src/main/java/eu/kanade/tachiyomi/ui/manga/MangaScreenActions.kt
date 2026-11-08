@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.ui.manga
 
-
 import android.content.Context
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue

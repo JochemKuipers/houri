@@ -29,8 +29,8 @@ data object SettingsYakuyomiProviderRoute : NavKey, SearchableRoute {
     override fun getPreferences(): List<Preference> {
         val prefs = remember { globalAppGraph.translationPreferences }
         return listOf(
-            SettingsYakuyomiRoute.getProviderGroup(prefs),
-            SettingsYakuyomiRoute.getMangaTranslatorGroup(prefs),
+            getProviderGroup(prefs),
+            getMangaTranslatorGroup(prefs),
         )
     }
 }
