@@ -425,7 +425,8 @@ private fun WebGpuViewer.decodedCacheBytes(): Long {
 }
 
 /**
- * Queue a page for decoding. If prioritize=true, moves existing queued page to front.
+ * Queue a page for decoding. Priority is computed at enqueue; `prioritize` marks the page as
+ * renderer-demanded, which both raises its class and switches its tie-break to newest-first.
  */
 internal fun WebGpuViewer.preloadPage(page: ViewerPage, prioritize: Boolean = false) {
     synchronized(lock) {
@@ -446,14 +447,17 @@ internal fun WebGpuViewer.preloadPages(page: ViewerPage) {
     val key = pageKey(page)
     val cachedPage = synchronized(lock) { findInCache(key) } ?: return
 
-    // Decoding follows reading order: current, then ahead nearest-first, then behind.
+    // Decoding follows reading order: current, then ahead, then behind.
     //
-    // queueForDecode inserts non-priority pages at the front and the worker pops from the back, so
-    // within a group the iteration order is the reverse of the pop order - hence nearest-first
-    // iteration, and hence the ahead group being inserted before the behind group. Inserting them
-    // the other way round pops behind-before-ahead.
+    // KMK --> The priority queue decides pop order now ([decodePriorityOf]: ahead pages outrank
+    // behind pages, distance orders within each, and the direction of travel boosts the side
+    // being read toward), so the old insertion-order trick - ahead inserted before behind so the
+    // deque's single pop end saw it first - is gone. The walk below still resolves the pages
+    // nearest-first because that is the order the chains are cheap to walk in; the queue sorts
+    // the work itself.
+    // KMK <--
 
-    // Ahead: inserted first, so it ends up nearest the back and pops first.
+    // Ahead: resolved first, queued at its distance-derived priority.
     val nextPages = mutableListOf<ViewerPage>()
     var p: ViewerPage? = cachedPage
     for (i in 0 until preloadAhead) {
@@ -462,7 +466,7 @@ internal fun WebGpuViewer.preloadPages(page: ViewerPage) {
     }
     nextPages.forEach { preloadPage(it) }
 
-    // Behind: inserted last, so it ends up nearest the front and pops last.
+    // Behind: resolved second; the queue keeps it behind the ahead group on its own.
     val prevPages = mutableListOf<ViewerPage>()
     p = cachedPage
     for (i in 0 until preloadBehind) {
@@ -686,7 +690,10 @@ internal fun WebGpuViewer.evictFarthestPage(reference: ViewerPage? = null) {
     val toRemove = victim ?: oldestIdleSafe ?: oldestAnySafe ?: oldestIdle ?: oldestAny ?: return
 
     pageCache.remove(pageKey(toRemove))
-    decodeQueue.remove(toRemove)
+    // KMK --> The decode queue holds reader pages only; a transition shell (also cached) is
+    // never in it, so its removal is a no-op and the guard just makes that honest to the type
+    // system. KMK <--
+    if (toRemove is ViewerReaderPage) decodeQueue.remove(toRemove)
     // Alongside pageCache so a load stamp cannot outlive the shell it belongs to.
     loadingSince.remove(pageKey(toRemove))
     if (toRemove is ViewerReaderPage) {

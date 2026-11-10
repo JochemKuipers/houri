@@ -7,6 +7,7 @@ import eu.kanade.tachiyomi.data.database.models.toDomainChapter
 import eu.kanade.tachiyomi.extension.reportingSourceErrorsOrNull
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.source.online.HttpSource
+import eu.kanade.tachiyomi.ui.reader.model.PredictedImageSize
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.model.segmentIndex
@@ -460,7 +461,7 @@ internal class HttpPageLoader(
                 imageFile = chapterCache.getImageFile(imageUrl),
                 maxSegmentHeight = maxSegmentHeight,
                 only = if (writeAll) null else index,
-            ) { i, bytes ->
+            ) { i, bytes, _, _ ->
                 produced = i + 1
                 chapterCache.putImageToCache(segmentKey(imageUrl, i), bytes)
             }
@@ -532,13 +533,20 @@ internal class HttpPageLoader(
             // would be coarser - a second live page sharing that image could then claim the first
             // one's segments.
             val keys = mutableListOf<String>()
+            // KMK --> The sink records each band's dimensions beside its bytes: a band's height is
+            // fully determined by the strip (segmentBounds), so the segments can carry their exact
+            // display geometry from the moment they exist - the reader's placeholder for one
+            // reserves the true height and the decode swap stops being a reflow.
+            // KMK <--
+            val sizes = mutableListOf<PredictedImageSize>()
             val split = TallPageSplitter.split(
                 imageFile = chapterCache.getImageFile(imageUrl),
                 maxSegmentHeight = maxSegmentHeight,
-            ) { index, bytes ->
+            ) { index, bytes, width, height ->
                 val key = segmentKey(imageUrl, index)
                 chapterCache.putImageToCache(key, bytes)
                 keys += key
+                sizes += PredictedImageSize(width, height)
             }
             if (!split || keys.isEmpty()) return null
 
@@ -577,6 +585,11 @@ internal class HttpPageLoader(
                     splitSourcePage = page
                     status = Page.State.Ready
                     stream = { chapterCache.getImageFile(key).inputStream() }
+                    // KMK --> Exact geometry from birth: the band whose bytes sit under `key` was
+                    // measured by the same bisect that cut it, and orderedKeys ordered by
+                    // segmentNumberOf puts `sizes` in the same order.
+                    // KMK <--
+                    predictedImageSize = sizes.getOrNull(segmentNumber)
                 }
             }
 

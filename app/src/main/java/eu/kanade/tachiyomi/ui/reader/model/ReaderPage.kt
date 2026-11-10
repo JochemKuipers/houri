@@ -69,5 +69,31 @@ open class ReaderPage(
      * renderer from this field's presence, exactly as it picks an image loader from `stream`.
      */
     var textPage: TextPage? = null
+
+    /**
+     * The image's pixel dimensions when they are known before the page decodes, or null while
+     * they are not.
+     *
+     * Two producers fill this, in the order a reader meets them: a split writes every segment's
+     * exact band size at cut time (a band's height is fully determined by the strip's height), and
+     * the WebGPU pipeline's validate stage writes what the image header declares the moment the
+     * page's bytes have been read - before the decode has run. A viewer uses it to reserve the
+     * page's true display height while the placeholder is up, which is what turns the
+     * placeholder-to-image swap from a reflow into a no-op. Volatile because the producers run on
+     * loader/decode threads while the render thread reads.
+     */
+    @Volatile
+    var predictedImageSize: PredictedImageSize? = null
     // KMK <--
+}
+
+/**
+ * An image size learned before decode. [width] and [height] are the image's own pixels, the same
+ * axes [eu.kanade.tachiyomi.source.model.Page] never carried because the source model predates any
+ * reader that needed geometry early - and it cannot gain them without an ABI change, which this
+ * app-side holder avoids.
+ */
+data class PredictedImageSize(val width: Int, val height: Int) {
+    /** True when the pair can meaningfully divide into a display aspect. */
+    val isValid: Boolean get() = width > 0 && height > 0
 }

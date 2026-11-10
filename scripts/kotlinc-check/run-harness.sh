@@ -94,6 +94,13 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
         OPF_SOURCES+=("$HARNESS_DIR/OpfPlatformParser.kt")
         KXML_CP=":$(find_jar net.sf.kxml kxml2)"
     fi
+    # The decode-queue harness compiles the generic PriorityDecodeQueue itself - one pure file,
+    # no Android imports, which is exactly why the class is generic on its element type. The
+    # ordering algorithm (binary insert, LIFO/FIFO ties, identity dedup) is asserted against
+    # the thing that runs rather than a copy of it.
+    if [ "$NAME" = "DecodeQueueHarness" ]; then
+        SOURCES+=("$REPO_ROOT/app/src/main/java/eu/kanade/tachiyomi/ui/reader/viewer/webgpu/PriorityDecodeQueue.kt")
+    fi
     # The highlights model is pure but carries the framework's `@JavascriptInterface` marker on
     # its bridge; the harness gets the one-line stub rather than dragging Android in.
     if [ "$NAME" = "PlainTextHarness" ]; then

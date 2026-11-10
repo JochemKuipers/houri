@@ -288,8 +288,30 @@ open class WebGpuViewer(
      */
     internal val loadingSince = HashMap<PageKey, Long>()
 
-    // Decode queue - pages waiting to be decoded, processed LIFO (last = highest priority)
-    internal val decodeQueue = ArrayDeque<ViewerReaderPage>()
+    // Decode queue - pages waiting to be decoded, ordered by decode priority (highest first;
+    // see [PriorityDecodeQueue] and [decodePriorityOf]). Generic with this label so the stall
+    // summary names what the workers touch next; the type argument keeps the label lambda's
+    // element type explicit.
+    internal val decodeQueue = PriorityDecodeQueue<ViewerReaderPage> { page ->
+        "${page.page.chapter.chapter.id}/${page.page.index}"
+    }
+
+    // KMK --> Which way the reader last moved, from the page-change deltas the pager reports.
+    // Decode priorities boost the side the reader is travelling toward, so a downward read fills
+    // downward first; the preload window itself stays symmetric. Default +1, the common open:
+    // start of a chapter, reading down.
+    // KMK <--
+    @Volatile
+    internal var lastScrollDirection: Int = 1
+
+    // KMK --> Bumped on every setChaptersInternal. The deferred restores capture it when armed
+    // and abort when it has moved: a chapter swap, an explicit seek or a second setChapters can
+    // land while a restore is still waiting for its page to decode, and the documentY-delta
+    // heuristic alone cannot tell "the user scrolled" from "the document was rebuilt under
+    // them".
+    // KMK <--
+    @Volatile
+    internal var restoreGeneration: Long = 0L
 
     /**
      * Requests a stuck-page sweep. Conflated, so signalling during a burst of evictions costs one
@@ -710,7 +732,7 @@ open class WebGpuViewer(
                     // Tap on an error page retries the decode/load.
                     synchronized(lock) {
                         current.imagePage.cleanup()
-                        current.imagePage = ProgressPage(this@WebGpuViewer)
+                        current.imagePage = ProgressPage(this@WebGpuViewer, predicted = current.page.predictedImageSize)
                         current.state = PageState.IDLE
                     }
                     queueForDecode(current, prioritize = true)
@@ -866,10 +888,13 @@ open class WebGpuViewer(
         // the guard call so the viewer's lock is taken before the guard's, never the reverse.
         val isStale = edgePages.firstOrNull()?.let { pg ->
             val k = PageKey.Reader(chapter.chapter.id, pg.index)
-            val chapterId = chapter.chapter.id
             synchronized(lock) {
                 findInCache(k) == null ||
-                    decodeQueue.none { it.page.chapter.chapter.id == chapterId && it.page.index == pg.index }
+                    // Chapter-qualified match: every chapter counts its pages from 0, so a bare
+                    // index would answer for the wrong chapter.
+                    !decodeQueue.any { q ->
+                        q.page.chapter.chapter.id == chapter.chapter.id && q.page.index == pg.index
+                    }
             }
         } ?: false
         // Through the guard rather than end()+tryBegin() here: the stale requeue rule lives in one
@@ -1093,6 +1118,11 @@ open class WebGpuViewer(
 
         this.viewerChapters = chapters
 
+        // KMK --> Any restore still pending belongs to the previous chapter set. Bump first,
+        // so the restores armed below capture the new generation and everything older aborts.
+        // KMK <--
+        restoreGeneration++
+
         // Baseline for syncPageList: it exists to catch pages replaced after this point, and
         // without recording the current versions the initial load reads as a change.
         pageListWatch.reset(chapters.pageListVersions())
@@ -1159,6 +1189,12 @@ open class WebGpuViewer(
         pager.state.apply {
             onPageChange = onPageChange@{ delta ->
                 activity.hideMenu()
+
+                // KMK --> Direction of travel, for decodePriorityOf: the side the reader is
+                // moving toward decodes first. Continuous crossings are ±1; paged deltas can
+                // exceed 1 but only their sign matters here.
+                // KMK <--
+                lastScrollDirection = if (delta >= 0) 1 else -1
 
                 // The viewer already showed the page at fetchPage(delta).
                 // We need to update currentPage to match that.

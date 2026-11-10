@@ -47,7 +47,7 @@ internal fun WebGpuViewer.startDecodeWorker() {
                             }
                         }
                         if (decodeQueue.isEmpty()) return@synchronized null
-                        decodeQueue.removeLast().apply { state = PageState.DECODING }
+                        decodeQueue.pop()?.apply { state = PageState.DECODING }
                     }
                     if (page == null) continue
 

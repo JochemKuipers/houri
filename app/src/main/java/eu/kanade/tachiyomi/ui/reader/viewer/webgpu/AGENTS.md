@@ -116,6 +116,53 @@ If you are looking for "why doesn't this page retry itself", that is the answer 
 design, and tap is the escape hatch. `rebuildPageCache` / `resetDecodedPagesAfterDeviceLoss`
 / chapter swap clear the flag en masse.
 
+## DECODE PRIORITY — the queue is ordered, not two-ended
+
+`decodeQueue` is a `PriorityDecodeQueue`, not an ArrayDeque. The old deque encoded priority in
+its two ends (prioritized at the pop end, background at the other), which made "prioritized" a
+single bit; priorities are now computed at enqueue by `decodePriorityOf`:
+
+| Class | Priority | Who |
+|---|---|---|
+| current page | 1000 | `page === currentPage` |
+| on screen | 900 | `imagePage.isOnScreen` |
+| renderer-demanded | 800 | `wantedByRender` (set by `ensureDecoding` *before* it queues, so the class is already correct at enqueue) |
+| travelling preload | 750 − distance (ahead) / 740 − distance (behind) | the side `lastScrollDirection` points at |
+| idle preload | 730 − distance (ahead) / 720 − distance (behind) | the side the reader came from |
+| other | 100 | no anchor / no measurable distance |
+
+The bands interleave rather than stack: scrolling up, the nearest page above (travelling behind,
+740−1) outranks the nearest below (idle ahead, 730−1) — direction genuinely flips the race —
+while every preload stays under renderer demand (max 749 < 800) and above OTHER. Distances past
+64 clamp, so a far preload still outranks an unrelated shell. Ahead still outranks behind at
+equal distance and equal direction (the deque-era invariant). Ties resolve LIFO among
+renderer-demanded pages (the page just demanded wins) and FIFO among preloads (the walk's
+nearest-first resolution decides within a distance tie) — the two ends of the old deque, as
+explicit classes. The queue itself is `PriorityDecodeQueue` (`PriorityDecodeQueue.kt`) —
+generic on its element type precisely so `scripts/kotlinc-check/run-harness.sh` can compile and
+run the real class (`DecodeQueueHarness`, 28 assertions) instead of asserting on a copy.
+
+Everything that was true of the deque's threading stays true: every mutation happens under the
+viewer's lock, `enqueue` dedups by identity first (the LOADING branch's old `contains` guard, now
+unconditional), and a page popped under the lock is never handed to two workers.
+
+## PIPELINE STAGES — the decode path, named, and on the placeholder
+
+`WebGpuPagePipeline.kt` turns the decode path's implicit stage structure into `PageStage`
+(FETCH → LOAD → READ → VALIDATE → ENHANCE → METADATA → DECODE → PREPARE → UPLOAD → ADOPT).
+`enterPipelineStage` does exactly two things: enters the [DecodeTrace] stage (the trace names are
+byte-identical to what the stages were when they were bare `traceStage("...")` calls — the
+symptom table greps them; do not rename one without grepping this file first) and publishes the
+stage label onto the shell's `ProgressPage.stageText`, which the placeholder renders under the
+percentage: `43%` over `Decoding`.
+
+The stage line is diagnostic plumbing with a reader-facing face, not a state machine: it writes
+nothing the pipeline did not already know, adds no work, and dies with the placeholder it rides
+on (adoption replaces the whole placeholder). FETCH/LOAD are published by `startPageLoad`
+(`publishLoadStage`) — they run before any trace exists. If you add a stage to the decode path,
+give it a `PageStage` so the reader can see it; if you add a *placeholder*, remember the stage
+line is `ProgressPage`-only and an `ErrorPage`/`TransitionPage` correctly has none.
+
 ## STUCK-PAGE LADDER
 
 `startStuckPageSweep` runs off `stuckSignal` (conflated) — not a timer. The orphan condition
@@ -437,6 +484,12 @@ evidence:
 - `awaitRestoreTarget` polls on `RESTORE_POLL_LIMIT` — 100 polls of 100 ms. Its comment had drifted
   away from that arithmetic and was restored; when touching the poll loop, keep comment and
   arithmetic in agreement.
+- A deferred restore is generation-scoped (2026-11-09): `setChaptersInternal` bumps
+  `restoreGeneration` on every chapter set, and both `restoreContinuousAfterDecode` and
+  `restorePagedZoomAfterDecode` capture it when armed and abort when it has moved. Before that,
+  a chapter swap or explicit seek landing while a restore waited for its page could still apply
+  the old position — the documentY-delta heuristic only catches the user scrolling, not the
+  document being rebuilt under them.
 
 > **Rule: a saved index is only valid in the list it was written against.** Every restore site —
 > SavedStateHandle, DB, position store — says which list its coordinate belongs to; `last_page_read`
@@ -696,7 +749,7 @@ above — a type mismatch that a compiler will not catch.
 | `Re-driving ... last=no-stream` forever, same page, **no "Giving up on" ever** | Both halves of the `no-stream` ladder were inert: the retry was filtered out by the loader's `status == Queue` guard, and the re-query reset `attempts` so escalation never terminated. Fixed in both — see *Page loading*. Before that fix, this was the signature of a long-strip segment whose cache file the LRU had evicted. |
 | A long strip renders with a chunk missing, or scrambled, but no error anywhere | `TallPageSplitter.split` reported success with fewer segments than bounds — now impossible; if you see it, check `segmentNumberOf` and the contiguity guard. |
 | Scrolling down skips several pages at once, or `getPage(0)` names a page the reader is no longer on | A placeholder resolved *smaller* than its slot. `clampScrollWithinPage` in `captureRenderState` is the only thing that keeps them on the page. |
-| Content below the reading point shifts as pages decode (continuous mode) | Not a transform bug — the continuous walk never reads `page.scale/x/y`. The only thing that changes when a page resolves is its **slot height**: a placeholder reserves one viewport height, the real page re-measures it (growth keeps the reading point inside the slot, shrink overshoot is clamped). If it is *not* the placeholder swap (the content jumps with no decode nearby), look at the library's walk — not at `applyZoomPolicy`, which short-circuits for continuous; see the zoom-stack landmine. |
+| Content below the reading point shifts as pages decode (continuous mode) | Not a transform bug — the continuous walk never reads `page.scale/x/y`. The only thing that changes when a page resolves is its **slot height**: a placeholder reserves one viewport height, the real page re-measures it (growth keeps the reading point inside the slot, shrink overshoot is clamped). If it is *not* the placeholder swap (the content jumps with no decode nearby), look at the library's walk — not at `applyZoomPolicy`, which short-circuits for continuous; see the zoom-stack landmine. **Since the 2026-11-09 freeze, a placeholder slot can no longer track the surface** (that was the "first page runs away while scrolling" bug — see the landmine): a jump with no decode nearby now means a width change (the library's proportional rescale) or a walk defect, never surface-height churn. |
 | Page index and the index in the segment cache key disagree | They are separate identifiers; `splitOversizedPage` now orders by the key and refuses a non-contiguous run. |
 | Page spins on the placeholder forever, no log line at all | Should now log `Re-driving ... loading-stalled`. If it still does not, the page is not LOADING — check `wantedByRender` and whether `imagePage` is really a `ProgressPage`. |
 | `Re-driving ... last=threw` | The decode threw; read the exception above it in the log for the real reason. |
@@ -920,6 +973,44 @@ line, for instance, does not appear anywhere in the current tree.
   fill and the placeholder's own placement centre. **Rule: adjacent pages' boundary values must
   be *assigned* from one another, never computed twice from neighbours' inputs — the only value
   that cannot disagree is the one both sides share.**
+- **The seam's last painters, chained too (2026-11-09): the fade veil and the per-image
+  underlay.** After the chained clip edges landed, two boundary painters still derived their own
+  row: `drawFade` painted `docTop .. docTop + pageHeight` (the pre-chain derivation — and it
+  paints exactly when a page fades in after its decode, the placeholder→real swap, i.e. a mixed
+  boundary pair), and the per-image underlay rect painted the image's own placement extent for
+  uncropped pages instead of the slot. Both now consume `clipTopY`/`clipBottomY` (the underlay
+  keeps the image-derived extent for a *cropped* page, whose content edge is mid-slot and shares
+  no boundary). **Rule: any new painter of a page boundary consumes the chained edges — a fourth
+  derivation reintroduces the line, and it will read as "sporadic" again.**
+- **A placeholder's slot height is a property of the page, not of the surface (2026-11-09).**
+  `ProgressPage.height` answered `pager.state.height` and `TransitionPage`'s answered
+  `min(width, height)` live, so every undecoded slot re-derived from the surface every frame —
+  and the surface height churns at open (0 → initial → insets-settled), when the menu bar hides
+  (fullscreen immersive), on foldable posture changes and on e-ink refresh switches. The walk
+  consumes scroll in slot units at crossing time, so the churn moved the content without anything
+  scrolling: the first pages of a chapter "ran away" while the user scrolled through them, which
+  is why it clustered at chapter opens and read as rare. Both placeholders now freeze on the
+  first stable read (`reservedHeight`/`reservedSide`) and never re-derive. **Rule: never return a
+  surface measurement from a placeholder's geometry — the decode swap to real heights is the one
+  height change that is supposed to happen, and it is the one that is compensated
+  (`clampScrollWithinPage`).** The width stays live on purpose: width changes are the library's
+  proportional rescale, and a width-invariant placeholder slot makes that rescale a no-op for it
+  (only decoded anchors rescale, whose document height genuinely scales with width).
+- **Predicted aspect outranks the freeze, and the freeze is only the fallback (2026-11-10).**
+  `ProgressPage` resolves its height in three steps: predicted aspect
+  (`viewportWidth * h / w` — the exact expression the walk computes for the decoded
+  `ImageSingle`), then the frozen viewport read, then the live read. Two producers feed the
+  prediction: a split segment is born with its exact band size (`TallPageSplitter.split`'s sink
+  now carries the band dimensions, and `splitOversizedPage` writes them into
+  `ReaderPage.predictedImageSize`), and every ordinary page learns its dimensions when the
+  pipeline's VALIDATE stage reads the image header — one stage before the decode. With a
+  prediction the decode swap changes no geometry at all and the clamp has nothing to hold; the
+  freeze exists only for pages whose bytes have not arrived yet. The prediction rides the
+  current viewport WIDTH (width-proportional, like a decoded page) and stays immune to the
+  surface-HEIGHT churn above. If a placeholder still reflows at its decode swap, check whether
+  the prediction actually reached it: a segment's `predictedImageSize` is set at split time, an
+  ordinary page's at VALIDATE — a page that misses both falls back to the freeze and owes its
+  one reflow to the clamp, exactly like before the prediction existed.
 - **Double-tap opt-out is one flag with a tied shadow** (port of upstream `34fb12b` in the
   library's `ImageViewerState.kt` KMK island). The app sets `doubleTapZoomEnabled`
   (`WebGpuViewer`/`WebGpuViewerContinuous`, from `WebGpuConfig.resolveDoubleTapZoom()`), and the
@@ -1016,6 +1107,8 @@ line, for instance, does not appear anywhere in the current tree.
 | page shells, spread slot, neighbour links | `WebGpuPageModel.kt` |
 | residency, eviction, split reconciliation, render walk | `WebGpuPageCache.kt` |
 | what the worker owes a page + the stuck ladder | `WebGpuDecodeQueue.kt` |
+| the ordered queue itself (generic, harness-verified) | `PriorityDecodeQueue.kt` |
+| the stage pipeline behind a decode + the placeholder's status line | `WebGpuPagePipeline.kt` |
 | bytes → GPU image for one page | `WebGpuDecodePipeline.kt` |
 | the long-lived coroutines (decode worker pool, liveness sweep, progress spinner) + stall watchdog | `WebGpuViewerWorkers.kt` |
 | progress / error / transition placeholders | `WebGpuPlaceholderPages.kt` |

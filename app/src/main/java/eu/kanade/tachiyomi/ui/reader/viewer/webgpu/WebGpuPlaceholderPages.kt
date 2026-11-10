@@ -16,6 +16,7 @@ import ca.mpreg.webgpuviewer.draw.uploadTexture
 import ca.mpreg.webgpuviewer.renderer.WebGpuRenderer
 import ca.mpreg.webgpuviewer.viewer.ImagePage
 import eu.kanade.tachiyomi.R
+import eu.kanade.tachiyomi.ui.reader.model.PredictedImageSize
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.i18n.MR
@@ -23,6 +24,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlin.math.PI
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 /**
  * The pages a [ViewerPage] holds while it has nothing decoded to show: a failed load, an
@@ -98,11 +100,89 @@ class ProgressPage(
     } catch (_: Exception) {
         Color.WHITE
     },
+    predicted: PredictedImageSize? = null,
 ) : ImagePage.Render(0, 0) {
     override val width: Int
         get() = viewer.viewportPageWidth(viewer.isDualPageMode())
+
+    // KMK --> The slot height is a property of the page, not of the surface. A live read made
+    // every undecoded page's slot re-derive from the surface each frame, so the document
+    // silently stretched and shrank under the reader whenever the surface height moved: at
+    // open (0 -> initial -> insets-settled), when the menu bar hides (fullscreen immersive),
+    // on foldable posture changes and on e-ink refresh switches. The walk consumes scroll
+    // offsets in slot units at crossing time, so that churn moved the content without anything
+    // scrolling - the first pages of a chapter "ran away" while the user scrolled through them,
+    // which is why it clustered at chapter opens and read as rare. The height freezes on the
+    // first stable read instead; before that the live value is returned, since a placeholder
+    // built before layout has nothing to freeze yet. Pages that decode swap to real heights
+    // through the decode clamp (hold-the-offset), the one height change that is supposed to
+    // happen and the one that is compensated. The width-change rescale stays correct for free:
+    // a frozen placeholder's slot is width-invariant, so the proportional rescale is a no-op
+    // for it and only ever fires for decoded anchors, whose document height genuinely scales
+    // with width.
+    //
+    // PREDICTED beats the freeze: when the page's image dimensions are known before decode (a
+    // split segment is born with its exact band size; every other page learns them when the
+    // pipeline's validate stage reads the image header out of its bytes), the aspect-derived
+    // height IS the page's true display height - `viewportWidth * h / w`, the same expression
+    // the walk computes for the decoded ImageSingle - so the swap to the real page changes no
+    // geometry at all, and the decode clamp has nothing to hold. The aspect path scales with
+    // the current viewport WIDTH on purpose: width changes are the library's proportional
+    // rescale, and an aspect-derived slot rides it the way a decoded page does, while staying
+    // immune to the surface-HEIGHT churn the freeze exists for.
+    // KMK <--
+    @Volatile
+    private var predictedSize: PredictedImageSize? = predicted
+
+    // KMK --> The no-prediction fallback: frozen on the first stable read (see above).
+    // KMK <--
+    @Volatile
+    private var reservedHeight: Int = 0
+
+    /**
+     * Publishes dimensions learned mid-flight - the pipeline's validate stage reads them out of
+     * the page's bytes the moment those arrive, long before the decode finishes. Inert once the
+     * placeholder has been replaced by the decoded image: the fields die with the placeholder.
+     */
+    fun reserveImageSize(size: PredictedImageSize?) {
+        if (size?.isValid == true) predictedSize = size
+    }
+
     override val height: Int
-        get() = viewer.pager.state.height
+        get() {
+            // KMK --> Predicted aspect first: exact, width-proportional, height-churn-immune.
+            // The expression mirrors the walk's own `page.height * (width / page.width)` for a
+            // decoded ImageSingle (same order of operations, same width source), rounded to the
+            // nearest pixel - the placeholder's slot is quantized to whole pixels while the real
+            // page's is Float, and rounding keeps the difference within half a pixel, well
+            // inside what the decode clamp absorbs.
+            // KMK <--
+            val size = predictedSize
+            if (size?.isValid == true) {
+                val docWidth = width
+                if (docWidth > 0) {
+                    return (size.height * (docWidth.toFloat() / size.width))
+                        .roundToInt()
+                        .coerceAtLeast(1)
+                }
+            }
+            reservedHeight.takeIf { it > 0 }?.let { return it }
+            val live = try {
+                viewer.pager.state.height
+            } catch (_: Exception) {
+                0
+            }
+            if (live > 0) reservedHeight = live
+            return live
+        }
+
+    // KMK --> Pipeline stage line, rendered under the percentage by [render]. Written by the
+    // page pipeline (publishPageStage) and the load path; volatile because the decode worker
+    // writes it while the render thread reads it. Null = no stage to show, and the percentage
+    // alone is the whole status - exactly what this line looked like before it existed.
+    // KMK <--
+    @Volatile
+    var stageText: String? = null
 
     @Volatile
     var progress: Float = 0f
@@ -158,6 +238,29 @@ class ProgressPage(
                 align = TextAlign.Center,
             )
         } catch (_: Exception) {
+        }
+        // KMK --> The stage line under the percentage: what the page is waiting on right now
+        // (fetching, decoding, uploading...). Kept under the same try-isolation as the
+        // percentage - a failed stage draw must not take the icon down - and sized a step
+        // smaller so the placeholder reads as one status line: "43%" over "Decoding".
+        // KMK <--
+        val stage = stageText
+        if (!stage.isNullOrBlank()) {
+            val stagePx = (full * 0.065f).coerceAtLeast(10f)
+            try {
+                text(
+                    dst,
+                    viewer.activity.baseContext,
+                    FontFamily.Default,
+                    stage,
+                    cx,
+                    cy + sizePx * 0.5f + textPx * 1.1f + stagePx * 1.5f,
+                    stagePx,
+                    foregroundColor,
+                    align = TextAlign.Center,
+                )
+            } catch (_: Exception) {
+            }
         }
         try {
             drawSplashPineapple(cx, cy, sizePx, dst)
@@ -358,8 +461,26 @@ class TransitionPage(
     val nextChapter: ReaderChapter?,
 ) : ImagePage.Render(0, 0) {
     /** Square, and never a spread side - [WebGpuViewer.buildSpreadPage] hands it back whole. */
+    // KMK --> Same rule as ProgressPage's reservedHeight: the square's side is a property of
+    // the page, not of the surface. A live min(width, height) re-derived the transition's slot
+    // from the surface every frame, so the chapter boundary shifted under the reader exactly
+    // when the surface moved (menu hide, foldable posture, e-ink refresh) - content moved with
+    // nothing scrolling. Frozen on the first stable read, like every placeholder.
+    // KMK <--
+    @Volatile
+    private var reservedSide: Int = 0
+
     override val width: Int
-        get() = min(viewer.pager.state.width, viewer.pager.state.height)
+        get() {
+            reservedSide.takeIf { it > 0 }?.let { return it }
+            val live = try {
+                min(viewer.pager.state.width, viewer.pager.state.height)
+            } catch (_: Exception) {
+                0
+            }
+            if (live > 0) reservedSide = live
+            return live
+        }
     override val height: Int
         get() = width
 

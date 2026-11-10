@@ -276,7 +276,7 @@ class ViewerReaderPage(
     // KMK <--
 
     @Volatile
-    override var imagePage: ImagePage = ProgressPage(viewer)
+    override var imagePage: ImagePage = ProgressPage(viewer, predicted = page.predictedImageSize)
 
     override val isDecoded
         get() = (imagePage as? ImagePage.ImageSingle)?.isDecoded == true

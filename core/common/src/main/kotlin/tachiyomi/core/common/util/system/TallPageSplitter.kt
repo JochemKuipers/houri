@@ -54,7 +54,10 @@ object TallPageSplitter {
     }
 
     /**
-     * Splits [imageFile] into JPEG segments, passing each encoded one to [onSegment] in order.
+     * Splits [imageFile] into JPEG segments, passing each encoded one to [onSegment] in order
+     * together with the band's pixel dimensions - every band of a strip is fully determined by
+     * the strip's own height, so handing them out costs nothing and lets the caller predict each
+     * segment's display geometry before a single one is decoded by the reader.
      *
      * Returns false without invoking [onSegment] when the image already fits, so the caller can
      * treat a true result as "the original page is now a list of segments".
@@ -69,7 +72,7 @@ object TallPageSplitter {
         imageFile: File,
         maxSegmentHeight: Int,
         only: Int? = null,
-        onSegment: (index: Int, bytes: ByteArray) -> Unit,
+        onSegment: (index: Int, bytes: ByteArray, width: Int, height: Int) -> Unit,
     ): Boolean {
         val bounds = segmentBounds(readHeight(imageFile), maxSegmentHeight)
         if (bounds.size <= 1) return false
@@ -104,7 +107,7 @@ object TallPageSplitter {
                 val out = ByteArrayOutputStream()
                 try {
                     bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-                    onSegment(index, out.toByteArray())
+                    onSegment(index, out.toByteArray(), width, range.last + 1 - range.first)
                 } finally {
                     bitmap.recycle()
                 }

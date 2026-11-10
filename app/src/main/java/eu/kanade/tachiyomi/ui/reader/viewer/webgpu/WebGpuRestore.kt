@@ -38,6 +38,12 @@ internal fun WebGpuViewer.restoreContinuousAfterDecode(
         return
     }
     val restoreChapterId = chapterId
+    // KMK --> The generation this restore belongs to. setChaptersInternal bumps on every chapter
+    // set; a move past that (a swap, an explicit seek, a second set) invalidates this restore
+    // however much its chapter still looks current - the docY-delta heuristic below cannot tell
+    // "the user scrolled" from "the document was rebuilt under them".
+    // KMK <--
+    val generationAtArm = restoreGeneration
     val anchorPage = currentPage
     val startDocY = try {
         st.documentY
@@ -47,6 +53,7 @@ internal fun WebGpuViewer.restoreContinuousAfterDecode(
     scope.launch {
         try {
             if (!awaitRestoreTarget(restoreChapterId, targetIndex, anchorPage)) return@launch
+            if (restoreGeneration != generationAtArm) return@launch
             // The user moved the viewport while the page decoded: their position is more recent
             // than the one being restored, so it wins.
             val nowDocY = try {
@@ -95,12 +102,17 @@ internal fun WebGpuViewer.restorePagedZoomAfterDecode(
 ) {
     if (!needed || stored == null) return
     val restoreChapterId = chapterId
+    // KMK --> Same generation guard as the continuous restore: a chapter set landing while this
+    // waits invalidates the stored zoom/pan along with everything else about the old set.
+    // KMK <--
+    val generationAtArm = restoreGeneration
     val anchorPage = currentPage
     val wantZoom = stored.zoom
     val wantX = stored.offsetX
     scope.launch {
         try {
             if (!awaitRestoreTarget(restoreChapterId, targetIndex, anchorPage)) return@launch
+            if (restoreGeneration != generationAtArm) return@launch
             try {
                 val page = pager.state.getPage(0)
                 if (page != null && wantZoom.isFinite()) {

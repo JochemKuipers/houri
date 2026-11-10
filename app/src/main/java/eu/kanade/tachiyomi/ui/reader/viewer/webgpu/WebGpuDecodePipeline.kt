@@ -10,6 +10,7 @@ import de.stefan_oltmann.kim.Kim
 import de.stefan_oltmann.kim.android.readMetadata
 import de.stefan_oltmann.kim.format.tiff.constant.TiffTag
 import eu.kanade.tachiyomi.source.model.Page
+import eu.kanade.tachiyomi.ui.reader.model.PredictedImageSize
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.takeWhile
@@ -80,7 +81,14 @@ internal fun WebGpuViewer.startPageLoad(page: ViewerReaderPage) {
         loadingSince[pageKey(page)] = System.currentTimeMillis()
     }
 
+    // KMK --> The placeholder's stage line: a page that needs its source asked says so, instead
+    // of a bare percentage that only starts moving once bytes flow. LOAD replaces it when the
+    // loader is actually handed the page; the decode path's own stages take over from there.
+    // KMK <--
+    publishLoadStage(page, PageStage.FETCH)
+
     if (page.page.status == Page.State.Queue) {
+        publishLoadStage(page, PageStage.LOAD)
         scope.launch(Dispatchers.IO) {
             try {
                 loader.loadPage(page.page)
@@ -295,7 +303,7 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
         // KMK <--
         // The read is the first unbounded blocking call on the worker's single thread, so it gets a
         // stage of its own rather than being folded into the surrounding work.
-        traceStage(trace, "readBytes", "cap=${maxPageBytes / (1024 * 1024)}MB")
+        enterPipelineStage(page, trace, PageStage.READ, "cap=${maxPageBytes / (1024 * 1024)}MB")
         val decodeBytes: ByteArray? = try {
             val bytes = input.readBytes()
             if (bytes.size > maxPageBytes) throw Exception("Page too large: ${bytes.size} bytes >${maxPageBytes / (1024 * 1024)}MB")
@@ -319,7 +327,7 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
         // the single thread every other page queues behind. A fault this catches is recoverable -
         // the page is dropped and its source asked again - whereas the same bytes reaching the
         // decoder may not come back at all.
-        traceStage(trace, "validate", "bytes=${decodeBytes.size}")
+        enterPipelineStage(page, trace, PageStage.VALIDATE, "bytes=${decodeBytes.size}")
         val verdict = PageBytesValidator.inspect(decodeBytes)
         if (!verdict.isAcceptable) {
             val detail = "${verdict.fault} format=${verdict.format?.label ?: "?"} ${verdict.detail ?: ""}".trim()
@@ -329,6 +337,26 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
             requerySuspectPage(page, detail)
             trace?.complete("rejected:${verdict.fault}")
             throw Exception("Corrupt page data: $detail")
+        }
+
+        // KMK --> Predictive geometry: the header the validator just parsed also carries the
+        // page's pixel dimensions, and knowing them here - one decode stage before the decode
+        // itself - lets the still-showing placeholder reserve the page's true display height.
+        // The decode swap then changes no geometry and the walk's clamp has nothing to hold.
+        // A split segment already carries its exact band size from birth; this is the path
+        // every ordinary page takes. Written onto the ReaderPage too, so a shell rebuilt for
+        // this page (device-loss reset, tap-to-retry) constructs its placeholder with the
+        // aspect instead of re-deriving it. Harmless if the placeholder is already gone: the
+        // fields die with the placeholder they feed.
+        // KMK <--
+        verdict.width?.let { w ->
+            verdict.height?.let { h ->
+                val size = PredictedImageSize(w, h)
+                if (size.isValid) {
+                    page.page.predictedImageSize = size
+                    (page.imagePage as? ProgressPage)?.reserveImageSize(size)
+                }
+            }
         }
 
         // The JXL ceiling can go where the format is already known: the validator that just ran
@@ -346,7 +374,7 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
         // KMK -->
         // Display-time upscale; translation and spread matching below keep the originals.
         // Native inference, on the worker's only thread: the second unbounded call in this path.
-        traceStage(trace, "upscale")
+        enterPipelineStage(page, trace, PageStage.ENHANCE)
         // KMK -->
         // Display-time only: translation, EXIF and spread matching below all read decodeBytes, so
         // the chain's output never becomes the page's canonical bytes.
@@ -380,7 +408,7 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
         // spread side tag (dual mode only - single-page display never pairs, so the tag
         // lookup is skipped there). EXIF lives in the original bytes: the display hook
         // below may strip it, so orientation is read here, before any transform.
-        traceStage(trace, "metadata")
+        enterPipelineStage(page, trace, PageStage.METADATA)
         var exifOrientation = 1
         val spreadTag: SpreadPosition? = try {
             val metadata = Kim.readMetadata(decodeBytes.inputStream(), decodeBytes.size.toLong())
@@ -426,7 +454,7 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
             page.spreadBytes = null
         }
 
-        traceStage(trace, "decoderInit", "bytes=${displayBytes.size}")
+        enterPipelineStage(page, trace, PageStage.DECODE, "bytes=${displayBytes.size}")
         val dec = try {
             // KMK --> Bytes already sit in a heap array; newBytes hands them over in one native
             // copy instead of wrapping them in a stream and re-reading them 8 KiB at a time.
@@ -466,6 +494,12 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
             } catch (_: Exception) {}
             throw Exception("Image too small ${firstFrame.width}x${firstFrame.height}, skipping GPU upload (avoids gralloc 0x3b on Adreno)")
         }
+        // KMK --> The pixel-shaping block starts here: EXIF orientation, rotate-to-fit and the
+        // downsample below. It never had a trace stage of its own (only a "downsample" enter when
+        // the resize fired), so a wedge in the rotation path reported the previous stage; PREPARE
+        // names it, for the trace and for the reader.
+        // KMK <--
+        enterPipelineStage(page, trace, PageStage.PREPARE)
         // KMK --> Honor EXIF orientation at decode: the native decoder hands back raw
         // pixels, so a camera-scan page would otherwise display sideways and pair with
         // the wrong aspect. Single-frame path only - an animated frame stack with an
@@ -562,7 +596,13 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
                 null
             }
 
-            traceStage(trace, "gpuUpload", "dims=${frameWidth}x$frameHeight mipmaps=true hdr=${dec.isHdr}")
+            enterPipelineStage(
+                page,
+                trace,
+                PageStage.UPLOAD,
+                "dims=${frameWidth}x$frameHeight mipmaps=true hdr=${dec.isHdr}",
+                "dims=${frameWidth}x$frameHeight",
+            )
             val firstImage = Image(
                 framePixels,
                 frameWidth,
@@ -688,7 +728,7 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
         // that superseded it - the old code simply fell through and dropped the reference, leaking
         // every uploaded texture of a decode nothing will ever show. That is ~47MB of GPU memory
         // per wasted split-segment decode, on a path that a split triggers by construction.
-        traceStage(trace, "adopt")
+        enterPipelineStage(page, trace, PageStage.ADOPT)
         var adopted = false
         var replaced: ImagePage? = null
         synchronized(lock) {

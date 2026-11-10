@@ -204,8 +204,11 @@ internal fun WebGpuViewer.startDecodeStallWatchdog() {
 
 /** What is queued behind the pages being decoded, so a stall reports how much of the chapter is stuck. */
 private fun WebGpuViewer.decodeQueueSummary(): String {
-    val queued = synchronized(lock) { decodeQueue.map { "${it.page.chapter.chapter.id}/${it.page.index}" } }
-    return if (queued.isEmpty()) "none" else "${queued.size} [${queued.take(6).joinToString(",")}]"
+    // KMK --> Priority order: the summary names what the workers will touch next, not what was
+    // queued first, which is what a stall diagnosis wants from it.
+    // KMK <--
+    val queued = synchronized(lock) { decodeQueue.describe() }
+    return if (queued.isEmpty()) "none" else queued
 }
 
 /**

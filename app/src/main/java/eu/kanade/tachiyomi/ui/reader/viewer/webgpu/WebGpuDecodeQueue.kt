@@ -13,9 +13,53 @@ import tachiyomi.core.common.util.system.logcat
 // is the one producer (the renderer asked for it); `requeueStuckPage` is the one place allowed to
 // break the tie.
 
+// The queue itself is [PriorityDecodeQueue] (PriorityDecodeQueue.kt) - generic, so the
+// offline harness can compile and run the real class against this file's priority policy.
+
+// KMK -->
+// Decode priority classes; higher decodes sooner. See [WebGpuViewer.decodePriorityOf].
+private const val PRIORITY_CURRENT = 1000
+private const val PRIORITY_ON_SCREEN = 900
+private const val PRIORITY_DEMANDED = 800
+// Preload band: the travelling side outranks the idle side, ahead outranks behind at equal
+// everything, distance orders within each. Bands were chosen so the classes interleave by
+// direction instead of stacking: travelling-behind (740-d) beats idle-ahead (730-d') whenever
+// d < 10 + d', which is the "you scrolled up, so the pages above you decode first" rule -
+// while every preload stays under PRIORITY_DEMANDED and above PRIORITY_OTHER.
+private const val PRIORITY_AHEAD_BASE = 730
+private const val PRIORITY_BEHIND_BASE = 720
+private const val PRIORITY_DIRECTION_BOOST = 20
+private const val PRIORITY_DISTANCE_CAP = 64
+private const val PRIORITY_OTHER = 100
+
+/**
+ * What the decode worker owes [page] relative to everything else queued, computed at enqueue.
+ *
+ * The reader's own demand outranks geometry, and geometry outranks everything else: the page on
+ * screen first, then everything the render walk is asking for, then the preload window by
+ * distance - ahead before behind - with the side the reader last travelled toward boosted, so a
+ * downward read fills downward first without the preload window itself ever becoming asymmetric.
+ * Distances past the window radius clamp rather than fall to OTHER, so a far preload still
+ * outranks an unrelated shell.
+ */
+internal fun WebGpuViewer.decodePriorityOf(page: ViewerReaderPage): Int {
+    if (page === currentPage) return PRIORITY_CURRENT
+    if (page.imagePage.isOnScreen) return PRIORITY_ON_SCREEN
+    if (page.wantedByRender) return PRIORITY_DEMANDED
+    val anchor = currentPage ?: return PRIORITY_OTHER
+    val distance = pageDistance(anchor, page) ?: return PRIORITY_OTHER
+    if (distance == 0) return PRIORITY_AHEAD_BASE
+    val travelling = if (lastScrollDirection > 0) distance > 0 else distance < 0
+    val base = if (distance > 0) PRIORITY_AHEAD_BASE else PRIORITY_BEHIND_BASE
+    val boost = if (travelling) PRIORITY_DIRECTION_BOOST else 0
+    return base + boost - minOf(kotlin.math.abs(distance), PRIORITY_DISTANCE_CAP)
+}
+// KMK <--
+
 /**
  * Queue a page for decoding if not already queued/loading/decoded.
- * If prioritize=true and page is already queued, moves it to front.
+ * The page's priority is computed at enqueue (see [decodePriorityOf]); `prioritize` still forces
+ * the renderer-demand class's LIFO tie-break for the current page.
  * Thread-safe: acquires [lock] internally.
  */
 internal fun WebGpuViewer.queueForDecode(page: ViewerReaderPage, prioritize: Boolean = false) {
@@ -35,24 +79,31 @@ internal fun WebGpuViewer.queueForDecode(page: ViewerReaderPage, prioritize: Boo
         when (page.state) {
             PageState.IDLE -> {
                 page.state = PageState.QUEUED
-                // The worker pops with removeLast(), so the tail is what decodes next and the head
-                // is what waits. A prioritised page therefore goes to the tail.
-                if (prioritize) {
-                    decodeQueue.addLast(page)
-                } else {
-                    decodeQueue.addFirst(page)
-                }
+                // KMK --> Priority, not insertion order: the current page, the pages the render
+                // walk is demanding, and the direction the reader is travelling toward all jump
+                // the preload window; distance breaks the rest. LIFO ties when the page is
+                // renderer-demanded, FIFO ties for background preloads - the deque's two ends,
+                // now as explicit classes.
+                // KMK <--
+                val priority = decodePriorityOf(page)
+                decodeQueue.enqueue(page, priority, lifoTies = prioritize || page.wantedByRender)
                 lock.notify()
                 logcat(LogPriority.DEBUG) {
                     "Queued ch=${page.page.chapter.chapter.id}/i=${page.page.index} " +
-                        "priority=$prioritize depth=${decodeQueue.size}"
+                        "priority=$priority depth=${decodeQueue.size}"
                 }
             }
 
             PageState.QUEUED -> {
-                // Already queued - move to the decoding end if prioritising
-                if (prioritize && decodeQueue.remove(page)) {
-                    decodeQueue.addLast(page)
+                // Already queued - re-prioritise rather than blindly reorder: a page queued as a
+                // background preload and demanded since moves forward, and enqueue dedups first.
+                // wantedByRender is checked alongside prioritize because ensureDecoding only
+                // passes prioritize for the current page - a render-walk demand for any other
+                // page in the window must still lift it out of its stale preload class (the flag
+                // is set before queueForDecode is called, and the one-shot guard above means this
+                // branch runs once per demand, not per frame).
+                if (prioritize || page.wantedByRender) {
+                    decodeQueue.enqueue(page, decodePriorityOf(page), lifoTies = true)
                 }
             }
 
@@ -74,7 +125,7 @@ internal fun WebGpuViewer.queueForDecode(page: ViewerReaderPage, prioritize: Boo
                 // KMK <--
                 if (page.page.status == Page.State.Ready && !decodeQueue.contains(page)) {
                     page.state = PageState.QUEUED
-                    decodeQueue.addLast(page)
+                    decodeQueue.enqueue(page, decodePriorityOf(page), lifoTies = true)
                     lock.notify()
                 }
             }
