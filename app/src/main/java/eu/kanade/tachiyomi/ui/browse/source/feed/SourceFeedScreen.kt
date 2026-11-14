@@ -36,7 +36,6 @@ import exh.source.isEhBasedSource
 import exh.util.nullIfBlank
 import mihon.app.di.globalAppGraph
 import mihon.core.navigation.BrowseSourceRoute
-import mihon.core.navigation.MangaDexFollowsRoute
 import mihon.core.navigation.MangaRoute
 import mihon.core.navigation.SourcePreferencesRoute
 import mihon.core.navigation.WebViewRoute
@@ -253,29 +252,6 @@ fun SourceFeedScreen(sourceId: Long) {
                 onSavedSearchPressDesc = stringResource(KMR.strings.saved_searches_add_feed),
                 shouldShowSavingButton = false,
                 // KMK <--
-                openMangaDexRandom = if (screenModel.sourceIsMangaDex) {
-                    {
-                        screenModel.onMangaDexRandom {
-                            // KMK -->
-                            backStack.add(
-                                BrowseSourceRoute(
-                                    sourceId,
-                                    "id:$it",
-                                ),
-                            )
-                            // KMK <--
-                        }
-                    }
-                } else {
-                    null
-                },
-                openMangaDexFollows = if (screenModel.sourceIsMangaDex) {
-                    {
-                        backStack.add(MangaDexFollowsRoute(sourceId))
-                    }
-                } else {
-                    null
-                },
             )
         }
         null -> Unit

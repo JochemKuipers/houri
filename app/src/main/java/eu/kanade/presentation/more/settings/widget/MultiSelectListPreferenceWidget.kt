@@ -17,10 +17,10 @@ import tachiyomi.presentation.core.components.LabeledCheckbox
 import tachiyomi.presentation.core.i18n.stringResource
 
 @Composable
-fun MultiSelectListPreferenceWidget(
-    preference: Preference.PreferenceItem.MultiSelectListPreference,
-    values: Set<String>,
-    onValuesChange: (Set<String>) -> Unit,
+fun <T> MultiSelectListPreferenceWidget(
+    preference: Preference.PreferenceItem.MultiSelectListPreference<T>,
+    values: Set<T>,
+    onValuesChange: (Set<T>) -> Unit,
 ) {
     var isDialogShown by remember { mutableStateOf(false) }
 

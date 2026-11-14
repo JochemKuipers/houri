@@ -1282,6 +1282,7 @@ class ReaderViewModel(
                     mangaId = currentManga.id,
                     totalChapters = unfilteredChapterList.size.toLong(),
                     readingModeFlag = getMangaReadingMode(),
+                    inLibrary = currentManga.favorite,
                 )
                 // KMK <--
             }

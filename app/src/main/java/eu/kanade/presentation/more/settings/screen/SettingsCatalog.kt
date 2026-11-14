@@ -57,7 +57,6 @@ object SettingsCatalog {
         SettingsSecurityRoute,
         // SY -->
         SettingsEhRoute,
-        SettingsMangadexRoute,
         // SY <--
         // KMK -->
         SettingsYakuyomiRoute,

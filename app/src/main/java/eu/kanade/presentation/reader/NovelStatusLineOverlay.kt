@@ -119,8 +119,12 @@ fun NovelStatusLineOverlay(
             overflow = TextOverflow.Ellipsis,
             style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
             modifier = Modifier
+                // KMK --> Solid, not translucent: at 35% alpha the book's own text bled through
+                // the pill and fought the status text for legibility, most visibly over a
+                // two-column layout or an illustration. The colour is still the reader's canvas
+                // (or black when there is none), just all of it. KMK <--
                 .background(
-                    color = (backgroundHex?.toColorIntOrNull()?.let(::Color) ?: Color.Black).copy(alpha = 0.35f),
+                    color = backgroundHex?.toColorIntOrNull()?.let(::Color) ?: Color.Black,
                     shape = RoundedCornerShape(8.dp),
                 )
                 .padding(horizontal = 10.dp, vertical = 2.dp),

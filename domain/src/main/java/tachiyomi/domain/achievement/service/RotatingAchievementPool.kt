@@ -93,7 +93,7 @@ class RotatingAchievementPool(
         if (progress <= 0) return
         val ach = Achievements.forId(id) ?: return
         if (!ach.isRotating) return
-        if (prefs.getUnlockedIds().contains(id)) return
+        val alreadyUnlocked = prefs.getUnlockedIds().contains(id)
         // Resolves (and, on the first call of a period, draws) the sets itself rather than
         // trusting that something else already drew them: nothing else reliably did, so testing
         // against empty stored ids discarded every mark until the user happened to open the
@@ -106,13 +106,24 @@ class RotatingAchievementPool(
         prefs.setRotatingProgress(map)
 
         if (current >= thresholdFor(id)) {
-            // Only clear the bar once the unlock actually landed. Clearing it on a failed
-            // unlock - achievements disabled, id unknown, entry ceiling reached - discarded the
-            // progress the user had built up, with nothing to show for it.
-            if (manager.tryUnlockDirect(id)) {
+            // KMK --> A re-drawn card the user already claimed cannot unlock again - the
+            // unlocked set is permanent by design (collection achievements count it, so
+            // re-adding or re-locking would corrupt them) - but the tier was still completed
+            // again, so the toast fans out through the same notifier path a first unlock
+            // takes. Progress clears in both branches, so each full re-completion fires
+            // exactly one toast, and the next one needs the full threshold again.
+            if (alreadyUnlocked) {
+                manager.notifyRotatingRecompletion(id)
+                map.remove(id)
+                prefs.setRotatingProgress(map)
+            } else if (manager.tryUnlockDirect(id)) {
+                // Only clear the bar once the unlock actually landed. Clearing it on a failed
+                // unlock - achievements disabled, id unknown, entry ceiling reached - discarded
+                // the progress the user had built up, with nothing to show for it.
                 map.remove(id)
                 prefs.setRotatingProgress(map)
             }
+            // KMK <--
         }
     }
 

@@ -12,12 +12,8 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.MergedSource
 import eu.kanade.tachiyomi.util.retainCovers
-import exh.md.utils.FollowStatus
-import exh.md.utils.MdUtil
 import exh.source.isEhBasedManga
 import exh.source.isMergedSourceId
-import exh.source.mangaDexSourceIds
-import exh.source.nHentaiSourceIds
 import exh.util.nullIfBlank
 import kotlinx.collections.immutable.PersistentList
 import tachiyomi.domain.manga.interactor.GetMergedMangaById
@@ -40,9 +36,6 @@ class LibrarySelectionController(
     private val setReadStatus: SetReadStatus,
     private val updateManga: UpdateManga,
     private val setMangaCategories: SetMangaCategoriesInteractor,
-    // SY -->
-    private val sourcePreferences: SourcePreferences,
-    // SY <--
     private val coverCache: CoverCache,
     private val sourceManager: SourceManager,
     private val downloadManager: DownloadManager,
@@ -51,13 +44,12 @@ class LibrarySelectionController(
 ) {
     // SY -->
     /**
-     * Strips bracket/brace/pipe noise from EH/NH-style titles of the selection, storing the
+     * Strips bracket/brace/pipe noise from EH-style titles of the selection, storing the
      * result as custom info (so the original title stays recoverable).
      */
     fun cleanTitles(mangas: List<Manga>) {
         mangas.fastFilter {
-            it.isEhBasedManga() ||
-                it.source in nHentaiSourceIds
+            it.isEhBasedManga()
         }.fastForEach { manga ->
             val editedTitle = manga.title
                 .replace(CLEAN_TITLE_BRACKETS, "").trim()
@@ -83,17 +75,6 @@ class LibrarySelectionController(
             )
 
             setCustomMangaInfo.set(mangaInfo)
-        }
-    }
-
-    /**
-     * Marks the selected MangaDex entries as READING on MangaDex itself.
-     */
-    suspend fun syncMangaToDex(mangas: List<Manga>) {
-        MdUtil.getEnabledMangaDex(sourcePreferences, sourceManager)?.let { mdex ->
-            mangas.fastFilter { it.source in mangaDexSourceIds }.fastForEach { manga ->
-                mdex.updateFollowStatus(MdUtil.getMangaId(manga.url), FollowStatus.READING)
-            }
         }
     }
     // SY <--

@@ -57,7 +57,6 @@ import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.track.BaseTracker
 import eu.kanade.tachiyomi.data.track.EnhancedTracker
 import eu.kanade.tachiyomi.data.track.TrackerManager
-import eu.kanade.tachiyomi.data.track.mdlist.MdList
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.source.PagePreviewSource
 import eu.kanade.tachiyomi.source.Source
@@ -76,13 +75,11 @@ import eu.kanade.tachiyomi.util.chapter.getNextUnread
 import eu.kanade.tachiyomi.util.retainCovers
 import eu.kanade.tachiyomi.util.system.toast
 import exh.log.xLogE
-import exh.md.utils.FollowStatus
 import exh.metadata.metadata.RaisedSearchMetadata
 import exh.metadata.metadata.base.FlatMetadata
 import exh.source.getMainSource
 import exh.source.isEhBasedManga
 import exh.source.isMergedSourceId
-import exh.source.mangaDexSourceIds
 import exh.util.nullIfEmpty
 import exh.util.trimOrNull
 import kotlinx.collections.immutable.ImmutableList
@@ -173,7 +170,6 @@ import tachiyomi.domain.manga.repository.MangaRepository
 import tachiyomi.domain.source.model.StubSource
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.track.interactor.GetTracks
-import tachiyomi.domain.track.interactor.InsertTrack
 import tachiyomi.domain.track.model.Track
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
@@ -218,7 +214,6 @@ class MangaViewModel(
     private val deleteMergeById: DeleteMergeById,
     private val getFlatMetadata: GetFlatMetadataById,
     private val getPagePreviews: GetPagePreviews,
-    private val insertTrack: InsertTrack,
     private val setCustomMangaInfo: SetCustomMangaInfo,
     // KMK -->
     private val getReadDurationForManga: GetReadDurationForManga,
@@ -1489,38 +1484,14 @@ class MangaViewModel(
             }
                 // SY -->
                 .map { (tracks, supportedTrackers) ->
-                    val supportedTrackerTracks = if (manga.source in mangaDexSourceIds ||
-                        state.mergedData?.manga?.values.orEmpty().any {
-                            it.source in mangaDexSourceIds
-                        }
-                    ) {
-                        val mdTrack = supportedTrackers.firstOrNull { it is MdList }
-                        when {
-                            mdTrack == null -> {
-                                tracks
-                            }
-                            // KMK: auto track MangaDex
-                            mdTrack.id !in tracks.map { it.trackerId } -> {
-                                createMdListTrack()?.let { tracks + it } ?: tracks
-                            }
-                            else -> tracks
-                        }
-                    } else {
-                        tracks
-                    }
                     // KMK --> carry the sequel/prequel inputs alongside
                     // the badge count so track bindings, logins and the
                     // preferred tracker can trigger a refetch below.
-                    val visibleTracks = supportedTrackerTracks
-                        .filter {
-                            it.trackerId != trackerManager.mdList.id ||
-                                it.status != FollowStatus.UNFOLLOWED.long
-                        }
                     Triple(
-                        visibleTracks.size,
+                        tracks.size,
                         supportedTrackers.isNotEmpty(),
                         SequelPrequelInputs(
-                            trackKeys = visibleTracks.map { it.trackerId to it.remoteId }.toSet(),
+                            trackKeys = tracks.map { it.trackerId to it.remoteId }.toSet(),
                             loggedInTrackerIds = supportedTrackers.map { it.id }.toSet(),
                             preferredTrackerId = trackPreferences.getPreferredTrackerForManga(manga.id),
                         ),
@@ -1554,30 +1525,6 @@ class MangaViewModel(
     }
 
     // SY -->
-    private suspend fun createMdListTrack(): Track? {
-        try {
-            val state = successState!!
-            val mdManga = state.manga.takeIf { it.source in mangaDexSourceIds }
-                ?: state.mergedData?.manga?.values?.find { it.source in mangaDexSourceIds }
-                ?: throw IllegalArgumentException("Entry does not belong to MangaDex")
-            val track = trackerManager.mdList.createInitialTracker(state.manga, mdManga)
-                .toDomainTrack(false)
-                ?: throw IllegalStateException("Could not create initial track")
-            insertTrack.await(track)
-            /* KMK -->
-            return TrackItem(
-                getTracks.await(mangaId).first { it.trackerId == trackerManager.mdList.id },
-                 trackerManager.mdList,
-             )
-            KMK <-- */
-            return getTracks.await(mangaId).first { it.trackerId == trackerManager.mdList.id }
-        } catch (e: Exception) {
-            xLogE("Failed to create MangaDex track", e)
-            return null
-        }
-    }
-    // SY <--
-
     // Track sheet - end
 
     sealed interface Dialog {

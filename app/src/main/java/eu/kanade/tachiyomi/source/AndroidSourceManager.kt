@@ -12,24 +12,15 @@ import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.source.online.HttpSource
 import eu.kanade.tachiyomi.source.online.all.EHentai
-import eu.kanade.tachiyomi.source.online.all.Lanraragi
-import eu.kanade.tachiyomi.source.online.all.MangaDex
 import eu.kanade.tachiyomi.source.online.all.MergedSource
-import eu.kanade.tachiyomi.source.online.all.NHentai
-import eu.kanade.tachiyomi.source.online.all.Pururin
 import eu.kanade.tachiyomi.source.online.all.komga.Komga
-import eu.kanade.tachiyomi.source.online.english.EightMuses
 import exh.log.xLogD
 import exh.source.BlacklistedSources
-import exh.source.DelegatedHttpSource
 import exh.source.EHENTAI_EXT_SOURCES
-import exh.source.EIGHTMUSES_SOURCE_ID
 import exh.source.EXHENTAI_EXT_SOURCES
-import exh.source.EnhancedHttpSource
 import exh.source.ExhPreferences
 import exh.source.KOMGA_SOURCE_ID
 import exh.source.MERGED_SOURCE_ID
-import exh.source.handleSourceLibrary
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -50,7 +41,6 @@ import tachiyomi.domain.source.repository.StubSourceRepository
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.source.local.LocalSource
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.reflect.KClass
 
 @Inject
 @SingleIn(AppScope::class)
@@ -198,42 +188,6 @@ class AndroidSourceManager(
         val src = this ?: return null
         // KMK <--
         // EXH -->
-        // KMK -->
-        // Use javaClass.name instead of ::class.qualifiedName — R8 strips
-        // Kotlin intrinsic null checks on classloader-loaded objects, causing
-        // getClass() NPE. javaClass is a direct JVM call that R8 cannot strip.
-        val sourceQName = src.javaClass.name
-        // KMK <--
-        val delegate = DELEGATED_SOURCES.firstOrNull { delegated ->
-            sourceQName == delegated.originalSourceQualifiedClassName ||
-                (delegated.factory && sourceQName.startsWith(delegated.originalSourceQualifiedClassName))
-        }
-        val newSource = if (src is HttpSource && delegate != null) {
-            xLogD("Delegating source: %s -> %s!", sourceQName, delegate.newSourceClass.qualifiedName)
-            try {
-                val enhancedSource = EnhancedHttpSource(
-                    src,
-                    delegate.newSourceClass.constructors.find { it.parameters.size == 2 }!!.call(src, context),
-                )
-
-                currentDelegatedSources[enhancedSource.originalSource.id] = DelegatedSource(
-                    enhancedSource.originalSource.name,
-                    enhancedSource.originalSource.id,
-                    // KMK -->
-                    enhancedSource.originalSource.javaClass.name,
-                    (enhancedSource.enhancedSource as DelegatedHttpSource)::class,
-                    // KMK <--
-                    delegate.factory,
-                )
-                enhancedSource
-            } catch (e: Throwable) {
-                xLogD("Failed to delegate source %s: %s", sourceQName, e.message)
-                src
-            }
-        } else {
-            src
-        }
-
         return if (
             // KMK -->
             isHentaiEnabled &&
@@ -248,7 +202,7 @@ class AndroidSourceManager(
             )
             null
         } else {
-            newSource
+            src
         }
         // EXH <--
     }
@@ -283,12 +237,6 @@ class AndroidSourceManager(
         .filter {
             it.id !in BlacklistedSources.HIDDEN_SOURCES
         }
-
-    fun getDelegatedSources() = sourcesMapFlow.value.values
-        .filterIsInstance<EnhancedHttpSource>()
-        .mapNotNull { enhancedHttpSource ->
-            enhancedHttpSource.enhancedSource as? DelegatedHttpSource
-        }
     // SY <--
 
     // KMK -->
@@ -322,90 +270,6 @@ class AndroidSourceManager(
     }
 
     // SY -->
-    companion object {
-        private const val fillInSourceId = Long.MAX_VALUE
-
-        /*
-         * If an extension is declaring sub-classes based on the main class, then set `factory=true` and
-         * only put the package without the class name. For example:
-         * "eu.kanade.tachiyomi.extension.all.mangadex" instead of "eu.kanade.tachiyomi.extension.all.mangadex.MangaDex"
-         */
-        val DELEGATED_SOURCES = listOf(
-            DelegatedSource(
-                "Pururin",
-                fillInSourceId,
-                "eu.kanade.tachiyomi.extension.all.pururin.Pururin",
-                Pururin::class,
-            ),
-            DelegatedSource(
-                "MangaDex",
-                fillInSourceId,
-                "eu.kanade.tachiyomi.extension.all.mangadex.MangaDex",
-                MangaDex::class,
-            ),
-            DelegatedSource(
-                "8Muses",
-                EIGHTMUSES_SOURCE_ID,
-                "eu.kanade.tachiyomi.extension.en.eightmuses.EightMuses",
-                EightMuses::class,
-            ),
-            DelegatedSource(
-                "NHentai",
-                fillInSourceId,
-                "eu.kanade.tachiyomi.extension.all.nhentai.NHentai",
-                NHentai::class,
-            ),
-            DelegatedSource(
-                "LANraragi",
-                fillInSourceId,
-                "eu.kanade.tachiyomi.extension.all.lanraragi.LANraragi",
-                Lanraragi::class,
-            ),
-        )
-
-        val currentDelegatedSources: MutableMap<Long, DelegatedSource> =
-            ListenMutableMap(mutableMapOf(), ::handleSourceLibrary)
-
-        data class DelegatedSource(
-            val sourceName: String,
-            val sourceId: Long,
-            val originalSourceQualifiedClassName: String,
-            val newSourceClass: KClass<out DelegatedHttpSource>,
-            val factory: Boolean = false,
-        )
-    }
-
-    private class ListenMutableMap<K, V>(
-        private val internalMap: MutableMap<K, V>,
-        private val listener: () -> Unit,
-    ) : MutableMap<K, V> by internalMap {
-        override fun clear() {
-            val clearResult = internalMap.clear()
-            listener()
-            return clearResult
-        }
-
-        override fun put(key: K, value: V): V? {
-            val putResult = internalMap.put(key, value)
-            if (putResult == null) {
-                listener()
-            }
-            return putResult
-        }
-
-        override fun putAll(from: Map<out K, V>) {
-            internalMap.putAll(from)
-            listener()
-        }
-
-        override fun remove(key: K): V? {
-            val removeResult = internalMap.remove(key)
-            if (removeResult != null) {
-                listener()
-            }
-            return removeResult
-        }
-    }
-
+    companion object
     // SY <--
 }

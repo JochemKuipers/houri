@@ -9,7 +9,6 @@ import dev.zacsweers.metro.ContributesIntoMap
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.binding
 import dev.zacsweers.metrox.viewmodel.ViewModelKey
-import eu.kanade.core.preference.asState
 import exh.GalleryAddEvent
 import exh.GalleryAdder
 import exh.log.xLogE
@@ -20,7 +19,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import mihon.app.di.globalAppGraph
 import mihon.core.viewmodel.StateViewModel
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.withIOContext
@@ -33,10 +31,6 @@ class BatchAddViewModel(
     private val exhPreferences: ExhPreferences,
 ) : StateViewModel<BatchAddState>(BatchAddState()) {
     private val galleryAdder by lazy { GalleryAdder() }
-
-    // KMK -->
-    val isHentaiEnabled by globalAppGraph.exhPreferences.isHentaiEnabled().asState(viewModelScope)
-    // KMK <--
 
     fun addGalleries(context: Context) {
         val galleries = state.value.galleries

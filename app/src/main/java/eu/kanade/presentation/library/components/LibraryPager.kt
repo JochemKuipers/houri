@@ -1,11 +1,13 @@
 package eu.kanade.presentation.library.components
 
 import android.content.res.Configuration
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.rememberScrollState
@@ -19,6 +21,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
+import coil3.compose.AsyncImage
 import eu.kanade.core.preference.PreferenceMutableState
 import eu.kanade.tachiyomi.ui.library.LibraryItem
 import mihon.app.di.globalAppGraph
@@ -62,6 +65,16 @@ fun LibraryPager(
         }
         val category = getCategoryForPage(page)
         val items = getItemsForCategory(category)
+
+        // KMK --> The library's "67": the query is swallowed whole - no grid, no empty-state
+        // text, no global-search escape hatch - and the server emoji takes the center of the
+        // screen instead. Equality against the trimmed query is the whole gate: "67" alone
+        // triggers it, any auxiliary text ("67 manga", "6 7", "676") reads as a normal search.
+        // KMK <--
+        if (searchQuery?.trim() == SIXTY_SEVEN_QUERY) {
+            SixtySeven(contentPadding)
+            return@HorizontalPager
+        }
 
         if (items.isEmpty()) {
             LibraryPagerEmptyScreen(
@@ -222,6 +235,30 @@ private fun LibraryPagerEmptyScreen(
         EmptyScreen(
             stringRes = msg,
             modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+// KMK --> The "67" Easter egg. The Discord CDN serves the same emoji id at any power-of-two
+// size; 512 keeps the animation crisp on a phone screen rather than scaling the 128 variant
+// the chat message linked. KMK <--
+private const val SIXTY_SEVEN_QUERY = "67"
+
+private const val SIXTY_SEVEN_EMOJI_URL =
+    "https://cdn.discordapp.com/emojis/1544117645287366806.webp?size=512&animated=true"
+
+@Composable
+private fun SixtySeven(contentPadding: PaddingValues) {
+    Box(
+        modifier = Modifier
+            .padding(contentPadding)
+            .fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
+        AsyncImage(
+            model = SIXTY_SEVEN_EMOJI_URL,
+            contentDescription = null,
+            modifier = Modifier.size(240.dp),
         )
     }
 }

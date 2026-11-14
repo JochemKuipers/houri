@@ -69,6 +69,87 @@ fun flattenToc(
     return rows
 }
 
+// KMK --> The status line's CHAPTER field: the name of the section on screen, resolved from the
+// book's own table of contents when it names one. A book is one library chapter, so the chapter
+// *name* is the novel's title — reporting that as "the chapter" was the field's whole defect.
+// KMK <--
+
+/**
+ * One label per document the ToC names, for the status line's chapter field.
+ *
+ * The outermost entry naming a document wins: nav files often list a chapter twice (a top-level
+ * "Chapter 1" and a deeper sub-section pointing into the same file), and the first is the one a
+ * reader would call the chapter. Both the raw href spelling and its percent-decoded form are
+ * keyed — the ToC speaks hrefs, the page speaks archive paths, and producers disagree on which
+ * one is encoded.
+ *
+ * Pure, like everything else here.
+ */
+fun tocLabelsOf(entries: List<TocEntry>): Map<String, String> {
+    val labels = LinkedHashMap<String, String>()
+    fun walk(entry: TocEntry) {
+        val document = entry.href.substringBefore('#').trim()
+        if (document.isNotEmpty() && entry.label.isNotBlank()) {
+            val label = entry.label.trim()
+            if (document !in labels) labels[document] = label
+            val decoded = percentDecode(document)
+            if (decoded.isNotEmpty() && decoded !in labels) labels[decoded] = label
+        }
+        entry.children.forEach { walk(it) }
+    }
+    entries.forEach { walk(it) }
+    return labels
+}
+
+/**
+ * A human label for a document when the ToC has none: its own file name, extension stripped,
+ * percent-decoded. `OEBPS/Text/Chapter%201.xhtml` reads as "Chapter 1". Null when the URL gives
+ * nothing to show.
+ */
+fun documentLabelOf(documentUrl: String?): String? {
+    val path = documentUrl?.trim().orEmpty()
+    if (path.isEmpty()) return null
+    val name = path.substringAfterLast('/')
+    if (name.isEmpty()) return null
+    val stem = name.substringBeforeLast('.').ifBlank { name }
+    return percentDecode(stem).ifBlank { null }
+}
+
+/**
+ * Percent-decodes a path segment leniently: `%41` → `A`, multi-byte sequences decoded as UTF-8,
+ * and anything malformed (`%G1`, a trailing `%`) left exactly as it was rather than throwing —
+ * a book's own naming is untrusted input, and the label is cosmetic.
+ */
+fun percentDecode(value: String): String {
+    if ('%' !in value) return value
+    val bytes = ByteArray(value.length)
+    var size = 0
+    var i = 0
+    while (i < value.length) {
+        val c = value[i]
+        // A hex pair needs the two characters after the '%'; anything else is literal.
+        if (c == '%' && i + 2 < value.length) {
+            val hi = value[i + 1].hexDigitOrNull()
+            val lo = value[i + 2].hexDigitOrNull()
+            if (hi != null && lo != null) {
+                bytes[size++] = ((hi shl 4) or lo).toByte()
+                i += 3
+                continue
+            }
+        }
+        bytes[size++] = c.code.toByte()
+        i += 1
+    }
+    return runCatching { String(bytes, 0, size, Charsets.UTF_8) }.getOrDefault(value)
+}
+
+private fun Char.hexDigitOrNull(): Int? = when (this) {
+    in '0'..'9' -> this - '0'
+    in 'a'..'f' -> this - 'a' + 10
+    in 'A'..'F' -> this - 'A' + 10
+    else -> null
+}
+
 /**
  * One row of the reader's in-chapter search results.
  *

@@ -162,15 +162,20 @@ internal fun PreferenceItem(
                     onValueChange = { scope.launch { item.onValueChanged(it) } },
                 )
             }
-            is Preference.PreferenceItem.MultiSelectListPreference -> {
-                val values by item.preference.collectAsState()
+            is Preference.PreferenceItem.MultiSelectListPreference<*> -> {
+                // The dispatch erases T; reify to <Any> so the generic widget infers.
+                // Nothing typed T escapes the widget: entries/values stay Set<*>,
+                // and set() writes through the erased PreferenceData.
+                @Suppress("UNCHECKED_CAST")
+                val casted = item as Preference.PreferenceItem.MultiSelectListPreference<Any>
+                val values by casted.preference.collectAsState()
                 MultiSelectListPreferenceWidget(
-                    preference = item,
+                    preference = casted,
                     values = values,
                     onValuesChange = { newValues ->
                         scope.launch {
-                            if (item.onValueChanged(newValues)) {
-                                item.preference.set(newValues.toMutableSet())
+                            if (casted.onValueChanged(newValues)) {
+                                casted.preference.set(newValues)
                             }
                         }
                     },

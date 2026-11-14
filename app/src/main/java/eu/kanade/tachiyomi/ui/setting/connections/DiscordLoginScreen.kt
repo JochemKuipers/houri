@@ -19,13 +19,19 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,6 +64,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
 
 private const val DISCORD_DOMAIN = "https://discord.com"
@@ -76,6 +83,11 @@ fun DiscordLoginScreen() {
     val context = LocalContext.current
 
     var currentUrl by remember { mutableStateOf(DISCORD_LOGIN_URL) }
+
+    // KMK --> manual token entry state
+    var showTokenDialog by remember { mutableStateOf(false) }
+    var tokenInput by rememberSaveable { mutableStateOf("") }
+    // KMK <--
 
     val webViewClient = remember {
         object : AccompanistWebViewClient() {
@@ -177,6 +189,53 @@ fun DiscordLoginScreen() {
         }
     }
 
+    // KMK --> manual token entry: same validation + storage path as the WebView scrape,
+    // just without depending on Discord's page state inside an embedded browser.
+    if (showTokenDialog) {
+        AlertDialog(
+            onDismissRequest = { showTokenDialog = false },
+            title = { Text(stringResource(KMR.strings.pref_discord_token_login)) },
+            text = {
+                Column {
+                    Text(stringResource(KMR.strings.pref_discord_token_login_description))
+                    OutlinedTextField(
+                        value = tokenInput,
+                        onValueChange = { tokenInput = it },
+                        label = { Text(stringResource(KMR.strings.pref_discord_token_login_field)) },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = MaterialTheme.padding.small),
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        // A token copied out of a browser's devtools is JSON-quoted; the
+                        // WebView scrape strips that with slice(1, -1), so do the same here.
+                        val token = tokenInput.trim().trim('"').trim()
+                        showTokenDialog = false
+                        tokenInput = ""
+                        if (token.isNotEmpty()) {
+                            login(token, context)
+                            backStack.removeLastOrNull()
+                        }
+                    },
+                    enabled = tokenInput.isNotBlank(),
+                ) {
+                    Text(stringResource(MR.strings.action_save))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTokenDialog = false }) {
+                    Text(stringResource(MR.strings.action_cancel))
+                }
+            },
+        )
+    }
+    // KMK <--
+
     Scaffold(
         topBar = {
             Box {
@@ -188,6 +247,14 @@ fun DiscordLoginScreen() {
                         actions = {
                             AppBarActions(
                                 persistentListOf(
+                                    // KMK --> Direct token login: the WebView scrape depends on
+                                    // Discord's own page state (localStorage layout, embedded
+                                    // browser flags), so offer the raw-token path that skips it.
+                                    AppBar.OverflowAction(
+                                        title = stringResource(KMR.strings.pref_discord_token_login),
+                                        onClick = { showTokenDialog = true },
+                                    ),
+                                    // KMK <--
                                     AppBar.OverflowAction(
                                         title = stringResource(MR.strings.action_webview_refresh),
                                         onClick = { webViewNavigator.reload() },

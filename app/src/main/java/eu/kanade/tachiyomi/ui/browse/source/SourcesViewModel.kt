@@ -42,6 +42,7 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import logcat.LogPriority
 import mihon.core.viewmodel.StateViewModel
+import mihon.domain.extension.model.ContentWarning
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.source.model.Pin
 import tachiyomi.domain.source.model.Source
@@ -135,7 +136,7 @@ class SourcesViewModel(
             }
         }
         val sources = unfilteredSources
-            .filter { !nsfwOnly || it.installedExtension?.isNsfw != false }
+            .filter { !nsfwOnly || it.installedExtension?.contentWarning != ContentWarning.SAFE }
             .filter(queryFilter(searchQuery))
         // KMK <--
         mutableState.update { state ->

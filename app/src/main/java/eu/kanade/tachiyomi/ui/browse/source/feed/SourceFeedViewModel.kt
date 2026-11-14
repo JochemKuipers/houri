@@ -26,13 +26,11 @@ import eu.kanade.presentation.browse.SourceFeedUI
 import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.FilterList
-import eu.kanade.tachiyomi.source.online.all.MangaDex
 import eu.kanade.tachiyomi.ui.browse.feed.MaxFeedItems
 import exh.source.EH_PACKAGE
 import exh.source.LOCAL_SOURCE_PACKAGE
 import exh.source.getMainSource
 import exh.source.isEhBasedSource
-import exh.source.mangaDexSourceIds
 import exh.util.nullIfBlank
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -108,8 +106,6 @@ open class SourceFeedViewModel(
     }
 
     var source = sourceManager.getOrStub(sourceId)
-
-    val sourceIsMangaDex = sourceId in mangaDexSourceIds
 
     private val coroutineDispatcher = appDispatchers.extensions
 
@@ -397,14 +393,6 @@ open class SourceFeedViewModel(
                 return@launchIO
             }
             openAddFeed(search.id, search.name)
-        }
-    }
-
-    fun onMangaDexRandom(onRandomFound: (String) -> Unit) {
-        viewModelScope.launchIO {
-            val random = source.getMainSource<MangaDex>()?.fetchRandomMangaUrl()
-                ?: return@launchIO
-            onRandomFound(random)
         }
     }
 

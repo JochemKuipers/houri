@@ -90,10 +90,11 @@ private val defaultContent: @Composable RowScope.(
             }
 
             // KMK -->
-            if (source.installedExtension?.isNsfw == true) {
+            val contentWarningLabel = source.installedExtension?.contentWarning?.label
+            if (contentWarningLabel != null) {
                 Text(
-                    text = stringResource(MR.strings.ext_nsfw_short).uppercase(),
-                    color = MaterialTheme.colorScheme.error,
+                    text = stringResource(contentWarningLabel.title).uppercase(),
+                    color = contentWarningLabel.color,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall,

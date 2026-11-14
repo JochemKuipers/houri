@@ -44,8 +44,6 @@ import exh.source.EH_SOURCE_ID
 import exh.source.ExhPreferences
 import exh.source.isEhBasedManga
 import exh.source.isMergedSourceId
-import exh.source.mangaDexSourceIds
-import exh.source.nHentaiSourceIds
 import kotlinx.collections.immutable.ImmutableSet
 import kotlinx.collections.immutable.PersistentList
 import kotlinx.collections.immutable.persistentSetOf
@@ -185,9 +183,6 @@ class LibraryViewModel(
         setReadStatus = setReadStatus,
         updateManga = updateManga,
         setMangaCategories = setMangaCategories,
-        // SY -->
-        sourcePreferences = sourcePreferences,
-        // SY <--
         coverCache = coverCache,
         sourceManager = sourceManager,
         downloadManager = downloadManager,
@@ -561,9 +556,6 @@ class LibraryViewModel(
             }
             .launchIn(viewModelScope)
 
-        viewModelScope.launchIO {
-            searchController.prewarmDmcaUuids()
-        }
         // KMK <--
     }
 
@@ -808,14 +800,6 @@ class LibraryViewModel(
         // Must call before clearSelection() since it reads the current selection
         updateSelectedManga()
         clearSelection()
-    }
-
-    @OptIn(DelicateCoroutinesApi::class)
-    fun syncMangaToDex() {
-        launchIO {
-            selectionController.syncMangaToDex(state.value.selectedManga)
-            clearSelection()
-        }
     }
 
     fun resetInfo() {
@@ -1296,13 +1280,8 @@ class LibraryViewModel(
         // SY -->
         val showCleanTitles: Boolean by lazy {
             selectedManga.fastAny {
-                it.isEhBasedManga() ||
-                    it.source in nHentaiSourceIds
+                it.isEhBasedManga()
             }
-        }
-
-        val showAddToMangadex: Boolean by lazy {
-            selectedManga.fastAny { it.source in mangaDexSourceIds }
         }
 
         val showResetInfo: Boolean by lazy {

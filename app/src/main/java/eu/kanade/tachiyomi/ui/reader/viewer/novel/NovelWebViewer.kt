@@ -38,6 +38,8 @@ import eu.kanade.tachiyomi.ui.reader.viewer.Viewer
 import eu.kanade.tachiyomi.ui.reader.viewer.ViewerProvider
 import eu.kanade.tachiyomi.util.system.readerBackgroundColor
 import exh.log.xLogE
+import exh.log.xLogI
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -195,6 +197,61 @@ internal class NovelWebViewer(
      * reporting where they last stopped.
      */
     val currentDocument: String? get() = currentPage?.textPage?.url
+
+    /**
+     * KMK --> The name of the section on screen, for the status line's CHAPTER field.
+     *
+     * A book is one library chapter, so the chapter's own name is the *novel's* title — reporting
+     * that here said nothing. Resolved, in order: the book's ToC label for this document (the
+     * reader-meaningful answer, and the only one for books whose spine files are all titled after
+     * the novel), the source's own page title, and last the document's file name. Observable so the
+     * status overlay recomposes as the reader turns sections; [refreshCurrentSectionName] keeps it
+     * in step with [currentPage] at both places that write it.
+     * KMK <--
+     */
+    var currentSectionName: String? by mutableStateOf(null)
+        private set
+
+    /** ToC labels, loaded once per chapter; null while loading or unavailable. */
+    private var tocLabels: Map<String, String>? = null
+    private var tocLabelsJob: Job? = null
+
+    private fun refreshCurrentSectionName() {
+        val textPage = currentPage?.textPage ?: run {
+            currentSectionName = null
+            return
+        }
+        val document = textPage.url
+        currentSectionName = tocLabels?.get(document)
+            ?.takeIf { it.isNotBlank() }
+            ?: textPage.name?.takeIf { it.isNotBlank() }
+            ?: documentLabelOf(document)
+    }
+
+    /**
+     * Loads the chapter's ToC labels once, in the background, and re-resolves the section name
+     * when they arrive. Best-effort: a source without a ToC, or one that fails to answer, leaves
+     * the fallback ladder in charge.
+     */
+    private fun ensureTocLabels() {
+        if (tocLabels != null || tocLabelsJob?.isActive == true) return
+        val loader = chapters?.currChapter?.pageLoader as? TextPageLoader ?: return
+        val tocSource = loader.tocSource ?: return
+        val sChapter = chapters?.currChapter?.chapter ?: return
+        tocLabelsJob = activity.lifecycleScope.launch {
+            val labels = try {
+                tocLabelsOf(tocSource.getTableOfContents(sChapter))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+            if (labels != null) {
+                tocLabels = labels
+                refreshCurrentSectionName()
+            }
+        }
+    }
 
     /**
      * Base URL of the document currently loaded, or null before the first one is.
@@ -1047,6 +1104,8 @@ internal class NovelWebViewer(
         typographyJob?.cancel()
         typographyJob = null
         // KMK -->
+        tocLabelsJob?.cancel()
+        tocLabelsJob = null
         pageModeJob?.cancel()
         pageModeJob = null
         rebuildJob?.cancel()
@@ -1213,6 +1272,10 @@ internal class NovelWebViewer(
     private fun renderDocument(page: ReaderPage, built: BuiltDocument) {
         val textPage = page.textPage ?: return
         currentPage = page
+        // KMK --> The status line follows the section on screen; the ToC labels load once here.
+        ensureTocLabels()
+        refreshCurrentSectionName()
+        // KMK <--
 
         // The base URL decides where every relative reference in this document points, and it is a
         // property of the document, not of the book. EpubArchiveUrls.BASE_URL is the right answer
@@ -1533,6 +1596,10 @@ internal class NovelWebViewer(
             NovelPageLayout.turnScript(if (volumeForward) 1 else -1),
         ) { raw ->
             val turn = NovelPageLayout.parseTurn(raw)
+            // KMK --> paged-debug: what the bridge answered to a turn. A null means the bridge is
+            // absent from the page; a !moved means the document believes it is at its edge.
+            xLogI("paged: turn(${if (volumeForward) 1 else -1}) reply = ${raw?.take(120)}")
+            // KMK <--
             if (turn == null || !turn.moved) {
                 snapshot?.recycle()
                 if (turn != null && !turn.moved) {
@@ -1732,6 +1799,10 @@ internal class NovelWebViewer(
                 // history and the contents sheet's marker all follow it, exactly as they follow
                 // the page on screen in the continuous manga viewer.
                 currentPage = page
+                // KMK --> The status line's section name follows the reader's place in the book.
+                ensureTocLabels()
+                refreshCurrentSectionName()
+                // KMK <--
                 activity.onPageSelected(page)
             }
             trimToWindow()
@@ -2156,7 +2227,14 @@ internal class NovelWebViewer(
             // layout the host needs (which way forward runs), and the pending position is applied
             // from inside the callback so the bridge is guaranteed ready for it.
             if (isPagedMode) {
-                webView.evaluateJavascript(NovelPageLayout.setupScript(pageMode.columns)) { raw ->
+                val pagedSetup = NovelPageLayout.setupScript(pageMode.columns)
+                webView.evaluateJavascript(pagedSetup) { raw ->
+                    // KMK --> paged-debug: the bridge's own answer to setup. A "null"/missing reply
+                    // here means the bridge never booted in the page (script stripped, syntax
+                    // error, wrong document) — the single most useful line for diagnosing a dead
+                    // paged mode.
+                    xLogI("paged: setup reply = ${raw?.take(200)}")
+                    // KMK <--
                     onPagedSetup(NovelPageLayout.parseLayout(raw))
                     applyPendingPosition()
                     // Highlights ride the paged callback too — this branch returns before the
@@ -2310,6 +2388,10 @@ internal class NovelWebViewer(
      * zones keep the Latin assumption.
      */
     private fun onPagedSetup(layout: NovelPageLayout.PagedLayout?) {
+        // KMK --> paged-debug: the parsed setup answer. A null here with a non-null raw reply
+        // above is a parse bug; a null with a null reply is a bridge that never ran.
+        xLogI("paged: setup layout = $layout")
+        // KMK <--
         if (layout != null) {
             pagedForwardIsLeft = layout.forwardIsLeft
         }

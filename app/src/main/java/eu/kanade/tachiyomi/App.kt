@@ -155,7 +155,7 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         // KMK -->
         // Expose the graph to non-Context classes (tracker services, etc.)
         // Must be set BEFORE graph.inject(): eager construction during injection
-        // (TrackerManager -> MdList -> BaseTracker) reads globalAppGraph.
+        // (TrackerManager -> tracker services) reads globalAppGraph.
         globalAppGraph = graph
 
         // Keeps reads and writes on Metro's single CustomMangaRepositoryImpl.

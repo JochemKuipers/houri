@@ -22,6 +22,7 @@ import kotlinx.coroutines.coroutineScope
 import logcat.LogPriority
 import mihon.core.concurrency.AppDispatchersHolder
 import mihon.domain.extension.interactor.GetExtensionStores
+import mihon.domain.extension.model.ContentWarning
 import mihon.domain.extension.model.ExtensionStore
 import tachiyomi.core.common.util.system.logcat
 import uy.kohesive.injekt.injectLazy
@@ -49,10 +50,6 @@ internal object ExtensionLoader {
     // KMK -->
     private val getExtensionStores: GetExtensionStores by injectLazy()
     // KMK <--
-
-    private fun shouldLoadNsfwSource(): Boolean {
-        return preferences.showNsfwSource().get()
-    }
 
     private const val EXTENSION_FEATURE = "tachiyomi.extension"
     private const val METADATA_SOURCE_CLASS = "tachiyomi.extension.class"
@@ -380,11 +377,20 @@ internal object ExtensionLoader {
             return LoadResult.Untrusted(extension)
         }
 
-        val isNsfw = appInfo.metaData.getInt(METADATA_CONTENT_WARNING) > 0 ||
-            appInfo.metaData.getInt(METADATA_NSFW) == 1
-        if (!shouldLoadNsfwSource() && isNsfw) {
-            logcat(LogPriority.WARN) { "[ExtInstall] NSFW extension $pkgName not allowed — returning Error" }
-            return attributedError(pkgInfo, "NSFW disabled: $pkgName")
+        val contentWarning = when {
+            appInfo.metaData.containsKey(METADATA_CONTENT_WARNING) -> {
+                when (appInfo.metaData.getInt(METADATA_CONTENT_WARNING)) {
+                    1 -> ContentWarning.MIXED
+                    2 -> ContentWarning.NSFW
+                    else -> ContentWarning.SAFE
+                }
+            }
+            appInfo.metaData.getInt(METADATA_NSFW) == 1 -> ContentWarning.NSFW
+            else -> ContentWarning.SAFE
+        }
+        if (contentWarning !in preferences.enabledContentWarnings().get()) {
+            logcat(LogPriority.WARN) { "[ExtInstall] Extension $pkgName with $contentWarning not allowed — returning Error" }
+            return attributedError(pkgInfo, "Content warning not allowed: $pkgName")
         }
 
         val classLoader = try {
@@ -439,7 +445,7 @@ internal object ExtensionLoader {
             versionCode = versionCode,
             libVersion = libVersion,
             lang = lang,
-            isNsfw = isNsfw,
+            contentWarning = contentWarning,
             sources = sources,
             pkgFactory = appInfo.metaData.getString(METADATA_SOURCE_FACTORY),
             icon = appInfo.loadIcon(pkgManager),

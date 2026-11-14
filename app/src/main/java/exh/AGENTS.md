@@ -1,17 +1,22 @@
 # exh/ Module
 
-E-Hentai/ExHentai, MangaDex, NHentai, 8Muses, Pururin, LANraragi integration. Package root: `exh.*`.
+E-Hentai/ExHentai integration and the Komga built-in source. Package root: `exh.*`.
+
+Every delegated source except E-Hentai was removed: NHentai, 8Muses, Pururin,
+LANraragi and the whole MangaDex client stack (`exh/md/`, OAuth login, follows
+sync, recommendations) no longer exist. Their IDs stay reserved in
+`source-api/.../SourceIds.kt` / `TrackerId.kt` so restored library rows keep
+resolving.
 
 ## Key directories
 
 | Path | Purpose |
 |------|---------|
 | `exh/eh/` | E-Hentai update helpers, tag definitions |
-| `exh/md/` | MangaDex API client, handlers, DTOs, OAuth |
-| `exh/recs/` | Recommendation system (6 sources) |
+| `exh/recs/` | Recommendation system (AniList, MAL, MangaUpdates, MangaUpdates-similar, Comick) |
 | `exh/favorites/` | Two-way favorites sync with ExHentai |
-| `exh/ui/metadata/` | Metadata viewer + per-source description adapters |
-| `exh/ui/batchadd/` | Batch gallery adding from URL list |
+| `exh/ui/metadata/` | Metadata viewer + EHentai description adapter |
+| `exh/ui/batchadd/` | Batch gallery adding from URL list (E-Hentai URLs only) |
 | `exh/ui/smartsearch/` | Smart search UI |
 | `exh/search/` | Custom search engine with query parsing |
 | `exh/smartsearch/` | Fuzzy title matching for library lookup |
@@ -26,24 +31,24 @@ E-Hentai/ExHentai, MangaDex, NHentai, 8Muses, Pururin, LANraragi integration. Pa
 - KMK: per-language source IDs (36 total:18 EH +18 EXH)
 - Login via cookies: memberId, passHash, igneous, sk, s, hath_perks
 
-**Delegated sources:** NHentai, 8Muses, Pururin, LANraragi (tracked in `SourceHelper.kt`)
-
-**MangaDex:** Full API client stack with OAuth auth, external source page delegation
-
 ## Metadata system
 
 **Two-tier model:**
 1. `FlatMetadata` (DB) = `SearchMetadata` + tags + titles
 2. `RaisedSearchMetadata` (runtime) = typed subclasses deserialized from JSON
 
-**Per-source metadata:** `EHentaiSearchMetadata`, `MangaDexSearchMetadata`, `NHentaiSearchMetadata`, etc.
+**Per-source metadata:** `EHentaiSearchMetadata` is the only per-source metadata
+class left (`source-api/.../metadata/metadata/`); the NHentai/Pururin/8Muses/
+LANraragi/MangaDex classes were deleted with their sources, and the shared
+generic layer (`base/FlatMetadata`, `RaisedSearchMetadata`, `RankedSearchMetadata`)
+remains for ABI + DB mapping.
 
-**UI:** Per-source `*DescriptionAdapter` composables for metadata display
+**UI:** `EHentaiDescriptionAdapter` for metadata display
 
 ## Recommendation system
 
-`RecommendationPagingSource` base class with6 implementations:
-- AniList (GraphQL), MAL (Jikan v4), MangaUpdates, MangaDex, Comick
+`RecommendationPagingSource` base class with implementations:
+- AniList (GraphQL), MAL (Jikan v4), MangaUpdates, MangaUpdates-similar, Comick
 - `StaticResultPagingSource` for pre-computed batch results
 - `RecommendationSearchHelper` processes entire library, ranks by frequency
 

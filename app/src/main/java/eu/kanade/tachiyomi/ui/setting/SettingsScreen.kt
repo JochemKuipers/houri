@@ -56,7 +56,6 @@ import eu.kanade.presentation.more.settings.screen.SettingsDataRoute
 import eu.kanade.presentation.more.settings.screen.SettingsDownloadRoute
 import eu.kanade.presentation.more.settings.screen.SettingsEhRoute
 import eu.kanade.presentation.more.settings.screen.SettingsLibraryRoute
-import eu.kanade.presentation.more.settings.screen.SettingsMangadexRoute
 import eu.kanade.presentation.more.settings.screen.SettingsReaderRoute
 import eu.kanade.presentation.more.settings.screen.SettingsSecurityRoute
 import eu.kanade.presentation.more.settings.screen.SettingsTrackingRoute
@@ -67,7 +66,6 @@ import eu.kanade.presentation.more.settings.widget.TextPreferenceWidget
 import eu.kanade.tachiyomi.BuildConfig
 import exh.assets.EhAssets
 import exh.assets.ehassets.EhLogo
-import exh.assets.ehassets.MangadexLogo
 import kotlinx.collections.immutable.persistentListOf
 import mihon.core.navigation.AboutRoute
 import mihon.core.navigation.SettingsRoute
@@ -307,12 +305,6 @@ private val items = listOfNotNull(
         subtitleRes = SYMR.strings.pref_ehentai_summary,
         icon = EhAssets.EhLogo,
         route = SettingsEhRoute,
-    ),
-    Item(
-        titleRes = SYMR.strings.pref_category_mangadex,
-        subtitleRes = SYMR.strings.pref_mangadex_summary,
-        icon = EhAssets.MangadexLogo,
-        route = SettingsMangadexRoute,
     ),
     // SY <--
     // KMK --> AI feature categories. Off-device MTL needs no local engine, but the no-MTL

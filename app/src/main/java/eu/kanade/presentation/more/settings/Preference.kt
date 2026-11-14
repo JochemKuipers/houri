@@ -158,12 +158,12 @@ sealed class Preference {
          * A [PreferenceItem] that displays a list of entries as a dialog.
          * Multiple entries can be selected at the same time.
          */
-        data class MultiSelectListPreference(
-            val preference: PreferenceData<Set<String>>,
-            val entries: ImmutableMap<String, String>,
+        data class MultiSelectListPreference<T>(
+            val preference: PreferenceData<Set<T>>,
+            val entries: ImmutableMap<T, String>,
             override val title: String,
             override val subtitle: String? = "%s",
-            val subtitleProvider: @Composable (value: Set<String>, entries: ImmutableMap<String, String>) -> String? =
+            val subtitleProvider: @Composable (value: Set<T>, entries: ImmutableMap<T, String>) -> String? =
                 { v, e ->
                     val combined = remember(v, e) {
                         v.mapNotNull { e[it] }
@@ -175,14 +175,14 @@ sealed class Preference {
                 },
             override val icon: ImageVector? = null,
             override val enabled: Boolean = true,
-            override val onValueChanged: suspend (value: Set<String>) -> Boolean = { true },
+            override val onValueChanged: suspend (value: Set<T>) -> Boolean = { true },
             // KMK -->
             override val dependsOn: PreferenceDependency? = null,
             override val mtlOnly: Boolean = false,
             override val ramGated: Boolean = false,
             override val grayOut: Boolean = false,
             // KMK <--
-        ) : PreferenceItem<Set<String>, Boolean>()
+        ) : PreferenceItem<Set<T>, Boolean>()
 
         /**
          * A [PreferenceItem] that shows a EditText in the dialog.

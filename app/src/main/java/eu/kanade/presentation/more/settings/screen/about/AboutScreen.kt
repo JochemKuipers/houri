@@ -94,10 +94,17 @@ fun AboutScreen() {
                     title = versionTitle,
                     subtitle = getVersionName(withBuildDate = true),
                     onPreferenceClick = {
-                        context.copyToClipboard(
-                            versionTitle,
-                            getVersionName(withBuildDate = true),
-                        )
+                        // KMK --> Copies the full device info block (the same one crash reports
+                        // lead with), not just the version line - bug reports kept arriving
+                        // without a device to reproduce on. Falls back to the version line when
+                        // the info cannot be built.
+                        val copied = try {
+                            globalAppGraph.crashLogUtil.getDebugInfo()
+                        } catch (_: Exception) {
+                            null
+                        } ?: getVersionName(withBuildDate = true)
+                        context.copyToClipboard(versionTitle, copied)
+                        // KMK <--
                         val now = System.currentTimeMillis()
                         val pruned = (versionTapTimes.filter { now - it < 60_000 } + now)
                         versionTapTimes = pruned

@@ -32,13 +32,11 @@ import eu.kanade.tachiyomi.network.PREF_DOH_CLOUDFLARE
 import eu.kanade.tachiyomi.network.PREF_DOH_CONTROLD
 import eu.kanade.tachiyomi.network.PREF_DOH_DNSPOD
 import eu.kanade.tachiyomi.network.PREF_DOH_GOOGLE
-import eu.kanade.tachiyomi.network.PREF_DOH_MULLVAD
 import eu.kanade.tachiyomi.network.PREF_DOH_NJALLA
 import eu.kanade.tachiyomi.network.PREF_DOH_QUAD101
 import eu.kanade.tachiyomi.network.PREF_DOH_QUAD9
 import eu.kanade.tachiyomi.network.PREF_DOH_SHECAN
 import eu.kanade.tachiyomi.network.interceptor.FlareSolverr
-import eu.kanade.tachiyomi.source.AndroidSourceManager
 import eu.kanade.tachiyomi.util.storage.DiskUtil
 import eu.kanade.tachiyomi.util.system.isDebugBuildType
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
@@ -133,7 +131,6 @@ internal fun getNetworkGroup(
                     PREF_DOH_DNSPOD to "DNSPod",
                     PREF_DOH_360 to "360",
                     PREF_DOH_QUAD101 to "Quad 101",
-                    PREF_DOH_MULLVAD to "Mullvad",
                     PREF_DOH_CONTROLD to "Control D",
                     PREF_DOH_NJALLA to "Njalla",
                     PREF_DOH_SHECAN to "Shecan",
@@ -464,7 +461,6 @@ internal fun getDeveloperToolsGroup(): Preference.PreferenceGroup {
     val backStack = LocalBackStack.current
     val sourcePreferences = remember { globalAppGraph.sourcePreferences }
     val exhPreferences = remember { globalAppGraph.exhPreferences }
-    val delegateSourcePreferences = remember { globalAppGraph.delegateSourcePreferences }
     val securityPreferences = remember { globalAppGraph.securityPreferences }
     return Preference.PreferenceGroup(
         title = stringResource(SYMR.strings.developer_tools),
@@ -497,16 +493,6 @@ internal fun getDeveloperToolsGroup(): Preference.PreferenceGroup {
                 subtitle = stringResource(KMR.strings.ext_error_text_enabled_summary),
             ),
             // KMK <--
-            Preference.PreferenceItem.SwitchPreference(
-                preference = delegateSourcePreferences.delegateSources(),
-                title = stringResource(SYMR.strings.toggle_delegated_sources),
-                subtitle = stringResource(
-                    SYMR.strings.toggle_delegated_sources_summary,
-                    stringResource(MR.strings.app_name),
-                    AndroidSourceManager.DELEGATED_SOURCES.map { it.sourceName }.distinct()
-                        .joinToString(),
-                ),
-            ),
             Preference.PreferenceItem.ListPreference(
                 // KMK -->
                 preference = exhPreferences.logLevel(isDebugBuildType),

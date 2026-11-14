@@ -57,12 +57,10 @@ import eu.kanade.tachiyomi.util.system.toast
 import exh.source.ExhPreferences
 import exh.source.anyIs
 import exh.source.isEhBasedSource
-import exh.source.isMdBasedSource
 import kotlinx.coroutines.flow.collectLatest
 import mihon.app.di.globalAppGraph
 import mihon.core.navigation.BrowseSourceRoute
 import mihon.core.navigation.CategoryRoute
-import mihon.core.navigation.MangaDexFollowsRoute
 import mihon.core.navigation.MangaRoute
 import mihon.core.navigation.SourcePreferencesRoute
 import mihon.core.navigation.WebViewRoute
@@ -420,29 +418,6 @@ fun BrowseSourceScreen(
                 // KMK -->
                 onSavedSearchPressDesc = stringResource(KMR.strings.saved_searches_delete),
                 // KMK <--
-                openMangaDexRandom = if (viewModel.source.isMdBasedSource()) {
-                    {
-                        viewModel.onMangaDexRandom {
-                            backStack.replace(
-                                BrowseSourceRoute(
-                                    sourceId,
-                                    "id:$it",
-                                ),
-                            )
-                        }
-                    }
-                } else {
-                    null
-                },
-                openMangaDexFollows = if (viewModel.source.isMdBasedSource()) {
-                    {
-                        // KMK -->
-                        backStack.add(MangaDexFollowsRoute(sourceId))
-                        // KMK <--
-                    }
-                } else {
-                    null
-                },
                 // SY <--
             )
         }
