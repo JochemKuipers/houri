@@ -45,3 +45,7 @@ __pycache__/
 
 # bugsanitizer console runner
 errors.log
+
+# local tooling
+.claude/settings.local.json
+*.backup
