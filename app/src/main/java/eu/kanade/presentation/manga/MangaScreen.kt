@@ -100,11 +100,6 @@ import eu.kanade.tachiyomi.source.getNameForMangaInfo
 import eu.kanade.tachiyomi.source.isIncognitoModeEnabled
 import eu.kanade.tachiyomi.source.online.MetadataSource
 import eu.kanade.tachiyomi.source.online.all.EHentai
-import eu.kanade.tachiyomi.source.online.all.Lanraragi
-import eu.kanade.tachiyomi.source.online.all.MangaDex
-import eu.kanade.tachiyomi.source.online.all.NHentai
-import eu.kanade.tachiyomi.source.online.all.Pururin
-import eu.kanade.tachiyomi.source.online.english.EightMuses
 import eu.kanade.tachiyomi.ui.manga.ChapterList
 import eu.kanade.tachiyomi.ui.manga.MangaInfoErrorKind
 import eu.kanade.tachiyomi.ui.manga.MangaInfoUiState
@@ -116,11 +111,6 @@ import exh.source.getMainSource
 import exh.source.isEhBasedManga
 import exh.source.isMergedSourceId
 import exh.ui.metadata.adapters.EHentaiDescription
-import exh.ui.metadata.adapters.EightMusesDescription
-import exh.ui.metadata.adapters.LanraragiDescription
-import exh.ui.metadata.adapters.MangaDexDescription
-import exh.ui.metadata.adapters.NHentaiDescription
-import exh.ui.metadata.adapters.PururinDescription
 import exh.util.isLewd
 import mihon.app.di.globalAppGraph
 import mihon.core.navigation.ScanlatorPreferenceRoute
@@ -1634,21 +1624,6 @@ fun metadataDescription(source: Source): MetadataDescriptionComposable? {
         when (metadataSource) {
             is EHentai -> { state, openMetadataViewer, search ->
                 EHentaiDescription(state, openMetadataViewer, search)
-            }
-            is MangaDex -> { state, openMetadataViewer, _ ->
-                MangaDexDescription(state, openMetadataViewer)
-            }
-            is NHentai -> { state, openMetadataViewer, _ ->
-                NHentaiDescription(state, openMetadataViewer)
-            }
-            is EightMuses -> { state, openMetadataViewer, _ ->
-                EightMusesDescription(state, openMetadataViewer)
-            }
-            is Pururin -> { state, openMetadataViewer, _ ->
-                PururinDescription(state, openMetadataViewer)
-            }
-            is Lanraragi -> { state, openMetadataViewer, _ ->
-                LanraragiDescription(state, openMetadataViewer)
             }
             else -> null
         }

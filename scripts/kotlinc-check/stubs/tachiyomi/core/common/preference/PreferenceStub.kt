@@ -5,6 +5,7 @@ interface Preference<T> {
     fun get(): T
     fun set(value: T)
     fun delete()
+    fun isSet(): Boolean
     fun changes(): kotlinx.coroutines.flow.Flow<T>
 }
 

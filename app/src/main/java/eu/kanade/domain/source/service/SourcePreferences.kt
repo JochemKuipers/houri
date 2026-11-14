@@ -7,10 +7,12 @@ import eu.kanade.domain.base.BasePreferences
 import eu.kanade.domain.source.interactor.SetMigrateSorting
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.SourceFilter
 import eu.kanade.tachiyomi.util.system.LocaleHelper
+import mihon.domain.extension.model.ContentWarning
 import mihon.domain.migration.models.MigrationFlag
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.preference.getEnum
+import tachiyomi.core.common.preference.getEnumSet
 import tachiyomi.core.common.preference.getLongArray
 import tachiyomi.domain.library.model.LibraryDisplayMode
 
@@ -50,7 +52,10 @@ class SourcePreferences(
         -1,
     )
 
-    fun showNsfwSource() = preferenceStore.getBoolean("show_nsfw_source", true)
+    fun enabledContentWarnings() = preferenceStore.getEnumSet(
+        "enabled_content_warnings",
+        setOf(ContentWarning.SAFE, ContentWarning.MIXED, ContentWarning.NSFW),
+    )
 
     fun migrationSortingMode() = preferenceStore.getEnum("pref_migration_sorting", SetMigrateSorting.Mode.ALPHABETICAL)
 
@@ -179,8 +184,10 @@ class SourcePreferences(
 
     // Fetch each manual-search result's chapter list in the background so the latest chapter
     // number can be shown on the card. Adds one request per result; shown for results only,
-    // and skipped for entries whose chapters are already known.
-    fun migrationFetchChaptersForResults() = preferenceStore.getBoolean("migration_fetch_chapters_for_results", true)
+    // and skipped for entries whose chapters are already known. Off by default - the extra
+    // request per result is opt-in traffic, and a slow source made every result card sit on
+    // a spinner for seconds before it settled.
+    fun migrationFetchChaptersForResults() = preferenceStore.getBoolean("migration_fetch_chapters_for_results", false)
     // KMK <--
 
     fun globalSearchPinnedState() = preferenceStore.getEnum(
@@ -235,13 +242,6 @@ class SourcePreferences(
     }
 
     fun allowLocalSourceHiddenFolders() = preferenceStore.getBoolean("allow_local_source_hidden_folders", false)
-
-    fun preferredMangaDexId() = preferenceStore.getString("preferred_mangaDex_id", "0")
-
-    fun mangadexSyncToLibraryIndexes() = preferenceStore.getStringSet(
-        "pref_mangadex_sync_to_library_indexes",
-        emptySet(),
-    )
 
     fun recommendationSearchFlags() = preferenceStore.getInt("rec_search_flags", Int.MAX_VALUE)
     // SY <--

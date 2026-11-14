@@ -22,9 +22,7 @@
     <string name="pref_category_all_sources">All Sources</string>
     <string name="pref_category_eh">E-Hentai</string>
     <string name="pref_category_fork">Fork Settings</string>
-    <string name="pref_category_mangadex">MangaDex</string>
     <string name="pref_ehentai_summary">E/ExHentai login, gallery sync</string>
-    <string name="pref_mangadex_summary">MangaDex login, follows sync</string>
 
     <!-- About -->
     <string name="changelog_version">Version %1$s</string>
@@ -561,7 +559,6 @@
     <!-- Gallery Adder -->
     <!-- Batch Add -->
     <string name="eh_batch_add">Batch Add</string>
-    <string name="md_batch_add_description">Example:\n\nhttps://mangadex.org/title/32d76d19-8a05-4db0-9fc2-e0b0648fe9d0/solo-leveling\nhttps://mangadex.org/title/77bee52c-d2d6-44ad-a33a-1734c1fe696a\n\n</string>
     <string name="eh_batch_add_description">Example:\n\nhttp://e-hentai.org/g/12345/1a2b3c4e\nhttp://g.e-hentai.org/g/67890/6f7g8h9i\nhttp://exhentai.org/g/13579/1a3b5c7e\nhttps://exhentai.org/g/24680/2f4g6h8i\n\nIt also supports E-H Visited exported data\n</string>
     <string name="eh_batch_add_title">Enter the galleries to add (separated by a new line):</string>
     <string name="eh_batch_add_button">Add Galleries</string>
@@ -697,17 +694,7 @@
     <string name="dedupe_most_chapters">Show source with most chapters</string>
     <string name="dedupe_highest_chapter">Show source with highest chapter number</string>
 
-    <!-- MangaDex -->
-    <string name="md_follows_unfollowed">Unfollowed</string>
-    <string name="mangadex_sync_follows_to_library">Sync MangaDex entries to your library</string>
-    <string name="mangadex_sync_follows_to_library_summary">Pulls entries from MangaDex into your library if they are not already added.</string>
-    <string name="mangadex_preffered_source">Preferred MangaDex source</string>
-    <string name="mangadex_preffered_source_summary">Set your chosen MangaDex source, this will be used for follows and a bunch more features around the app</string>
-    <string name="mangadex_add_to_follows">Add to MangaDex follows</string>
-    <string name="mangadex_follows">MangaDex follows</string>
     <string name="random">Random</string>
-    <string name="mangadex_push_favorites_to_mangadex">Sync library entries to MangaDex</string>
-    <string name="mangadex_push_favorites_to_mangadex_summary">Syncs any non MdList tracked entries to MangaDex as reading.</string>
     <string name="community_recommendations">Community recommendations</string>
     <string name="similar_titles">Similar titles</string>
     <string name="alt_titles">Alternative titles</string>

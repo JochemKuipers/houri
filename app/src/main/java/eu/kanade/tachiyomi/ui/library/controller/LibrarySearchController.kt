@@ -9,14 +9,12 @@ import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.ui.library.LOCAL_SOURCE_ID_ALIAS
 import eu.kanade.tachiyomi.ui.library.LibraryItem
-import exh.log.xLogE
 import exh.metadata.sql.models.SearchTag
 import exh.metadata.sql.models.SearchTitle
 import exh.search.Namespace
 import exh.search.QueryComponent
 import exh.search.SearchEngine
 import exh.search.Text
-import exh.source.MANGADEX_IDS
 import exh.source.isMetadataSource
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.TriState
@@ -60,15 +58,6 @@ class LibrarySearchController(
         // KMK <--
     ): List<LibraryItem> {
         return if (unfiltered.isNotEmpty() && !query.isNullOrBlank()) {
-            // AZ -->
-            if (query.trim().lowercase() == "mangadex-dmca") {
-                // Special easter egg query
-                return unfiltered.fastFilter {
-                    it.libraryManga.manga.source in MANGADEX_IDS &&
-                        it.libraryManga.manga.url.removePrefix("/manga/").lowercase() in mangaDexDmcaUuids
-                }
-            }
-            // AZ <--
             // KMK -->
             val normalisedQuery = query.trim().lowercase()
             if (normalisedQuery == "mango") {
@@ -391,44 +380,8 @@ class LibrarySearchController(
     }
     // KMK <--
 
-    /**
-     * Loads the MangaDex DMCA list once per process if it is not loaded yet. The library
-     * screen kicks this off in the background; [filter] answers the easter-egg query from
-     * whatever is loaded.
-     */
-    suspend fun prewarmDmcaUuids() {
-        if (mangaDexDmcaUuids.isEmpty()) {
-            mangaDexDmcaUuids = loadMangaDexDmcaUuids(context = mihon.app.di.globalAppGraph.context)
-        }
-    }
-
     companion object {
         /** Namespace prefixes that mean "match a tag", for the tag-search rotating tier. */
         private val TAG_NAMESPACES = setOf("tag", "tags")
-
-        /** List of MangaDex UUIDs subject to DMCA takedowns */
-        @Volatile
-        private var mangaDexDmcaUuids = hashSetOf<String>()
-
-        /**
-         * Loads the list of MangaDex UUIDs subject to DMCA takedowns from an external file.
-         * The file should be placed at res/raw/mangadex_dmca_uuids.txt, one UUID per line.
-         */
-        private suspend fun loadMangaDexDmcaUuids(context: Context): HashSet<String> = withIOContext {
-            try {
-                val inputStream = context.resources.openRawResource(
-                    eu.kanade.tachiyomi.R.raw.mangadex_dmca_uuids,
-                )
-                inputStream.bufferedReader().useLines { lines ->
-                    lines.map { it.trim().lowercase() }
-                        .filter { it.isNotEmpty() && !it.startsWith("#") }
-                        .toHashSet()
-                }
-            } catch (e: Exception) {
-                // Log the error and return an empty set if the file cannot be read.
-                xLogE("Error loading MangaDex DMCA UUIDs", e)
-                hashSetOf()
-            }
-        }
     }
 }

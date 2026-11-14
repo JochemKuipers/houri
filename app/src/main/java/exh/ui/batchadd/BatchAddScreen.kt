@@ -70,15 +70,7 @@ fun BatchAddScreen() {
                         modifier = Modifier.fillMaxWidth(),
                         placeholder = {
                             Text(
-                                text =
-                                // KMK -->
-                                stringResource(SYMR.strings.md_batch_add_description) +
-                                    if (screenModel.isHentaiEnabled) {
-                                        // KMK <--
-                                        stringResource(SYMR.strings.eh_batch_add_description)
-                                    } else {
-                                        ""
-                                    },
+                                text = stringResource(SYMR.strings.eh_batch_add_description),
                             )
                         },
                         keyboardOptions = KeyboardOptions(autoCorrectEnabled = false),

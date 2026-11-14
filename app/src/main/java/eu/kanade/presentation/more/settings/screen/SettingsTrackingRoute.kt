@@ -169,7 +169,6 @@ data object SettingsTrackingRoute : NavKey, SearchableRoute {
                 preferenceItems = (
                     trackerManager.trackers
                         .filter { it.getLoginMode() != eu.kanade.tachiyomi.data.track.core.TrackerLoginMode.ENHANCED_NOOP }
-                        .filter { it.id != eu.kanade.tachiyomi.data.track.core.TrackerId.MDLIST }
                         .map { tracker ->
                             Preference.PreferenceItem.TrackerPreference(
                                 tracker = tracker,

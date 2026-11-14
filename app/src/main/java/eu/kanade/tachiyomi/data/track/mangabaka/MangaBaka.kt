@@ -215,7 +215,7 @@ class MangaBaka(id: Long) : BaseTracker(id, "MangaBaka"), DeletableTracker {
     // on the difference: null is "this service could not tell", emptyList is "this service
     // answered and the series has no relations". They used to be the same thing - the mapping
     // ended in `entries.ifEmpty { null }` - so a series MangaBaka reports as unlinked was treated
-    // as unanswerable, and the provider moved on to another tracker (or the MangaDex fallback)
+    // as unanswerable, and the provider moved on to another tracker
     // and showed *its* relations under the MangaBaka-bound manga. That is how a title MangaBaka
     // lists with no relations at all could show a prequel or a source that has nothing to do
     // with it. Only a failed fetch returns null now.

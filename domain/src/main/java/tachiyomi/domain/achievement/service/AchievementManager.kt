@@ -471,7 +471,7 @@ class AchievementManager(
     }
 
     @Synchronized
-    fun onMangaFinished(mangaId: Long = 0L): List<String> {
+    fun onMangaFinished(mangaId: Long = 0L, countBacklogClear: Boolean = true): List<String> {
         if (!prefs.achievementsEnabled().get()) return emptyList()
         if (prefs.suppressOrganicForImport) return emptyList()
         // KMK --> Reached every time the reader lands on the last page of a series that is
@@ -492,14 +492,17 @@ class AchievementManager(
         // onBacklogClearedQuiet counts without notifying or re-evaluating the library gate.
         // No backlog recompute here either: finishing implies the entry was already started, so
         // it cannot be in the stale-unstarted set. refreshBacklog covers the other triggers.
+        // [countBacklogClear] is false for a series outside the library: the backlog is defined
+        // over library entries (see GetStaleUnstartedBacklog), so completing one that was never
+        // in the library is not a backlog entry coming off it.
         // KMK <--
-        unlocked += onBacklogClearedQuiet()
+        if (countBacklogClear) unlocked += onBacklogClearedQuiet()
         if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
         return unlocked
     }
 
     @Synchronized
-    fun onMangaCaughtUp(mangaId: Long = 0L): List<String> {
+    fun onMangaCaughtUp(mangaId: Long = 0L, countBacklogClear: Boolean = true): List<String> {
         if (!prefs.achievementsEnabled().get()) return emptyList()
         if (prefs.suppressOrganicForImport) return emptyList()
         // KMK --> Same claim as onMangaFinished. Kept in one shared set rather than two: a
@@ -515,8 +518,10 @@ class AchievementManager(
         if (count >= 20) tryUnlock("twenty_manga_caught_up", unlocked)
         if (count >= 50) tryUnlock("fifty_manga_caught_up", unlocked)
         // KMK --> Composed for the same reason as onMangaFinished: one event, one batch.
+        // [countBacklogClear]: see the twin gate in onMangaFinished - outside the library is
+        // not a backlog entry coming off.
         // KMK <--
-        unlocked += onBacklogClearedQuiet()
+        if (countBacklogClear) unlocked += onBacklogClearedQuiet()
         if (unlocked.isNotEmpty()) notifyIfNeeded(unlocked)
         return unlocked
     }
@@ -616,6 +621,18 @@ class AchievementManager(
         tryUnlock(id, out)
         if (out.isNotEmpty()) notifyIfNeeded(out)
         return out.isNotEmpty()
+    }
+
+    /**
+     * KMK --> Fan-out for a rotating tier that completed again while its card is on show after
+     * the initial unlock. No unlock record is written - the unlocked set is permanent and
+     * collection achievements count it - so this exists to run the toast/webhook path the
+     * first unlock took, and it honours the same onboarding hold [tryUnlock] applies.
+     */
+    fun notifyRotatingRecompletion(id: String) {
+        if (!prefs.achievementsEnabled().get()) return
+        if (prefs.unlocksHeldForOnboarding) return
+        notifyIfNeeded(listOf(id))
     }
 
     @Synchronized

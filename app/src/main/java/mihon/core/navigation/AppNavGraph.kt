@@ -14,7 +14,6 @@ import eu.kanade.presentation.more.settings.screen.SettingsDiscordRoute
 import eu.kanade.presentation.more.settings.screen.SettingsDownloadRoute
 import eu.kanade.presentation.more.settings.screen.SettingsEhRoute
 import eu.kanade.presentation.more.settings.screen.SettingsLibraryRoute
-import eu.kanade.presentation.more.settings.screen.SettingsMangadexRoute
 import eu.kanade.presentation.more.settings.screen.SettingsReaderRoute
 import eu.kanade.presentation.more.settings.screen.SettingsSearchScreen
 import eu.kanade.presentation.more.settings.screen.SettingsSecurityRoute
@@ -189,10 +188,6 @@ fun EntryProviderScope<NavKey>.appEntries() {
 
     entry<BatchAddRoute> {
         BatchAddScreen()
-    }
-
-    entry<MangaDexFollowsRoute> { route ->
-        exh.md.follows.MangaDexFollowsScreen(route.sourceId)
     }
 
     entry<PagePreviewRoute> { route ->
@@ -485,14 +480,16 @@ fun EntryProviderScope<NavKey>.appEntries() {
     entry<SettingsDataRoute> {
         SettingsDataRoute.Content()
     }
+    // KMK --> Discord (AM (CONNECTIONS))
+    entry<SettingsDiscordRoute> {
+        SettingsDiscordRoute.Content()
+    }
+    // KMK <--
     entry<SettingsSecurityRoute> {
         SettingsSecurityRoute.Content()
     }
     entry<SettingsEhRoute> {
         SettingsEhRoute.Content()
-    }
-    entry<SettingsMangadexRoute> {
-        SettingsMangadexRoute.Content()
     }
     entry<SettingsYakuyomiRoute> {
         SettingsYakuyomiRoute.Content()

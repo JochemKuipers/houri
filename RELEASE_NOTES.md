@@ -28,8 +28,20 @@ files moved. See .github/scripts/release_notes.py.
 - **Upscale category defaults**: choose per category whether its entries get upscaled (on, off, or no override), with the per-manga toggle still winning over everything.
 - **Prefetch pages ahead while reading**: the next pages are upscaled in the background before you reach them, memory-gated so low-RAM devices keep the page turn smooth.
 - **Bring your own upscaler**: import your own ONNX super-resolution models from storage — they are probed by the runtime before acceptance and join the fallback chain like the built-in ones.
+- **Discord RPC: log in with a token.** The Discord login screen's menu now takes a raw account token directly, validated against Discord and stored locally — a way in when the embedded-WebView login is flagged or fails.
 
 ### Improve
+
+- **Granular extension content warnings replace the single NSFW toggle.** Extensions can now be flagged Safe, Mixed or NSFW (an extension's sites can carry more than one label), and you choose which warnings you allow in Settings → Browse — several at once. The old "show NSFW sources" switch migrates to the new setting; everything you had enabled stays visible.
+- **MangaDex and the remaining delegated sources have been removed.** MangaDex (including its login, follows sync and recommendations) plus the NHentai, 8Muses, Pururin and LANraragi in-app sources are gone — only E-Hentai/ExHentai and the built-in Komga source remain. Library entries from the removed sources are kept and their metadata remains readable; MDList (MangaDex) tracker rows are cleaned up on upgrade. If you read from MangaDex, install the community MangaDex extension instead.
+- The discontinued Mullvad DNS-over-HTTPS option has been removed from the DNS-over-HTTPS picker; anyone on it is switched to the default automatically.
+
+### Fix
+
+- **Chapter blacklist entries now stay hidden.** The per-source chapter blacklist (hidden chapters) used to reset when you left a series and came back — the filters screen now persists its state, so blacklisted chapters stay blacklisted.
+- **Rotating achievements now announce themselves again.** The rotating achievement toast did not fire when a tier completed.
+- **The Discord RPC settings no longer crash the app on open.**
+- App: fixed a `NoSuchMethodError` crash (`HttpException.getCode`) that killed the whole app when an extension hit an HTTP error — the 1.25.3 package shipped an inconsistent build of that exception class; any build of the current sources resolves it.
 
 - **Upscaling no longer requires AI Translation**: the upscaler was rebuilt as its own pipeline (like the translation rewrite) — the no-MTL build now gets native model inference too, the mode gains an Auto option that falls back to simple resampling when a model or backend is unavailable, and existing per-manga opt-ins and the page cache carry over untouched.
 - **Real-CUGAN 3x model added**: the upscaler catalog now offers a 3x Real-CUGAN alongside 2x/4x options, with 3x/4x artifacts verified by hash.
@@ -51,3 +63,19 @@ files moved. See .github/scripts/release_notes.py.
 - Reader (WebGPU): the first pages of a chapter could "run away" from you while you scrolled down — right after opening, or whenever the display's size shifted (menu bar hide/unhide, foldable posture change, e-ink refresh), any page still loading silently re-sized its reserved space, moving the content under your finger without you scrolling. Loading pages now reserve a fixed height until they decode, so the document only ever moves when you move it.
 - Reader (WebGPU): a thin dark line could appear between two pages, rarely, while a neighbouring page was still decoding or just finished (the two painters that redraw those boundary rows each computed the boundary their own way, and the two computations could disagree by less than a pixel). Every boundary painter now shares one chained value, closing the last two ways the line could form.
 - Reader (WebGPU): a saved reading position could be re-applied over a chapter that had already changed (a chapter swap or a seek landing while the restore was still waiting for its page to decode). Restores are now invalidated the moment the chapter set changes.
+- **Books: paged and two-page reading modes now work.** The layout engine's script had a syntax error that silently disabled itself — and the rest of the reader's page plumbing with it — so picking Paged or Two-page did nothing and every book kept scrolling. All three modes behave now.
+- **Books: the reader options sheet scrolls again on first open.** The settings sheet could come up with dead scrolling after entering from the reader menu (worst on the first open of a session); closing and reopening it used to be the only cure.
+- **Books: the status line's selected colour now shows as selected immediately** instead of only after closing and reopening the settings, and the status line now paints a solid background so the book's text no longer bleeds through it.
+- **Books: the status line's chapter field now shows the section you are reading** (from the book's table of contents, falling back to the document's name) instead of repeating the novel's title everywhere.
+- **Books: corrupt downloaded chapters now explain themselves.** A download interrupted by a full disk or a dead storage provider used to surface as "Truncated ZIP file data" or "mmap failed: EINVAL (invalid argument)" every time you opened the chapter. Downloads are now verified the moment they finish — a broken archive is deleted and the download fails with a message telling you to try again, instead of leaving a permanently unreadable chapter behind.
+- Reader: a chapter whose very tall page gets cut into screen-sized chunks used to land you at the *end* of that page once the chunks finished loading — the classic webtoon "opened the chapter and I'm at the bottom" bug. Opening it now starts you at the top, where the page began.
+- Reader: WebGPU devices that black-screen without ever killing their GPU device (seen on PowerVR 32-bit phones) are now counted and remembered, and the reader falls back to the standard viewer on later launches instead of opening the same black screen again.
+- App: installing extensions no longer crashes the app on Android 15+ after the install service's daily background-data budget runs out — the service now degrades gracefully instead of taking the process down.
+- Library: completing a series that is not in your library no longer counts toward the "clear the backlog" achievements — the backlog is your shelved pile, so only shelved series can clear it.
+
+### Improve
+
+- Tapping the version entry on the About screen now copies the full device info block (the same one crash reports lead with), not just the version line — bug reports finally arrive with a device to reproduce on.
+- Extension update errors are now only recorded for HTTP 401 and 404 — the statuses that mean the source needs your attention. The rest (Cloudflare challenges, rate limits, server hiccups) are logged but no longer flood the errors screen, and any recorded HTTP error's message tells you to check the site in WebView.
+- Migration: **"Fetch chapters in manual search" is now off by default** — each result's latest-chapter lookup is opt-in traffic, and slow sources no longer leave every result card spinning.
+- Books: turning pages now reports what the layout engine actually answered, so a "pages don't turn" report can be diagnosed from the log.

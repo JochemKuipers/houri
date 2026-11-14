@@ -235,8 +235,6 @@ fun MigrateSourceSearchScreen(
                 shouldShowSavingButton = false,
                 // KMK <--
                 onSavedSearchPress = {},
-                openMangaDexRandom = null,
-                openMangaDexFollows = null,
                 // SY <--
             )
         }

@@ -38,6 +38,13 @@ import java.io.InputStream
 class ArchiveReader(pfd: ParcelFileDescriptor) : Closeable {
 
     val size = pfd.statSize
+    // KMK --> A 0-byte archive maps nothing: Os.mmap answers EINVAL for a zero length, which
+    // surfaced as the inscrutable "mmap failed: EINVAL (invalid argument)" on corrupt
+    // downloads (an interrupted SAF write can commit an empty .cbz). Fail with what actually
+    // happened instead. KMK <--
+    init {
+        require(size > 0L) { "Archive is empty (0 bytes) - the file was not written completely" }
+    }
     val address = Os.mmap(0, size, OsConstants.PROT_READ, OsConstants.MAP_PRIVATE, pfd.fileDescriptor, 0)
 
     /**

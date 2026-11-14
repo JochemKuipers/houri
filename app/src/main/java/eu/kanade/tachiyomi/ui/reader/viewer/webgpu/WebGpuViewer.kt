@@ -595,6 +595,18 @@ open class WebGpuViewer(
      */
     private val sessionDeviceLosses = java.util.concurrent.atomic.AtomicInteger(0)
 
+    /**
+     * The renderer's swapchain-park count at viewer construction. A park is the black-screen
+     * shape where the device is alive but nothing reaches the display (PowerVR field reports) -
+     * `isAvailable` stays true through it, so without this snapshot a session that spent its
+     * whole life parked would close looking healthy and strike nothing. Only parks that
+     * happened while this viewer was open count against it. Read from the state's renderer
+     * INSTANCE - the park count is per-renderer, not a companion member like `isAvailable`.
+     */
+    private val surfaceParksAtStart = runCatching {
+        pager.state.renderer.surfaceParkCount
+    }.getOrDefault(0)
+
     private val deviceLostListener =
         ca.mpreg.webgpuviewer.renderer.WebGpuRenderer.Companion.DeviceLostListener { _, _ ->
             if (isDestroyed) return@DeviceLostListener
@@ -948,8 +960,11 @@ open class WebGpuViewer(
         // the check reads. A session that closes with the renderer still dead is the reported
         // black-screen shape (device lost, every recovery given up, reader unusable until the
         // process is killed); a session that thrashed through repeated losses is the same
-        // defect with recoveries in between. Consecutive strikes are what flip the WebGPU
-        // provider off - see WebGpuHealth for why that beats another recovery attempt.
+        // defect with recoveries in between; and a session that *parked* is the PowerVR
+        // shape - device alive, tiles uploading, swapchain Error on every frame, screen black
+        // - which never deadens the device and used to close as "healthy". Consecutive
+        // strikes are what flip the WebGPU provider off - see WebGpuHealth for why that
+        // beats another recovery attempt.
         // The isFinishing gate keeps the system's own background-kill from striking: a phone
         // drops the GPU device on backgrounding as a matter of course, and an activity the OS
         // destroyed mid-background is not a session the user gave up on. Only a deliberate
@@ -957,11 +972,17 @@ open class WebGpuViewer(
         try {
             val deadAtExit = !ca.mpreg.webgpuviewer.renderer.WebGpuRenderer.isAvailable &&
                 activity.isFinishing
-            if (deadAtExit || sessionDeviceLosses.get() >= WebGpuHealth.SESSION_LOSS_STRIKE_THRESHOLD) {
+            val parkedThisSession = runCatching {
+                pager.state.renderer.surfaceParkCount > surfaceParksAtStart
+            }.getOrDefault(false)
+            if (deadAtExit || parkedThisSession ||
+                sessionDeviceLosses.get() >= WebGpuHealth.SESSION_LOSS_STRIKE_THRESHOLD
+            ) {
                 WebGpuHealth.recordStrike(activity)
                 logcat(LogPriority.WARN) {
                     "WebGPU session ended degraded (deadAtExit=$deadAtExit, " +
-                        "losses=${sessionDeviceLosses.get()}) - strike recorded"
+                        "parked=$parkedThisSession, losses=${sessionDeviceLosses.get()}) - " +
+                        "strike recorded"
                 }
             }
         } catch (_: Exception) {}

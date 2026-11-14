@@ -121,19 +121,26 @@ class ReaderAchievementHandler(
         mangaId: Long = 0L,
         totalChapters: Long = 0L,
         readingModeFlag: Int = ReadingMode.DEFAULT.flagValue,
+        inLibrary: Boolean = true,
     ) {
         // KMK --> Both branches count a cleared backlog entry themselves: onMangaFinished and
         // onMangaCaughtUp each end in onBacklogClearedQuiet(). Calling onBacklogCleared(1) here
         // as well used to be *how* the count happened; leaving it in after that refactor
         // incremented the lifetime counter twice per completed manga and re-created the second
         // toast batch the composition was meant to eliminate.
+        // [inLibrary] feeds both branches' backlog gates: the backlog is a library population
+        // (GetStaleUnstartedBacklog), so a series the user never shelved does not clear it -
+        // completing one used to bank a "backlog cleared" for free.
+        // KMK <--
         step("manga completion") {
             if (achievementManager.isPermanentStatus(status)) {
-                achievementManager.onMangaFinished(mangaId)
+                achievementManager.onMangaFinished(mangaId, countBacklogClear = inLibrary)
             } else {
-                achievementManager.onMangaCaughtUp(mangaId)
-                mark("rotating_daily_backlog_clear_1")
-                mark("rotating_weekly_extra_4")
+                achievementManager.onMangaCaughtUp(mangaId, countBacklogClear = inLibrary)
+                if (inLibrary) {
+                    mark("rotating_daily_backlog_clear_1")
+                    mark("rotating_weekly_extra_4")
+                }
             }
         }
         // KMK --> Both completion paths count: the description is "complete 7 manga in 7 days",

@@ -9,6 +9,7 @@ import eu.kanade.tachiyomi.util.storage.DiskUtil.NOMEDIA_FILE
 import logcat.LogPriority
 import mihon.core.archive.CbzCrypto
 import mihon.core.archive.ZipWriter
+import mihon.core.archive.archiveReader
 import okhttp3.Response
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.system.ImageUtil
@@ -16,6 +17,7 @@ import tachiyomi.core.common.util.system.logcat
 import tachiyomi.core.metadata.comicinfo.COMIC_INFO_FILE
 import tachiyomi.domain.download.service.DownloadPreferences
 import tachiyomi.i18n.MR
+import tachiyomi.i18n.kmk.KMR
 import java.io.File
 import java.util.Locale
 
@@ -132,7 +134,39 @@ internal class DownloadFileOps(
                 writer.write(file)
             }
         }
-        zip.renameTo("$dirname.cbz")
+        // KMK --> The rename is the commit point and its result used to be ignored: on a
+        // provider that refuses it (SAF quirks, storage full), the chapter was left as
+        // ".cbz_tmp" with no ".cbz" beside it, and opening it later fell through to an empty
+        // page list with no hint why. Fail the download instead - the retry can finalize it.
+        // KMK <--
+        val renamed = zip.renameTo("$dirname.cbz")
+        if (!renamed) {
+            throw Exception("Failed to finalize $dirname.cbz (rename failed) - the storage may be full or busy")
+        }
+        // KMK --> Validate the committed archive before the tmp dir is deleted. The zip writer
+        // can complete while the underlying storage silently drops bytes (SAF, SD cards) or the
+        // process dies mid-write; the result was a .cbz that failed to open on every read with
+        // "Truncated ZIP file data" / "mmap failed: EINVAL" forever - the only recovery being
+        // delete + re-download by hand. An index pass over the archive the moment it is written
+        // costs one cheap seek-skip walk and guarantees the file that lands is readable; when it
+        // is not, delete it (it would block the rename on retry) and fail the download so the
+        // user is told to try again rather than owning a permanently broken chapter.
+        // KMK <--
+        val finalFile = mangaDir.findFile("$dirname.cbz")
+        try {
+            finalFile?.archiveReader(context).use { reader ->
+                if (reader == null || reader.size <= 0L) {
+                    throw Exception("Archived CBZ is empty")
+                }
+            }
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e) { "Archived CBZ failed validation: $dirname" }
+            finalFile?.delete()
+            throw Exception(
+                context.stringResource(KMR.strings.download_archive_corrupt_error, e.message ?: "unreadable archive"),
+                e,
+            )
+        }
         tmpDir.delete()
     }
 }

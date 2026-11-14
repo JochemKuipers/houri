@@ -201,7 +201,7 @@ body { height: 100% !important; overflow: hidden !important; column-fill: auto !
             return {
               n: self.screens,
               l: self.forwardSign < 0 ? 1 : 0,
-              w: self.body ? (window.getComputedStyle(self.body).writingMode || '').indexOf('vertical') === 0 ? 1 : 0
+              w: self.body ? (window.getComputedStyle(self.body).writingMode || '').indexOf('vertical') === 0 ? 1 : 0 : 0
             };
           };
           self.resettle = function () {

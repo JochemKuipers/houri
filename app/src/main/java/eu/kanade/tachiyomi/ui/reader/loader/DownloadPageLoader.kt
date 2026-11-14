@@ -10,9 +10,14 @@ import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.model.Page
 import eu.kanade.tachiyomi.ui.reader.model.ReaderChapter
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
+import kotlinx.coroutines.CancellationException
+import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import mihon.core.archive.archiveReader
+import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.manga.model.Manga
+import tachiyomi.i18n.kmk.KMR
 
 /**
  * Loader used to load a chapter from the downloaded chapters.
@@ -55,7 +60,22 @@ internal class DownloadPageLoader(
     }
 
     private suspend fun getPagesFromArchive(file: UniFile): List<ReaderPage> {
-        val loader = ArchivePageLoader(file.archiveReader(context)).also { archivePageLoader = it }
+        // KMK --> A corrupt download (truncated zip, empty file) used to surface libarchive's
+        // native errors verbatim - "Truncated ZIP file data", "mmap failed: EINVAL" - as the
+        // chapter's error state, with no hint that the fix is a re-download. Translate the open
+        // failure into one that names the remedy; the underlying exception rides along.
+        // KMK <--
+        val loader = try {
+            ArchivePageLoader(file.archiveReader(context))
+        } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            logcat(LogPriority.ERROR, e) { "Downloaded chapter archive failed to open: ${file.filePath ?: file.uri}" }
+            throw Exception(
+                context.stringResource(KMR.strings.download_archive_unreadable_error, e.message ?: "unreadable archive"),
+                e,
+            )
+        }
+        archivePageLoader = loader
         return loader.getPages()
     }
 

@@ -7,8 +7,6 @@ import eu.kanade.domain.source.interactor.GetIncognitoState
 import eu.kanade.domain.track.model.toDbTrack
 import eu.kanade.domain.track.service.TrackPreferences
 import eu.kanade.tachiyomi.data.track.TrackerManager
-import eu.kanade.tachiyomi.data.track.mdlist.MdList
-import exh.md.utils.FollowStatus
 import exh.source.isMergedSourceId
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
@@ -90,10 +88,7 @@ class StartRereading(
             if (
                 service == null ||
                 !service.isLoggedIn ||
-                service.getRereadingStatus() == -1L ||
-                // SY -->
-                (service is MdList && track.status == FollowStatus.UNFOLLOWED.long)
-                // SY <--
+                service.getRereadingStatus() == -1L
             ) {
                 return@forEach
             }

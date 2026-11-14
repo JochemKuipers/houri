@@ -1228,7 +1228,16 @@ class ReaderActivity : BaseActivity() {
                 menuVisible = state.menuVisible,
                 showWhenHidden = showWhenHidden,
                 progressPct = bookViewer?.scrollFraction?.let { (it * 100).toInt().coerceIn(0, 100) },
-                chapterName = state.currentChapter?.chapter?.name,
+                // KMK --> The status line's chapter field follows the *section* on screen while a
+                // book is open — the library chapter's name is the novel's title, which is what
+                // every book was showing no matter where in it the reader was. Falls back to the
+                // chapter name until the viewer has resolved one (pre-first-document).
+                // KMK <--
+                chapterName = if (isTextChapter) {
+                    bookViewer?.currentSectionName ?: state.currentChapter?.chapter?.name
+                } else {
+                    state.currentChapter?.chapter?.name
+                },
             )
         }
         // KMK <--

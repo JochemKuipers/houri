@@ -35,7 +35,6 @@ import eu.kanade.tachiyomi.extension.ExtensionManager
 import eu.kanade.tachiyomi.extension.reportingSourceLoadErrors
 import eu.kanade.tachiyomi.source.model.FilterList
 import eu.kanade.tachiyomi.source.online.MetadataSource
-import eu.kanade.tachiyomi.source.online.all.MangaDex
 import eu.kanade.tachiyomi.util.retainCovers
 import exh.metadata.metadata.RaisedSearchMetadata
 import exh.source.EH_PACKAGE
@@ -270,7 +269,7 @@ open class BrowseSourceViewModel(
                     // now its failures stopped at this screen's error state: the extensions page
                     // never learned why a source returned nothing until a chapter was read or
                     // downloaded. Wrapping here covers every [createSourcePagingSource] override
-                    // too (MangaDex follows, recommendations).
+                    // too (recommendations).
                     .reportingSourceLoadErrors(source)
                 // KMK <--
                 // SY <--
@@ -713,13 +712,5 @@ open class BrowseSourceViewModel(
     ) = savedSearchController.saveSearch(name)
 
     fun deleteSearch(savedSearchId: Long) = savedSearchController.deleteSearch(savedSearchId)
-
-    fun onMangaDexRandom(onRandomFound: (String) -> Unit) {
-        viewModelScope.launchIO {
-            val random = source.getMainSource<MangaDex>()?.fetchRandomMangaUrl()
-                ?: return@launchIO
-            onRandomFound(random)
-        }
-    }
     // EXH <--
 }

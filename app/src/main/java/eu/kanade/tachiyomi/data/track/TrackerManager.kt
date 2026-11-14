@@ -19,7 +19,6 @@ import eu.kanade.tachiyomi.data.track.kitsu.Kitsu
 import eu.kanade.tachiyomi.data.track.komga.Komga
 import eu.kanade.tachiyomi.data.track.mangabaka.MangaBaka
 import eu.kanade.tachiyomi.data.track.mangaupdates.MangaUpdates
-import eu.kanade.tachiyomi.data.track.mdlist.MdList
 import eu.kanade.tachiyomi.data.track.myanimelist.MyAnimeList
 import eu.kanade.tachiyomi.data.track.shikimori.Shikimori
 import eu.kanade.tachiyomi.data.track.suwayomi.Suwayomi
@@ -38,15 +37,12 @@ class TrackerManager {
         const val ANIMEPLANET = TrackerId.ANIMEPLANET
         const val SUWAYOMI = TrackerId.SUWAYOMI
         const val COMICK = TrackerId.COMICK
-        const val MDLIST = TrackerId.MDLIST
         const val MYANIMELIST = TrackerId.MYANIMELIST
         const val SHIKIMORI = TrackerId.SHIKIMORI
         const val BANGUMI = TrackerId.BANGUMI
         const val KOMGA = TrackerId.KOMGA
         const val MANGA_UPDATES = TrackerId.MANGA_UPDATES
     }
-
-    val mdList = MdList(TrackerId.MDLIST)
 
     val myAnimeList = MyAnimeList(TrackerId.MYANIMELIST)
     val aniList = Anilist(TrackerId.ANILIST)
@@ -63,7 +59,7 @@ class TrackerManager {
     val comicK = ComicK(TrackerId.COMICK)
 
     val trackers: List<Tracker> =
-        listOf(mdList, myAnimeList, aniList, kitsu, shikimori, bangumi, komga, mangaUpdates, kavita, suwayomi, hikka, mangaBaka, animePlanet, comicK)
+        listOf(myAnimeList, aniList, kitsu, shikimori, bangumi, komga, mangaUpdates, kavita, suwayomi, hikka, mangaBaka, animePlanet, comicK)
 
     init {
         val ids = trackers.map { it.id }

@@ -60,3 +60,25 @@ inline fun <reified T : Enum<T>> PreferenceStore.getEnum(
         },
     )
 }
+
+inline fun <reified T : Enum<T>> PreferenceStore.getEnumSet(
+    key: String,
+    defaultValue: Set<T>,
+): Preference<Set<T>> {
+    return getObjectFromString(
+        key = key,
+        defaultValue = defaultValue,
+        serializer = { set -> set.joinToString(separator = ",") { it.name } },
+        deserializer = { string ->
+            string.split(",")
+                .filter { it.isNotBlank() }
+                .mapNotNull { name -> enumValueOfOrNull<T>(name) }
+                .toSet()
+        },
+    )
+}
+
+@PublishedApi
+internal inline fun <reified T : Enum<T>> enumValueOfOrNull(name: String): T? {
+    return T::class.java.enumConstants.firstOrNull { it.name == name }
+}

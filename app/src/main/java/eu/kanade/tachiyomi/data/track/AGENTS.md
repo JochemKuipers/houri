@@ -1,7 +1,7 @@
 # data/track/ — Tracker Services
 
-Built-in tracking services (14+: MyAnimeList, AniList, Kitsu, MangaUpdates, Shikimori, Bangumi,
-Anime-Planet, ComicK, MangaBaka, Hikka, Kavita, Komga, Suwayomi, MDList). Adding/removing a tracker
+Built-in tracking services (13: MyAnimeList, AniList, Kitsu, MangaUpdates, Shikimori, Bangumi,
+Anime-Planet, ComicK, MangaBaka, Hikka, Kavita, Komga, Suwayomi). Adding/removing a tracker
 is a 3-step task with zero UI edits — the authoritative procedure lives in `core/README.md`
 (implementation: `template/TrackerTemplate.kt`). This file is an index, not a duplicate.
 

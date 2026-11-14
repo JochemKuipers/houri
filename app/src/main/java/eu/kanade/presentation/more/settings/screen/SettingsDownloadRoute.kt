@@ -126,7 +126,7 @@ data object SettingsDownloadRoute : NavKey, SearchableRoute {
     private fun getExcludedCategoriesPreference(
         downloadPreferences: DownloadPreferences,
         categories: () -> List<Category>,
-    ): Preference.PreferenceItem.MultiSelectListPreference {
+    ): Preference.PreferenceItem.MultiSelectListPreference<String> {
         return Preference.PreferenceItem.MultiSelectListPreference(
             preference = downloadPreferences.removeExcludeCategories(),
             // KMK -->

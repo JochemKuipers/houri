@@ -8,8 +8,6 @@ import eu.kanade.domain.track.service.DelayedTrackingUpdateJob
 import eu.kanade.domain.track.store.DelayedTrackingStore
 import eu.kanade.tachiyomi.data.track.TrackStatus
 import eu.kanade.tachiyomi.data.track.TrackerManager
-import eu.kanade.tachiyomi.data.track.mdlist.MdList
-import exh.md.utils.FollowStatus
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import logcat.LogPriority
@@ -73,8 +71,7 @@ class TrackChapter(
                 if (
                     service == null ||
                     !service.isLoggedIn ||
-                    (chapterNumber <= track.lastChapterRead && !isRereadingTrack) ||
-                    (service is MdList && track.status == FollowStatus.UNFOLLOWED.long)
+                    (chapterNumber <= track.lastChapterRead && !isRereadingTrack)
                 ) {
                     return@mapNotNull null
                 }

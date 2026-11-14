@@ -21,6 +21,7 @@ import eu.kanade.tachiyomi.util.system.notificationBuilder
 import exh.log.xLogD
 import exh.log.xLogE
 import exh.log.xLogI
+import exh.log.xLogW
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.i18n.MR
 
@@ -44,17 +45,65 @@ class ExtensionInstallService : Service() {
             setContentTitle(stringResource(MR.strings.ext_install_service_notif))
             setProgress(100, 100, true)
         }.build()
-        // KMK -->
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // KMK --> Android 15+ budgets every dataSync foreground service at ~6 hours per 24; once
+        // the budget is exhausted, startForeground throws ForegroundServiceStartNotAllowed
+        // Exception ("Time limit already exhausted for foreground service type dataSync") and
+        // an exception thrown out of onCreate kills the whole process - a crash loop, because
+        // the auto-update worker retries the install on the next run. Degrade instead of
+        // crashing: retry the promotion as a shortService (no 24-hour budget; ~3-minute cap,
+        // answered by onTimeout), and if even that is refused continue as a plain background
+        // service. In the degraded cases the system may tear the install down mid-confirmation,
+        // but the package session is abandoned cleanly by the platform - strictly better than
+        // killing the app.
+        // KMK <--
+        startForegroundCompat(notification)
+    }
+
+    // KMK --> See onCreate. The ladder: dataSync, then shortService (API 34+), then none.
+    // Catching Exception rather than ForegroundServiceStartNotAllowedException directly keeps
+    // the class reference off API < 31 builds of this code path; every failure mode has the
+    // same answer, so specificity would buy nothing. KMK <--
+    private fun startForegroundCompat(notification: android.app.Notification) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            startForeground(Notifications.ID_EXTENSION_INSTALLER, notification)
+            return
+        }
+        try {
             startForeground(
                 Notifications.ID_EXTENSION_INSTALLER,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC,
             )
-        } else {
-            // KMK <--
-            startForeground(Notifications.ID_EXTENSION_INSTALLER, notification)
+            return
+        } catch (e: Exception) {
+            xLogE(
+                "[ExtInstall] dataSync foreground refused (${e.javaClass.simpleName}: ${e.message}) - retrying as shortService",
+                e,
+            )
         }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            try {
+                startForeground(
+                    Notifications.ID_EXTENSION_INSTALLER,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE,
+                )
+                return
+            } catch (e: Exception) {
+                xLogE(
+                    "[ExtInstall] shortService foreground refused (${e.javaClass.simpleName}: ${e.message}) - continuing without foreground",
+                    e,
+                )
+            }
+        }
+    }
+
+    override fun onTimeout(flags: Int) {
+        // shortService calls this instead of killing the process when its ~3-minute cap runs
+        // out. The staged install sessions are abandoned by the platform on stopSelf; the
+        // pending user-confirmation dialog, if any, is simply dismissed.
+        xLogW("[ExtInstall] shortService time cap reached - stopping install service")
+        stopSelf()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {

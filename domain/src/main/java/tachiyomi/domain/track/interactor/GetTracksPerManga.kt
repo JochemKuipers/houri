@@ -9,14 +9,13 @@ import tachiyomi.domain.track.repository.TrackRepository
 /**
  * Every track row in the database, grouped by manga id.
  *
- * This used to drop any row that was not "followed" on tracker 60 (MangaDex) - a restriction
- * MDLst applies to *its own* source listing. Nothing else consumed it, so the library's
- * tracking filter - both the blanket "tracked / untracked" tri-state and the per-tracker
- * tri-states - was handed an effectively empty map for anyone tracking on MAL, AniList, Kitsu
- * or any other service, and reported every entry as untracked.
+ * This used to drop any row that was not "followed" on a retired tracker (MangaDex) - a
+ * restriction that tracker applied to *its own* source listing. Nothing else consumed it, so the
+ * library's tracking filter - both the blanket "tracked / untracked" tri-state and the
+ * per-tracker tri-states - was handed an effectively empty map for anyone tracking on MAL,
+ * AniList, Kitsu or any other service, and reported every entry as untracked.
  *
  * Being tracked is a property of whether a track row exists, so that is what this returns.
- * [IsTrackFollowed] stays available for callers that genuinely want the MDLst semantics.
  */
 @Inject
 class GetTracksPerManga(

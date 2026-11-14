@@ -21,8 +21,6 @@ import androidx.work.workDataOf
 import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.domain.source.service.SourcePreferences
 import eu.kanade.domain.sync.SyncPreferences
-import eu.kanade.domain.track.model.toDbTrack
-import eu.kanade.domain.track.model.toDomainTrack
 import eu.kanade.tachiyomi.data.LibraryUpdateStatus
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.event.AppEvent
@@ -30,19 +28,15 @@ import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
 import eu.kanade.tachiyomi.data.track.TrackStatus
 import eu.kanade.tachiyomi.data.track.TrackerManager
-import eu.kanade.tachiyomi.data.track.core.TrackerId
+import eu.kanade.tachiyomi.network.HttpException
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.util.system.isConnectedToWifi
 import eu.kanade.tachiyomi.util.system.isRunning
 import eu.kanade.tachiyomi.util.system.setForegroundSafely
 import eu.kanade.tachiyomi.util.system.workManager
-import exh.log.xLogE
-import exh.md.utils.FollowStatus
-import exh.md.utils.MdUtil
 import exh.source.LIBRARY_UPDATE_EXCLUDED_SOURCES
 import exh.source.isMergedSourceId
-import exh.source.mangaDexSourceIds
 import exh.util.WorkerUtil
 import exh.util.nullIfBlank
 import kotlinx.coroutines.CancellationException
@@ -83,17 +77,13 @@ import tachiyomi.domain.libraryUpdateError.model.LibraryUpdateError
 import tachiyomi.domain.libraryUpdateErrorMessage.interactor.InsertLibraryUpdateErrorMessages
 import tachiyomi.domain.libraryUpdateErrorMessage.model.LibraryUpdateErrorMessage
 import tachiyomi.domain.manga.interactor.FetchInterval
-import tachiyomi.domain.manga.interactor.GetFavorites
 import tachiyomi.domain.manga.interactor.GetLibraryManga
 import tachiyomi.domain.manga.interactor.GetManga
 import tachiyomi.domain.manga.interactor.GetMergedMangaForDownloading
-import tachiyomi.domain.manga.interactor.InsertFlatMetadata
-import tachiyomi.domain.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.source.model.SourceNotInstalledException
 import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.domain.track.interactor.GetTracks
-import tachiyomi.domain.track.interactor.InsertTrack
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
 import java.time.Instant
@@ -124,14 +114,9 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
 
     // SY -->
     private val updateManga: UpdateManga = globalAppGraph.updateManga
-    private val getFavorites: GetFavorites = globalAppGraph.getFavorites
-    private val insertFlatMetadata: InsertFlatMetadata = globalAppGraph.insertFlatMetadata
-    private val networkToLocalManga: NetworkToLocalManga = globalAppGraph.networkToLocalManga
     private val getMergedMangaForDownloading: GetMergedMangaForDownloading = globalAppGraph.getMergedMangaForDownloading
     private val getTracks: GetTracks = globalAppGraph.getTracks
-    private val insertTrack: InsertTrack = globalAppGraph.insertTrack
     private val trackerManager: TrackerManager = globalAppGraph.trackerManager
-    private val mdList = trackerManager.mdList
     // SY <--
 
     private val notifier = LibraryUpdateNotifier(context)
@@ -187,10 +172,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
             try {
                 when (target) {
                     Target.CHAPTERS -> updateChapterList()
-                    // SY -->
-                    Target.SYNC_FOLLOWS -> syncFollows()
-                    Target.PUSH_FAVORITES -> pushFavorites()
-                    // SY <--
                 }
                 Result.success()
             } catch (e: Exception) {
@@ -455,9 +436,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
         val newUpdates = CopyOnWriteArrayList<Pair<Manga, Array<Chapter>>>()
         val failedUpdates = CopyOnWriteArrayList<Pair<Manga, String?>>()
         val hasDownloads = AtomicBoolean(false)
-        // SY -->
-        val mdlistLogged = mdList.isLoggedIn
-        // SY <--
 
         val fetchWindow = fetchInterval.getWindow(ZonedDateTime.now())
 
@@ -468,32 +446,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                 // SY <--
                 .values
                 .toList()
-            groups
-                .map { mangaInSource ->
-                    async {
-                        if (
-                            mdlistLogged &&
-                            mangaInSource.firstOrNull()
-                                ?.let { it.manga.source in mangaDexSourceIds } == true
-                        ) {
-                            mangaInSource.forEach { (manga) ->
-                                try {
-                                    val tracks = getTracks.await(manga.id)
-                                    if (tracks.isEmpty() ||
-                                        tracks.none { it.trackerId == TrackerId.MDLIST }
-                                    ) {
-                                        val track = mdList.createInitialTracker(manga)
-                                        insertTrack.await(mdList.refresh(track).toDomainTrack(false)!!)
-                                    }
-                                } catch (e: Exception) {
-                                    if (e is CancellationException) throw e
-                                    xLogE("Error adding initial track for ${manga.title}", e)
-                                }
-                            }
-                        }
-                    }
-                }
-                .awaitAll()
             groups
                 .flatten()
                 .map { libraryManga ->
@@ -531,19 +483,40 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
                                     }
                                     clearErrorFromDB(mangaId = manga.id)
                                 } catch (e: Throwable) {
-                                    val errorMessage = when (e) {
-                                        is NoChaptersException ->
-                                            context.stringResource(MR.strings.no_chapters_error)
-                                        // failedUpdates will already have the source,
-                                        // don't need to copy it into the message
-                                        is SourceNotInstalledException -> context.stringResource(
-                                            MR.strings.loader_not_implemented_error,
-                                        )
+                                    // KMK --> Only 401 (authentication revoked) and 404 (entry
+                                    // gone) are worth surfacing as update errors: the other
+                                    // statuses are anti-bot / rate-limit / transient-server
+                                    // noise that floods the errors screen and clears only when
+                                    // some later update happens to succeed. Those still log for
+                                    // diagnosis; they no longer count the update as failed.
+                                    // A recorded HTTP error uses the exception_http string, whose
+                                    // own text tells the user to check the site in WebView.
+                                    // KMK <--
+                                    if (e is HttpException && e.code !in RECORDED_HTTP_ERROR_CODES) {
+                                        logcat(LogPriority.WARN) {
+                                            "Library update: ${manga.title} failed with HTTP " +
+                                                "${e.code} - not recorded as an update error"
+                                        }
+                                    } else {
+                                        val errorMessage = when (e) {
+                                            is NoChaptersException ->
+                                                context.stringResource(MR.strings.no_chapters_error)
+                                            // failedUpdates will already have the source,
+                                            // don't need to copy it into the message
+                                            is SourceNotInstalledException -> context.stringResource(
+                                                MR.strings.loader_not_implemented_error,
+                                            )
 
-                                        else -> e.message
+                                            is HttpException -> context.stringResource(
+                                                MR.strings.exception_http,
+                                                e.code,
+                                            )
+
+                                            else -> e.message
+                                        }
+                                        writeErrorToDB(manga to errorMessage)
+                                        failedUpdates.add(manga to errorMessage)
                                     }
-                                    writeErrorToDB(manga to errorMessage)
-                                    failedUpdates.add(manga to errorMessage)
                                 }
                             }
                         }
@@ -620,111 +593,6 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
 
         return if (update.manga.favorite) update.newChapters else emptyList()
     }
-
-    // SY -->
-    /**
-     * filter all follows from Mangadex and only add reading or rereading manga to library
-     */
-    private suspend fun syncFollows() = coroutineScope {
-        val preferences = globalAppGraph.sourcePreferences
-        val count = AtomicInt(0)
-        val mangaDex = MdUtil.getEnabledMangaDex(preferences, sourceManager = sourceManager)
-            ?: return@coroutineScope
-        val syncFollowStatusInts = preferences.mangadexSyncToLibraryIndexes().get().map { it.toInt() }
-
-        val follows = mangaDex.fetchAllFollows()
-            .filter { (_, metadata) ->
-                syncFollowStatusInts.contains(metadata.followStatus)
-            }
-        val size = follows.size
-        val semaphore = Semaphore(3)
-        follows
-            .map { (networkManga, metadata) ->
-                async {
-                    semaphore.withPermit {
-                        ensureActive()
-
-                        val c = count.incrementAndFetch()
-                        notifier.showProgressNotification(
-                            listOf(Manga.create().copy(ogTitle = networkManga.title)),
-                            c,
-                            size,
-                        )
-
-                        var dbManga = getManga.await(networkManga.url, mangaDex.id)
-
-                        if (dbManga == null) {
-                            dbManga = networkToLocalManga(
-                                Manga.create().copy(
-                                    url = networkManga.url,
-                                    ogTitle = networkManga.title,
-                                    source = mangaDex.id,
-                                    favorite = true,
-                                    dateAdded = System.currentTimeMillis(),
-                                ),
-                            )
-                        } else if (!dbManga.favorite) {
-                            updateManga.awaitUpdateFavorite(dbManga.id, true)
-                        }
-
-                        updateMangaFromRemote(
-                            manga = dbManga,
-                            // KMK -->
-                            // Update cover & fetchInterval
-                            manualFetch = true,
-                            // KMK <--
-                        )
-
-                        metadata.mangaId = dbManga.id
-                        insertFlatMetadata.await(metadata)
-                    }
-                }
-            }
-            .awaitAll()
-
-        notifier.cancelProgressNotification()
-    }
-
-    /**
-     * Method that updates the all mangas which are not tracked as "reading" on mangadex
-     */
-    private suspend fun pushFavorites() = coroutineScope {
-        val count = AtomicInt(0)
-        val listManga = getFavorites.await().filter { it.source in mangaDexSourceIds }
-
-        // filter all follows from Mangadex and only add reading or rereading manga to library
-        if (mdList.isLoggedIn) {
-            val semaphore = Semaphore(3)
-            listManga
-                .map { manga ->
-                    async {
-                        semaphore.withPermit {
-                            ensureActive()
-
-                            val c = count.incrementAndFetch()
-                            notifier.showProgressNotification(listOf(manga), c, listManga.size)
-
-                            // Get this manga's trackers from the database
-                            val dbTracks = getTracks.await(manga.id)
-
-                            var tracker = dbTracks.firstOrNull { it.trackerId == TrackerId.MDLIST }
-                                ?: mdList.createInitialTracker(manga).toDomainTrack(idRequired = false)
-
-                            if (tracker?.status == FollowStatus.UNFOLLOWED.long) {
-                                tracker = tracker.copy(
-                                    status = FollowStatus.READING.long,
-                                )
-                                val updatedTrack = mdList.update(tracker.toDbTrack())
-                                insertTrack.await(updatedTrack.toDomainTrack(false)!!)
-                            }
-                        }
-                    }
-                }
-                .awaitAll()
-        }
-
-        notifier.cancelProgressNotification()
-    }
     // SY <--
 
     private suspend fun withUpdateNotification(
@@ -793,18 +661,19 @@ class LibraryUpdateJob(private val context: Context, workerParams: WorkerParamet
      */
     enum class Target {
         CHAPTERS, // Manga chapters
-
-        // SY -->
-        SYNC_FOLLOWS, // MangaDex specific, pull mangadex manga in reading, rereading
-
-        PUSH_FAVORITES, // MangaDex specific, push mangadex manga to mangadex
-        // SY <--
     }
 
     companion object {
         private const val TAG = "LibraryUpdate"
         private const val WORK_NAME_AUTO = "LibraryUpdate-auto"
         private const val WORK_NAME_MANUAL = "LibraryUpdate-manual"
+
+        // KMK --> HTTP statuses recorded as library-update errors. Everything else
+        // (Cloudflare challenges, rate limits, 5xx) logs but does not surface - see the
+        // catch block in the update loop. 401 = the source wants authentication, 404 =
+        // the entry vanished from the source; both are things only the user can resolve.
+        private val RECORDED_HTTP_ERROR_CODES = setOf(401, 404)
+        // KMK <--
 
         private const val ERROR_LOG_HELP_URL = "https://komikku-app.github.io/docs/guides/troubleshooting/"
 

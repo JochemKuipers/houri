@@ -103,9 +103,6 @@ data class MetadataViewRoute(
 data object BatchAddRoute : NavKey
 
 @Serializable
-data class MangaDexFollowsRoute(val sourceId: Long) : NavKey
-
-@Serializable
 data class PagePreviewRoute(val mangaId: Long) : NavKey
 // SY <--
 

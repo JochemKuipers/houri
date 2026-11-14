@@ -577,17 +577,22 @@ internal fun NovelTypographyPage(
     )
 
     var editingStatusColor by remember { mutableStateOf(false) }
+    // KMK --> Collected, not read: `.get()` inside composition samples the store once and never
+    // recomposes, so a freshly tapped chip only showed as selected after the sheet was closed and
+    // reopened - the exact report. The palette rows above read `typography`, which is itself
+    // collected, which is why only this row was broken. KMK <--
+    val statusColor by novelPrefs.statusColor.collectAsState()
     SettingsChipRow(KMR.strings.pref_novel_status_color) {
         ColorChips(
             choices = STATUS_COLORS,
-            selected = novelPrefs.statusColor.get(),
+            selected = statusColor,
             onCustom = { editingStatusColor = true },
             onSelect = { novelPrefs.statusColor.set(it) },
         )
     }
     if (editingStatusColor) {
         HexColorDialog(
-            initial = customColorOrEmpty(novelPrefs.statusColor.get(), STATUS_COLORS),
+            initial = customColorOrEmpty(statusColor, STATUS_COLORS),
             onConfirm = { value ->
                 novelPrefs.statusColor.set(value)
                 editingStatusColor = false

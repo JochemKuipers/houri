@@ -9,9 +9,7 @@ import eu.kanade.tachiyomi.source.model.MangasPage
 import eu.kanade.tachiyomi.source.model.SChapter
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.model.SMangaUpdate
-import exh.md.similar.MangaDexSimilarPagingSource
 import exh.source.COMICK_IDS
-import exh.source.MANGADEX_IDS
 import kotlinx.serialization.json.Json
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
@@ -59,22 +57,6 @@ abstract class RecommendationPagingSource(
                 add(MangaUpdatesCommunityPagingSource(manga))
                 add(MangaUpdatesSimilarPagingSource(manga))
                 add(MyAnimeListPagingSource(manga))
-
-                // Only include MangaDex if the delegate sources are enabled and the source is MD-based
-                if (
-                    // KMK -->
-                    recommendationSource.isMangaDexSource()
-                    // KMK <--
-                ) {
-                    add(
-                        MangaDexSimilarPagingSource(
-                            manga,
-                            // KMK -->
-                            recommendationSource,
-                            // KMK <--
-                        ),
-                    )
-                }
 
                 // Only include Comick if the source manga is from there
                 if (
@@ -156,7 +138,6 @@ class RecommendationSource(
     }
 
     fun isComickSource(): Boolean = id in COMICK_IDS
-    fun isMangaDexSource(): Boolean = id in MANGADEX_IDS
 
     override val name: String by lazy { delegate?.name ?: "Recommends Source" }
     override val lang: String by lazy { delegate?.lang ?: "all" }

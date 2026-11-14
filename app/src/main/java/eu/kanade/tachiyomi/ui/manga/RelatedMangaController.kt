@@ -155,7 +155,7 @@ internal class RelatedMangaController(
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e)
         }
-        // KMK --> in-source resolution (e.g. MangaDex fallback urls).
+        // KMK --> in-source resolution (e.g. source-specific url formats).
         return try {
             val sManga = (state.source as? ResolvableSource)?.getManga(entry.url)
                 ?: state.source.getMangaUpdate(

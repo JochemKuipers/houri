@@ -12,12 +12,18 @@ object TrackerId {
     const val SUWAYOMI = 9L
     const val HIKKA = 10L
     const val MANGABAKA = 11L
+
+    /**
+     * Retired (MangaDex tracker removed): kept reserved so the value is never
+     * reused and stale `manga_sync` rows remain unambiguous.
+     */
     const val MDLIST = 60L
+
     const val ANIMEPLANET = 61L
     const val COMICK = 63L
 
     val all = setOf(
         MYANIMELIST, ANILIST, KITSU, SHIKIMORI, BANGUMI, KOMGA, MANGA_UPDATES,
-        KAVITA, SUWAYOMI, HIKKA, MANGABAKA, MDLIST, ANIMEPLANET, COMICK,
+        KAVITA, SUWAYOMI, HIKKA, MANGABAKA, ANIMEPLANET, COMICK,
     )
 }

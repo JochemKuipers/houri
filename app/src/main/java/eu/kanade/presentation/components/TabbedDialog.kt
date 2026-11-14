@@ -1,6 +1,5 @@
 package eu.kanade.presentation.components
 
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -75,8 +74,13 @@ fun TabbedDialog(
             }
             HorizontalDivider()
 
+            // KMK --> No animateContentSize on the pager: it re-measures the incoming page against
+            // the *old* height while its animation runs, and on the first open — where the tab list
+            // is still settling as the text-chapter flags arrive — the settings page could end up
+            // sized from that stale pass, leaving the options' scrolling dead until the sheet was
+            // closed and reopened. The sheet's own entrance slide covers the transition. KMK <--
             HorizontalPager(
-                modifier = Modifier.animateContentSize(),
+                modifier = Modifier,
                 state = pagerState,
                 verticalAlignment = Alignment.Top,
                 pageContent = { page -> content(page) },

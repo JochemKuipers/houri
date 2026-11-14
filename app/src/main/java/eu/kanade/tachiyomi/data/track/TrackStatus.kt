@@ -15,7 +15,6 @@ import eu.kanade.tachiyomi.data.track.mangaupdates.MangaUpdates
 import eu.kanade.tachiyomi.data.track.myanimelist.MyAnimeList
 import eu.kanade.tachiyomi.data.track.shikimori.Shikimori
 import eu.kanade.tachiyomi.data.track.suwayomi.Suwayomi
-import exh.md.utils.FollowStatus
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.sy.SYMR
 
@@ -32,19 +31,8 @@ enum class TrackStatus(val int: Int, val res: StringResource) {
     companion object {
         fun parseTrackerStatus(trackerManager: TrackerManager, tracker: Long, status: Long): TrackStatus? {
             // Framework: prefer TrackerId constants; fall back to manager fields for legacy call sites.
-            // This switch is now exhaustive for all 14 built-in trackers (+1 MDLIST).
+            // This switch is now exhaustive for all 13 built-in trackers.
             return when (tracker) {
-                TrackerId.MDLIST, trackerManager.mdList.id -> {
-                    when (FollowStatus.fromLong(status)) {
-                        FollowStatus.UNFOLLOWED -> null
-                        FollowStatus.READING -> READING
-                        FollowStatus.COMPLETED -> COMPLETED
-                        FollowStatus.ON_HOLD -> PAUSED
-                        FollowStatus.PLAN_TO_READ -> PLAN_TO_READ
-                        FollowStatus.DROPPED -> DROPPED
-                        FollowStatus.RE_READING -> REPEATING
-                    }
-                }
                 TrackerId.MYANIMELIST, trackerManager.myAnimeList.id -> {
                     when (status) {
                         MyAnimeList.READING -> READING

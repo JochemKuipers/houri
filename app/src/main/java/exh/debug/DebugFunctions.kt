@@ -5,14 +5,11 @@ import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.backup.models.Backup
 import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
 import eu.kanade.tachiyomi.data.sync.SyncDataJob
-import eu.kanade.tachiyomi.source.AndroidSourceManager
 import eu.kanade.tachiyomi.util.system.workManager
 import exh.eh.EHentaiUpdateWorker
 import exh.metadata.metadata.EHentaiSearchMetadata
 import exh.source.EH_SOURCE_ID
 import exh.source.EXH_SOURCE_ID
-import exh.source.NHENTAI_SOURCE_ID
-import exh.source.nHentaiSourceIds
 import exh.util.ThrottleManager
 import exh.util.jobScheduler
 import kotlinx.coroutines.runBlocking
@@ -74,10 +71,6 @@ object DebugFunctions {
         }
     }
     private val throttleManager = ThrottleManager()
-
-    fun getDelegatedSourceList(): String = AndroidSourceManager.currentDelegatedSources.map {
-        it.value.sourceName + " : " + it.value.sourceId + " : " + it.value.factory
-    }.joinToString(separator = "\n")
 
     fun resetEHGalleriesForUpdater() {
         throttleManager.resetThrottle()
@@ -301,12 +294,6 @@ object DebugFunctions {
 
     fun resetReaderViewerForAllManga() {
         runBlocking { handler.await { ehQueries.resetReaderViewerForAllManga() } }
-    }
-
-    fun migrateLangNhentaiToMultiLangSource() {
-        val sources = nHentaiSourceIds - NHENTAI_SOURCE_ID
-
-        runBlocking { handler.await { ehQueries.migrateAllNhentaiToOtherLang(NHENTAI_SOURCE_ID, sources) } }
     }
 
     fun exportProtobufScheme() = ProtoBufSchemaGenerator.generateSchemaText(Backup.serializer().descriptor)

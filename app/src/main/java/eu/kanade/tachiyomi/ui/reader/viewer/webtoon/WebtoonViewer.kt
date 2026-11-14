@@ -374,7 +374,18 @@ class WebtoonViewer(
         val chapter = adapter.currentChapter ?: return false
         if (!adapter.syncPageList(chapter)) return false
         if ((currentPage as? ReaderPage)?.supersededBySplit == true) {
+            // KMK --> The split removed the page on screen and put its segments in that slot. The
+            // anchor the recycler keeps across the diff is whatever it happened to preserve - on a
+            // long strip that was somewhere inside the replacement's segments, which read as
+            // "opening a chapter landed me in the middle of a page". A parent page never rendered:
+            // it was too tall to decode, the reader saw a spinner, so its place is the top - the
+            // first segment - and going there explicitly is what the pager's re-anchor already
+            // does by index. KMK <--
+            val superseded = currentPage as ReaderPage
             currentPage = null
+            adapter.items.filterIsInstance<ReaderPage>()
+                .firstOrNull { it.splitSourcePage === superseded }
+                ?.let(::moveToPage)
         }
         return true
     }

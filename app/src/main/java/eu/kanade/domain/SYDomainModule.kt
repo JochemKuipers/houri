@@ -67,7 +67,6 @@ import tachiyomi.domain.source.interactor.InsertSavedSearch
 import tachiyomi.domain.source.interactor.ReorderFeed
 import tachiyomi.domain.source.repository.FeedSavedSearchRepository
 import tachiyomi.domain.source.repository.SavedSearchRepository
-import tachiyomi.domain.track.interactor.IsTrackFollowed
 import uy.kohesive.injekt.api.InjektModule
 import uy.kohesive.injekt.api.InjektRegistrar
 import uy.kohesive.injekt.api.addFactory
@@ -97,7 +96,6 @@ class SYDomainModule : InjektModule {
         addFactory { ReorderSortTag(get(), get()) }
         addFactory { GetPagePreviews(get(), get()) }
         addFactory { SearchEngine() }
-        addFactory { IsTrackFollowed() }
         addFactory { GetReadMangaNotInLibraryView(get()) }
 
         // Required for [MetadataSource]

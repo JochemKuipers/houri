@@ -39,6 +39,7 @@ import eu.kanade.tachiyomi.util.system.launchRequestPackageInstallsPermission
 import kotlinx.collections.immutable.persistentListOf
 import mihon.core.navigation.ExtensionStoresRoute
 import mihon.core.navigation.util.LocalBackStack
+import mihon.domain.extension.model.ContentWarning
 import mihon.domain.extension.model.ExtensionStore
 import mihon.domain.extension.model.KOMIKKU_SIGNATURE
 import tachiyomi.i18n.MR
@@ -377,7 +378,7 @@ private fun ExtensionItemContentPreview() {
         lang = "en",
         versionCode = 1,
         libVersion = 1.0,
-        isNsfw = true,
+        contentWarning = ContentWarning.NSFW,
         signatureHash = "900000",
         storeName = "Houri",
         sources = emptyList(),
@@ -392,7 +393,7 @@ private fun ExtensionItemContentPreview() {
         lang = "en",
         versionCode = 1,
         libVersion = 1.0,
-        isNsfw = true,
+        contentWarning = ContentWarning.NSFW,
         signatureHash = "900000",
         storeName = "Houri",
         sources = emptyList(),
@@ -411,7 +412,7 @@ private fun ExtensionItemContentPreview() {
         lang = "en",
         versionCode = 1,
         libVersion = 1.0,
-        isNsfw = true,
+        contentWarning = ContentWarning.NSFW,
         signatureHash = "900000",
         storeName = "Repository",
     )
