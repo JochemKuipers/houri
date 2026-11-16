@@ -91,6 +91,16 @@ internal class DecodeTrace(
     @Volatile
     var transformed: Boolean? = null
 
+    /**
+     * Whether the page exceeded the budget's pixel ceiling and was resized before upload.
+     *
+     * A quality change the reader can see (see the memory-budget section of the folder AGENTS), and
+     * the one decode-path event that is *normal* but worth counting: a session that downsamples
+     * every page is a session whose budget is wrong for the device, not one with a broken page.
+     */
+    @Volatile
+    var downsampled: Boolean = false
+
     /** The reason [complete] was last called with, or null while the decode is still running. */
     @Volatile
     var outcome: String? = null
@@ -150,7 +160,8 @@ internal class DecodeTrace(
 
     /** A compact description of what is known about the page, for reuse across the log lines. */
     private fun describe(): String =
-        "bytes=$bytes fmt=${format ?: "?"} dims=${dimensions ?: "?"} transformed=${transformed ?: "?"}"
+        "bytes=$bytes fmt=${format ?: "?"} dims=${dimensions ?: "?"} transformed=${transformed ?: "?"} " +
+            "downsampled=$downsampled"
 }
 
 /**
@@ -189,7 +200,11 @@ internal fun WebGpuViewer.startDecodeStallWatchdog() {
                 // A lambda, not a value: reportStallIfDue only invokes it on a tick that actually
                 // reports, so a healthy decode never pays for the lock or the string building.
                 for (trace in snapshotActiveDecodes()) {
-                    trace.reportStallIfDue(System.currentTimeMillis(), ::decodeQueueSummary)
+                    if (trace.reportStallIfDue(System.currentTimeMillis(), ::decodeQueueSummary)) {
+                        // The watchdog's line goes to logcat, which is what a phone-only user
+                        // cannot see; the counter is what their report can carry.
+                        WebGpuDiagnostics.recordStall()
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e

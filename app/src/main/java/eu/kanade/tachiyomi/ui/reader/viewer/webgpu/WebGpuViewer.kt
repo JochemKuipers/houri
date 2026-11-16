@@ -191,6 +191,14 @@ open class WebGpuViewer(
 
     internal val scope = MainScope()
 
+    /**
+     * Called when the activity's configuration changes (a rotation, a foldable posture change).
+     *
+     * A hook rather than an override of the framework callback because the trim callbacks are a
+     * private anonymous object; anything a viewer derives from the window size overrides this.
+     */
+    open fun onViewerConfigurationChanged() = Unit
+
     @Volatile
     internal var isDestroyed = false
 
@@ -221,7 +229,7 @@ open class WebGpuViewer(
      * by threads.
      */
     internal fun decodeParallelism(): Int =
-        if (memoryBudget.deviceTier <= WebGpuMemoryBudget.DeviceTier.SMALL) 1 else DECODE_WORKER_LIMIT
+        if (memoryBudget.deviceTier <= DeviceTier.SMALL) 1 else DECODE_WORKER_LIMIT
 
     /**
      * The traces for the decodes currently in flight, one per worker.
@@ -446,7 +454,7 @@ open class WebGpuViewer(
      * `applyMemoryBudget` is also called from `onTrimMemory`, which is main-thread.
      */
     @Volatile
-    internal var memoryPressureLast: WebGpuMemoryBudget.Pressure? = null
+    internal var memoryPressureLast: MemoryPressure? = null
 
     /**
      * When the reader last shed pages, which gates how soon anything may grow back.
@@ -511,15 +519,20 @@ open class WebGpuViewer(
             val base = 1 + preloadAhead + preloadBehind + if (isDualPageMode()) 3 else 1
             val visible = if (isDualPageMode()) 4 else 2
             return when (memoryBudget.budget().pressure) {
-                WebGpuMemoryBudget.Pressure.CRITICAL -> maxOf(visible, base / 3)
-                WebGpuMemoryBudget.Pressure.TIGHT -> maxOf(visible, base * 2 / 3)
-                WebGpuMemoryBudget.Pressure.ROOMY -> base
+                MemoryPressure.CRITICAL -> maxOf(visible, base / 3)
+                MemoryPressure.TIGHT -> maxOf(visible, base * 2 / 3)
+                MemoryPressure.ROOMY -> base
             }
         }
 
     // KMK -->
     private val trimCallbacks = object : ComponentCallbacks2 {
-        override fun onConfigurationChanged(newConfig: Configuration) = Unit
+        override fun onConfigurationChanged(newConfig: Configuration) {
+            // KMK --> A viewer that sizes anything off the window re-derives it here: a rotation
+            // changes the width a column is computed from, and the pager is not otherwise
+            // re-laid-out until something invalidates it.
+            onViewerConfigurationChanged()
+        }
         override fun onLowMemory() = shedMemoryUnderPressure()
 
         @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
@@ -611,6 +624,7 @@ open class WebGpuViewer(
         ca.mpreg.webgpuviewer.renderer.WebGpuRenderer.Companion.DeviceLostListener { _, _ ->
             if (isDestroyed) return@DeviceLostListener
             sessionDeviceLosses.incrementAndGet()
+            WebGpuDiagnostics.recordDeviceLoss("device lost")
             // Counted on the loss itself, not on a successful recovery: a device loss
             // on a phone is usually the app being backgrounded and the GPU going away, and
             // recovery routinely succeeds either way, so waiting for success would under-count.
@@ -641,6 +655,7 @@ open class WebGpuViewer(
     private val deviceRecoveredListener =
         ca.mpreg.webgpuviewer.renderer.WebGpuRenderer.Companion.DeviceRecoveredListener {
             if (isDestroyed) return@DeviceRecoveredListener
+            WebGpuDiagnostics.recordRecovery(ok = true)
             scope.launch {
                 try {
                     resetDecodedPagesAfterDeviceLoss()
@@ -712,6 +727,15 @@ open class WebGpuViewer(
         // them starts. Installing here rather than lazily means no page can decode through a chain
         // that is missing its upscaler, and install-by-id makes a second viewer's call a no-op.
         installBuiltinWebGpuExtensions()
+        // KMK --> Opens the session record the crash dump and the strike log both read. Header only:
+        // the counters fill in as the session runs, and nothing here can change the reader's
+        // behaviour.
+        WebGpuDiagnostics.beginSession(
+            "tier=${memoryBudget.deviceTier} budget=${memoryBudget.describe()} " +
+                "preload=${config.preloadAhead}/${config.preloadBehind} workers=${decodeParallelism()} " +
+                "continuous=$isContinuous dual=${if (isContinuous) false else isDualPageMode()}",
+        )
+        // KMK <--
         startDecodeWorker()
         startStuckPageSweep()
         // KMK --> Drives the live spin of the ProgressPage pineapple while a page is loading.
@@ -972,9 +996,11 @@ open class WebGpuViewer(
         try {
             val deadAtExit = !ca.mpreg.webgpuviewer.renderer.WebGpuRenderer.isAvailable &&
                 activity.isFinishing
-            val parkedThisSession = runCatching {
-                pager.state.renderer.surfaceParkCount > surfaceParksAtStart
-            }.getOrDefault(false)
+            val parksThisSession = runCatching {
+                (pager.state.renderer.surfaceParkCount - surfaceParksAtStart).coerceAtLeast(0)
+            }.getOrDefault(0)
+            val parkedThisSession = parksThisSession > 0
+            WebGpuDiagnostics.recordPark(parksThisSession)
             if (deadAtExit || parkedThisSession ||
                 sessionDeviceLosses.get() >= WebGpuHealth.SESSION_LOSS_STRIKE_THRESHOLD
             ) {
@@ -985,6 +1011,12 @@ open class WebGpuViewer(
                         "strike recorded"
                 }
             }
+        } catch (_: Exception) {}
+        // KMK <--
+        // KMK --> Closes the session record. A notable session writes itself to the in-app log
+        // here (see WebGpuDiagnostics.isNotable); a clean one only goes to logcat.
+        try {
+            WebGpuDiagnostics.endSession()
         } catch (_: Exception) {}
         // KMK <--
         config.onSettingsChanged = null

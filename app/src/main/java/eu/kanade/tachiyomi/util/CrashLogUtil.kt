@@ -97,6 +97,7 @@ class CrashLogUtil(
             $localeInfo
             $orientationInfo
             Process: ${android.os.Process.myPid()} / Thread: ${Thread.currentThread().name}
+            ${eu.kanade.tachiyomi.ui.reader.viewer.webgpu.WebGpuDiagnostics.render()}
         """.trimIndent()
     }
 

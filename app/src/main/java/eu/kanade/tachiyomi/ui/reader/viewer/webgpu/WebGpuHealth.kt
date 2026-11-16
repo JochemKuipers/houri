@@ -2,6 +2,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.webgpu
 
 import android.content.Context
+import exh.log.xLogE
 
 /**
  * Cross-session record of WebGPU sessions whose device died without coming back.
@@ -47,9 +48,26 @@ object WebGpuHealth {
     fun recordStrike(context: Context) {
         runCatching {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            prefs.edit()
-                .putInt(KEY_STRIKES, (prefs.getInt(KEY_STRIKES, 0) + 1).coerceAtMost(DISABLE_STRIKES))
-                .apply()
+            val next = (prefs.getInt(KEY_STRIKES, 0) + 1).coerceAtMost(DISABLE_STRIKES)
+            prefs.edit().putInt(KEY_STRIKES, next).apply()
+            // KMK --> The app's logcat lines never reach a user who only has the phone; the
+            // in-app log file is what a field report actually arrives with. Say what the
+            // strike means for their next launches, and call out the disable explicitly -
+            // "the reader stopped opening on WebGPU" with no record of why reads as a
+            // mystery regression. xLogE is an Any-extension; the receiver names the tag.
+            // The session aggregate rides along: the strike says *that* a session went wrong, this
+            // says what it did. Neither half is much use to a field report without the other.
+            val diagnostics = runCatching { WebGpuDiagnostics.render() }.getOrNull()
+            xLogE(
+                "WebGPU health: degraded session recorded (strike $next/$DISABLE_STRIKES)" +
+                    if (next >= DISABLE_STRIKES) {
+                        " - WebGPU viewer disabled; the standard reader will be used until " +
+                            "the About-screen easter egg resets it"
+                    } else {
+                        ""
+                    } + (diagnostics?.let { "\n$it" } ?: ""),
+            )
+            // KMK <--
         }
     }
 

@@ -32,16 +32,21 @@ files moved. See .github/scripts/release_notes.py.
 
 ### Improve
 
+- **Reader: diagnostics now travel with the log dump.** Settings → Advanced → Dump crash logs now includes a short WebGPU session summary — what the reader decoded and how long it took, how tight memory was, whether pages were downsampled or evicted, whether a decode stalled, and whether the GPU device was lost. A problem report can now carry what the session actually did instead of only "the reader is broken".
+
 - **Granular extension content warnings replace the single NSFW toggle.** Extensions can now be flagged Safe, Mixed or NSFW (an extension's sites can carry more than one label), and you choose which warnings you allow in Settings → Browse — several at once. The old "show NSFW sources" switch migrates to the new setting; everything you had enabled stays visible.
 - **MangaDex and the remaining delegated sources have been removed.** MangaDex (including its login, follows sync and recommendations) plus the NHentai, 8Muses, Pururin and LANraragi in-app sources are gone — only E-Hentai/ExHentai and the built-in Komga source remain. Library entries from the removed sources are kept and their metadata remains readable; MDList (MangaDex) tracker rows are cleaned up on upgrade. If you read from MangaDex, install the community MangaDex extension instead.
 - The discontinued Mullvad DNS-over-HTTPS option has been removed from the DNS-over-HTTPS picker; anyone on it is switched to the default automatically.
 
 ### Fix
 
+- **WebGPU reader: the Webtoon group's switches now reach it.** Three settings in that group were read only by the legacy viewers, so they changed nothing while the hardware-accelerated reader was open: **Viewer navigation** (tap zones — the Pager group's zones were used for every mode), **Crop borders** (the Pager switch was used for every mode), and **Side padding** (ignored entirely). Tap zones and crop borders are now resolved per reading mode, and side padding draws the strip in a narrower, centred column. One setting is deliberately *not* implemented: **Scale type**, which is defined against a paged viewer the WebGPU reader does not have — a fixed column would have narrowed every page, including the long strips the setting exists to leave alone.
+
 - **Chapter blacklist entries now stay hidden.** The per-source chapter blacklist (hidden chapters) used to reset when you left a series and came back — the filters screen now persists its state, so blacklisted chapters stay blacklisted.
 - **Rotating achievements now announce themselves again.** The rotating achievement toast did not fire when a tier completed.
 - **The Discord RPC settings no longer crash the app on open.**
 - App: fixed a `NoSuchMethodError` crash (`HttpException.getCode`) that killed the whole app when an extension hit an HTTP error — the 1.25.3 package shipped an inconsistent build of that exception class; any build of the current sources resolves it.
+- **Custom covers now travel with backups**: an entry's custom cover image is stored inside the backup itself and restored on any device, instead of living only in the app's cover cache that backups never carried. Toggleable under Create backup → Custom covers (on for manual backups; off for sync, so sync payloads stay light).
 
 - **Upscaling no longer requires AI Translation**: the upscaler was rebuilt as its own pipeline (like the translation rewrite) — the no-MTL build now gets native model inference too, the mode gains an Auto option that falls back to simple resampling when a model or backend is unavailable, and existing per-manga opt-ins and the page cache carry over untouched.
 - **Real-CUGAN 3x model added**: the upscaler catalog now offers a 3x Real-CUGAN alongside 2x/4x options, with 3x/4x artifacts verified by hash.
@@ -55,6 +60,8 @@ files moved. See .github/scripts/release_notes.py.
 - Reader: a WebGPU page could render at a tiny fraction of its size (a few dozen pixels) after the surface was rebuilt underneath it — seen on e-ink readers around refresh-mode switches and on sleep/resume: view a page, swipe away and back, and it came back postage-stamp. The degenerate scale is no longer latched; the page returns at its proper size.
 - Reader: WebGPU sessions whose GPU device keeps dying without recovering now fall back to the standard reader on the next launches, instead of opening the same black screen every time — the easter egg on the About screen's version entry resets that fallback after a driver update fixes the device.
 - **Reader: pages load in the order you read.** The WebGPU reader now ranks its background loading by where you are and where you are heading — the page on screen first, then the side you are scrolling toward — so turning into an unfetched page finds it already decoded far more often, especially right after opening a chapter.
+- **Reader: TIFF-based pages are recognised again.** A comic page delivered as a little-endian TIFF was rejected as an unsupported image format before the decoder ever saw it, because the header's byte-order mark was read in the wrong byte order; the page now decodes like any other.
+
 - **Reader: the WebGPU loading placeholder now says what it is doing** — the percentage is joined by the current stage (fetching, decoding, uploading…), so a slow page tells you whether it is waiting on the network or already rendering.
 - **Reader: pages reserve their true height before they finish loading** — as soon as the app can know a page's shape (the moment its bytes are read, or — for long strips cut into segments — at the moment they are cut), the loading placeholder occupies exactly the space the finished page will. Turning into an unfetched page or scrolling through a loading long strip no longer reflows the pages around you as they finish.
 
@@ -79,3 +86,23 @@ files moved. See .github/scripts/release_notes.py.
 - Extension update errors are now only recorded for HTTP 401 and 404 — the statuses that mean the source needs your attention. The rest (Cloudflare challenges, rate limits, server hiccups) are logged but no longer flood the errors screen, and any recorded HTTP error's message tells you to check the site in WebView.
 - Migration: **"Fetch chapters in manual search" is now off by default** — each result's latest-chapter lookup is opt-in traffic, and slow sources no longer leave every result card spinning.
 - Books: turning pages now reports what the layout engine actually answered, so a "pages don't turn" report can be diagnosed from the log.
+
+### Fix
+
+- **The download queue now survives a full app close.** Paused and unfinished downloads used to vanish every time the app was killed outright: the queue was rebuilt at startup before the extension sources had finished loading, so every entry failed its source lookup and the persisted list was wiped. The queue now restores once the sources are ready.
+- **Tracking: adding a series to a second tracker no longer opens the previous tracker's search screen.** The tracking sheet's sub-screens shared one cached state, so each new tracker search reused the first one's results.
+- **The More tab's Updates and History entries work again** when their navbar buttons are hidden — they used to do nothing when tapped from the fallback rows.
+- **The extensions tab's first page shows the grid-shaped skeleton immediately** instead of flashing a list layout on first load of a grid-mode source.
+- **Content-warning badges no longer appear on the Sources tab** — the labels belong on extension rows only.
+- **The browse "Support: …" text now lists only the sources that remain** (E-Hentai/ExHentai and Komga) instead of the removed delegated sources.
+- **Tablet: leaving a two-pane settings screen with the app bar's back arrow no longer collapses the layout to the phone arrangement.**
+- **Tracker-connect achievements now count trackers that arrived with a restored backup**, not only services logged into on this device.
+- **Two settings achievements were granted at startup to users who never touched the setting** (Cutout Connoisseur, AST Searcher) — the watcher seeded from default-on preferences.
+- **Backup restore: the "Restoring backup" banner no longer lingers** on screen for up to a minute after the restore finished.
+
+### Improve
+
+- **Books: the font picker now has a scrollbar** — the bundled and imported families overflow the dialog, and the list gave no affordance for that.
+- **Anime-Planet tracker search works again.** The site now fronts its search page with a Cloudflare bot check; the tracker used to read that interstitial as the search result (empty "no results", or a long spin) instead of waiting out the check. It now waits for the real page — and if the check never clears, the error names the likely cause instead of a raw timeout message.
+- **Beta builds now log what the Discord RPC is doing.** The RPC logs through Timber, which was only planted in debug builds — every RPC failure (including the external-asset errors behind a missing presence image) was silent outside debug. Logging is now planted in every build, external-asset failures are mirrored into the in-app log, and successful image conversions are cached so the rate-limited endpoint is asked once per image instead of on every presence update.
+- **The WebGPU reader now records degraded sessions in the in-app log** — when a session ends with a dead or parked renderer, the strike (and what it means for future launches, up to the automatic fallback to the standard reader) is written where a phone-only user can actually see it.

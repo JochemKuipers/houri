@@ -155,11 +155,67 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
         UPSCALE_CP=":$COROUTINES"
     fi
 
+    # The WebGPU reader's pure policy. Each of these files carries no Android import precisely so it
+    # can be compiled here directly rather than stubbed: a stub would be a *copy*, and a test that
+    # asserts the copy proves nothing about the thing that runs. What stays in the viewer (the
+    # ActivityManager reads, the page cache, the state machine) is covered by check.sh.
+    WEBGPU_DIR="$REPO_ROOT/app/src/main/java/eu/kanade/tachiyomi/ui/reader/viewer/webgpu"
+    case "$NAME" in
+        DecodePriorityHarness)
+            # The queue itself, generic precisely so this file can link the real class.
+            SOURCES+=("$WEBGPU_DIR/PriorityDecodeQueue.kt" "$WEBGPU_DIR/WebGpuDecodePriority.kt") ;;
+        StuckLadderHarness)
+            SOURCES+=("$WEBGPU_DIR/WebGpuStuckLadder.kt") ;;
+        SpreadMathHarness)
+            SOURCES+=("$WEBGPU_DIR/WebGpuSpreadMath.kt") ;;
+        MemoryBudgetHarness)
+            SOURCES+=("$WEBGPU_DIR/WebGpuMemoryMath.kt") ;;
+        ImageValidationHarness)
+            SOURCES+=("$WEBGPU_DIR/WebGpuImageValidation.kt") ;;
+        ExifRotationHarness)
+            # The rotation references the spread dimension clamp, so both files ride along.
+            SOURCES+=("$WEBGPU_DIR/WebGpuExif.kt" "$WEBGPU_DIR/WebGpuSpreadMath.kt") ;;
+        ChapterPreloadGuardHarness)
+            SOURCES+=("$WEBGPU_DIR/ChapterPreloadGuard.kt") ;;
+        ColumnWidthHarness)
+            SOURCES+=("$WEBGPU_DIR/WebGpuColumnWidth.kt") ;;
+        DiagnosticsHarness)
+            # The recorder's own facades are stubbed, so the run writes nothing.
+            SOURCES+=("$WEBGPU_DIR/WebGpuDiagnostics.kt")
+            SOURCES+=("$REPO_ROOT/scripts/kotlinc-check/stubs/logcat/LogPriority.kt")
+            SOURCES+=("$REPO_ROOT/scripts/kotlinc-check/stubs/tachiyomi/core/common/util/system/LogcatStub.kt")
+            SOURCES+=("$REPO_ROOT/scripts/kotlinc-check/stubs/exh/log/XLogStub.kt") ;;
+        BlacklistRoundTripHarness)
+            # Issue #68: the blacklist column's encoding must round-trip keys that carry free
+            # text (scanlator names, embedded urls). Links the real domain key/matcher/visibility
+            # functions and the real column adapter; SQLDelight's ColumnAdapter interface is
+            # stubbed (one line, harness-only) and the JSON primitives need the serialization
+            # runtime jars on both the compile and runtime classpaths.
+            SOURCES+=("$REPO_ROOT/domain/src/main/java/tachiyomi/domain/chapter/service/ChapterBlacklist.kt")
+            SOURCES+=("$REPO_ROOT/domain/src/main/java/tachiyomi/domain/chapter/service/ChapterVisibility.kt")
+            SOURCES+=("$REPO_ROOT/domain/src/main/java/tachiyomi/domain/chapter/model/Chapter.kt")
+            SOURCES+=("$REPO_ROOT/domain/src/main/java/tachiyomi/domain/chapter/model/BookmarkColor.kt")
+            SOURCES+=("$REPO_ROOT/core/common/src/main/kotlin/mihon/core/common/extensions/JsonObject.kt")
+            SOURCES+=("$REPO_ROOT/data/src/main/java/tachiyomi/data/BlacklistColumnAdapter.kt")
+            SOURCES+=("$REPO_ROOT/scripts/kotlinc-check/stubs/app/cash/sqldelight/ColumnAdapter.kt") ;;
+    esac
+
+    # The blacklist harness drives the real JSON primitives, so the serialization runtime
+    # rides both the compile and the runtime classpath for that one harness.
+    BLACKLIST_CP=""
+    RUN_CP=""
+    if [ "$NAME" = "BlacklistRoundTripHarness" ]; then
+        JSON_JAR=$(find_jar org.jetbrains.kotlinx kotlinx-serialization-json-jvm)
+        CORE_JAR=$(find_jar org.jetbrains.kotlinx kotlinx-serialization-core-jvm)
+        BLACKLIST_CP=":$JSON_JAR:$CORE_JAR"
+        RUN_CP=":$JSON_JAR:$CORE_JAR"
+    fi
+
     OUT=$(mktemp -d)
     echo "== $NAME =="
     # A hard compile error must fail the run, not fall through to "class not found".
     if ! java -cp "$COMPILER_CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
-            -no-stdlib -nowarn -cp "$STDLIB$KXML_CP$MTL_CP$UPSCALE_CP" -d "$OUT/classes" "${SOURCES[@]}" "${OPF_SOURCES[@]}" "$MAIN" 2>&1 \
+            -no-stdlib -nowarn -cp "$STDLIB$KXML_CP$MTL_CP$UPSCALE_CP$BLACKLIST_CP" -d "$OUT/classes" "${SOURCES[@]}" "${OPF_SOURCES[@]}" "$MAIN" 2>&1 \
             | grep -E 'error:' | grep -vE 'unresolved reference'; then
         :
     else
@@ -170,7 +226,7 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     fi
 
     # Kotlin file-facade class for a top-level main() is the file name plus "Kt".
-    if java -cp "$OUT/classes:$STDLIB$KXML_CP$MTL_CP$UPSCALE_CP" "${NAME}Kt" 2> "$OUT/run.err"; then
+    if java -cp "$OUT/classes:$STDLIB$KXML_CP$MTL_CP$UPSCALE_CP$RUN_CP" "${NAME}Kt" 2> "$OUT/run.err"; then
         RAN=$((RAN + 1))
     else
         # A runtime crash must name the crash: everything above succeeds and passes silently

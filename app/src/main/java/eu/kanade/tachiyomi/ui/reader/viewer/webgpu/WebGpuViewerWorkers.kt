@@ -142,6 +142,14 @@ internal fun WebGpuViewer.startDecodeWorker() {
                         // Before the sweep is signalled: the reason this page is about to be looked
                         // at is the one thing it cannot work out for itself.
                         recordDecodeOutcome(page, trace.outcome ?: "unfinished")
+                        // The session aggregate, for the report a phone-only user can actually send.
+                        // Kept beside the outcome ledger because it is the same fact plus a duration.
+                        WebGpuDiagnostics.recordDecode(
+                            outcome = trace.outcome ?: "unfinished",
+                            totalMs = System.currentTimeMillis() - trace.startedAtMs,
+                            label = "ch=${trace.chapterId}/i=${trace.pageIndex}",
+                            downsampled = trace.downsampled,
+                        )
                         unregisterActiveDecode(trace)
                         synchronized(lock) {
                             // KMK --> Unconditional, same as the skip path above: a page evicted

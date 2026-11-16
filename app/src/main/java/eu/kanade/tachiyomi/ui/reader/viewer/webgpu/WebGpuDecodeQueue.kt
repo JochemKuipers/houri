@@ -12,47 +12,43 @@ import tachiyomi.core.common.util.system.logcat
 // `queueForDecode` treats as "someone is already on it" while nothing actually is. `ensureDecoding`
 // is the one producer (the renderer asked for it); `requeueStuckPage` is the one place allowed to
 // break the tie.
-
-// The queue itself is [PriorityDecodeQueue] (PriorityDecodeQueue.kt) - generic, so the
-// offline harness can compile and run the real class against this file's priority policy.
+//
+// The queue itself is [PriorityDecodeQueue] (PriorityDecodeQueue.kt) - generic, so the offline
+// harness can compile and run the real class against this file's priority policy.
+//
+// The policy halves are extracted and pure: the ordering is `decodePriorityFor`
+// (WebGpuDecodePriority.kt) and the escalation table is `stuckLadderActionFor` /
+// `stuckRetryDue` (WebGpuStuckLadder.kt). Both are asserted offline; what stays here is the state
+// machine that applies them.
 
 // KMK -->
-// Decode priority classes; higher decodes sooner. See [WebGpuViewer.decodePriorityOf].
-private const val PRIORITY_CURRENT = 1000
-private const val PRIORITY_ON_SCREEN = 900
-private const val PRIORITY_DEMANDED = 800
-// Preload band: the travelling side outranks the idle side, ahead outranks behind at equal
-// everything, distance orders within each. Bands were chosen so the classes interleave by
-// direction instead of stacking: travelling-behind (740-d) beats idle-ahead (730-d') whenever
-// d < 10 + d', which is the "you scrolled up, so the pages above you decode first" rule -
-// while every preload stays under PRIORITY_DEMANDED and above PRIORITY_OTHER.
-private const val PRIORITY_AHEAD_BASE = 730
-private const val PRIORITY_BEHIND_BASE = 720
-private const val PRIORITY_DIRECTION_BOOST = 20
-private const val PRIORITY_DISTANCE_CAP = 64
-private const val PRIORITY_OTHER = 100
-
 /**
  * What the decode worker owes [page] relative to everything else queued, computed at enqueue.
  *
- * The reader's own demand outranks geometry, and geometry outranks everything else: the page on
- * screen first, then everything the render walk is asking for, then the preload window by
- * distance - ahead before behind - with the side the reader last travelled toward boosted, so a
- * downward read fills downward first without the preload window itself ever becoming asymmetric.
- * Distances past the window radius clamp rather than fall to OTHER, so a far preload still
- * outranks an unrelated shell.
+ * The two facts that need the viewer - which page is current, and how far [page] sits from it - are
+ * resolved here; the ordering itself is [decodePriorityFor], which the offline harness drives
+ * directly. Keeping the split at that seam is what makes the band arithmetic testable at all: it
+ * used to be reachable only through a live viewer with a populated cache.
  */
 internal fun WebGpuViewer.decodePriorityOf(page: ViewerReaderPage): Int {
-    if (page === currentPage) return PRIORITY_CURRENT
-    if (page.imagePage.isOnScreen) return PRIORITY_ON_SCREEN
-    if (page.wantedByRender) return PRIORITY_DEMANDED
-    val anchor = currentPage ?: return PRIORITY_OTHER
-    val distance = pageDistance(anchor, page) ?: return PRIORITY_OTHER
-    if (distance == 0) return PRIORITY_AHEAD_BASE
-    val travelling = if (lastScrollDirection > 0) distance > 0 else distance < 0
-    val base = if (distance > 0) PRIORITY_AHEAD_BASE else PRIORITY_BEHIND_BASE
-    val boost = if (travelling) PRIORITY_DIRECTION_BOOST else 0
-    return base + boost - minOf(kotlin.math.abs(distance), PRIORITY_DISTANCE_CAP)
+    val onScreen = page.imagePage.isOnScreen
+    val anchor = currentPage
+    // Only a page that falls through to the preload bands needs a distance, and computing one walks
+    // the chapter chain - so the three viewer-bound classes short-circuit before it. This runs at
+    // enqueue time for every speculative preload in the window, which is exactly the case where an
+    // avoidable chain walk would be paid most often.
+    val distance = if (page === anchor || onScreen || page.wantedByRender) {
+        null
+    } else {
+        anchor?.let { pageDistance(it, page) }
+    }
+    return decodePriorityFor(
+        isCurrent = page === anchor,
+        isOnScreen = onScreen,
+        rendererDemanded = page.wantedByRender,
+        distance = distance,
+        scrollDirection = lastScrollDirection,
+    )
 }
 // KMK <--
 
@@ -169,10 +165,11 @@ internal fun WebGpuViewer.ensureDecoding(page: ViewerPage) {
                 // Only a real absence counts as a fresh chance. A shell rebuilt by the escalation is
                 // a new shell moments after the old one, so resetting on that would restart the
                 // ladder on every rebuild - which is the churn the escalation exists to stop.
-                if (System.currentTimeMillis() - record.lastAttemptAt > STUCK_REDRIVE_FRESH_WINDOW_MS) {
+                val now = System.currentTimeMillis()
+                if (stuckRetryBudgetReset(now, record.lastAttemptAt)) {
                     logcat(LogPriority.DEBUG) {
                         "Re-demand ch=${page.page.chapter.chapter.id}/i=${page.page.index} " +
-                            "after ${System.currentTimeMillis() - record.lastAttemptAt}ms away " +
+                            "after ${now - record.lastAttemptAt}ms away " +
                             "- stuck ladder reset from ${record.attempts} attempts"
                     }
                     record.attempts = 0
@@ -214,8 +211,8 @@ internal fun WebGpuViewer.requeueStuckPage(page: ViewerReaderPage): StuckRecover
 
         // Rate limit rather than a cap. A cap would leave a page that needed one more attempt
         // permanently broken; this keeps trying, so the page does eventually load, while bounding
-        // how fast a page that cannot load can spin.
-        if (now - record.lastAttemptAt < STUCK_REDRIVE_COOLDOWN_MS) return StuckRecovery.DEFERRED
+        // how fast a page that cannot load can spin. See WebGpuStuckLadder.kt for the table.
+        if (!stuckRetryDue(now, record.lastAttemptAt)) return StuckRecovery.DEFERRED
         record.lastAttemptAt = now
         record.attempts++
         // A re-driven page gets a fresh load deadline. Without this the stamp from the attempt that
@@ -223,10 +220,10 @@ internal fun WebGpuViewer.requeueStuckPage(page: ViewerReaderPage): StuckRecover
         // does not reach a load at all would measure against the old entry and be rescued instantly.
         loadingSince.remove(pageKey(page))
 
-        when {
-            record.attempts <= STUCK_REDRIVE_SOFT_LIMIT -> page.state = PageState.IDLE
-            record.attempts <= STUCK_REDRIVE_HARD_LIMIT -> escalate = true
-            else -> {
+        when (stuckLadderActionFor(record.attempts)) {
+            StuckLadderAction.REQUEUE -> page.state = PageState.IDLE
+            StuckLadderAction.REBUILD -> escalate = true
+            StuckLadderAction.GIVE_UP -> {
                 // Out of budget, and simply returning here is what makes it permanent. The shell
                 // stays resident with `wantedByRender` still set, and ensureDecoding - the one
                 // place that resets the record - returns before it can reach the reset. Nothing
@@ -234,6 +231,7 @@ internal fun WebGpuViewer.requeueStuckPage(page: ViewerReaderPage): StuckRecover
                 // sits on it. Releasing the flag hands the page back to the render walk, which
                 // re-arms the whole ladder once the reader has been away for the fresh window.
                 page.wantedByRender = false
+                WebGpuDiagnostics.recordLadder("GIVE_UP")
                 logcat(LogPriority.WARN) {
                     "Giving up on ch=${page.page.chapter.chapter.id}/i=${page.page.index} " +
                         "after ${record.attempts} attempts last=${lastDecodeOutcome(page) ?: "none"} " +
@@ -253,20 +251,13 @@ internal fun WebGpuViewer.requeueStuckPage(page: ViewerReaderPage): StuckRecover
     }
 
     queueForDecode(page, prioritize = currentPage?.let { pageKey(it) == pageKey(page) } ?: false)
+    WebGpuDiagnostics.recordLadder("REDRIVEN")
     return StuckRecovery.REDRIVEN
 }
 
 /**
- * How long a page may sit in [PageState.LOADING] before the sweep treats it as stranded.
- *
- * A fetch that is genuinely slow must be left alone, so this is well above a slow connection
- * pulling a large image on a weak device. It exists for the page whose load coroutine ended with
- * the status stranded at Queue/LoadPage/DownloadImage: no further emission will ever arrive, so
- * without a deadline that page is LOADING for the rest of the session and matches no sweep branch.
+ * How long [page] has been LOADING, or 0 when it is not currently loading.
  */
-internal const val STUCK_LOAD_DEADLINE_MS = 30_000L
-
-/** How long [page] has been LOADING, or 0 when it is not currently loading. */
 internal fun WebGpuViewer.loadingFor(page: ViewerReaderPage): Long {
     val since = synchronized(lock) { loadingSince[pageKey(page)] } ?: return 0L
     return System.currentTimeMillis() - since
@@ -286,29 +277,6 @@ internal class StuckPageRecord {
 }
 
 /**
- * Minimum gap between two recovery attempts on one page - the difference between a page that spins
- * and a page that is merely slow.
- */
-internal const val STUCK_REDRIVE_COOLDOWN_MS = 1_500L
-
-/**
- * How long a page must be out of demand before [ensureDecoding] treats coming back to it as a fresh
- * chance. Comfortably longer than the cooldown, so a rebuild is never mistaken for the user having
- * left and returned, and short enough that scrolling away and back still retries a hard failure.
- */
-internal const val STUCK_REDRIVE_FRESH_WINDOW_MS = 5_000L
-
-/** Attempts re-queued before the page's own state is thrown away instead. */
-private const val STUCK_REDRIVE_SOFT_LIMIT = 3
-
-/**
- * Attempts after which the page is left alone; recovery has clearly not fixed it. Nine at the
- * cooldown is roughly fourteen seconds of trying, which outlasts a slow load rather than writing a
- * page off, and a page that comes back on screen gets its budget again from [ensureDecoding].
- */
-private const val STUCK_REDRIVE_HARD_LIMIT = 9
-
-/**
  * Discards [page] and everything it owns, so the next [WebGpuViewer.getPage] builds it fresh.
  *
  * Cleanup runs outside the lock - it tears down textures, and holding the viewer lock across that is
@@ -319,6 +287,7 @@ internal fun WebGpuViewer.tearDownStuckPage(page: ViewerReaderPage): StuckRecove
         if (page.imagePage.destroyed) return StuckRecovery.GONE
         pageCache.remove(pageKey(page))
         decodeQueue.remove(page)
+        WebGpuDiagnostics.recordLadder("REBUILT")
     }
     releasePageResources(page)
     return StuckRecovery.REBUILT

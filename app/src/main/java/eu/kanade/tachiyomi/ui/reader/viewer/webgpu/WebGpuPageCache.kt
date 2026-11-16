@@ -697,6 +697,7 @@ internal fun WebGpuViewer.evictFarthestPage(reference: ViewerPage? = null) {
     // Alongside pageCache so a load stamp cannot outlive the shell it belongs to.
     loadingSince.remove(pageKey(toRemove))
     if (toRemove is ViewerReaderPage) {
+        WebGpuDiagnostics.recordEviction("ch=${toRemove.page.chapter.chapter.id}/i=${toRemove.page.index}")
         logcat(LogPriority.DEBUG) {
             "Evicted ch=${toRemove.page.chapter.chapter.id}/i=${toRemove.page.index} " +
                 "state=${toRemove.state} decoded=${toRemove.isDecoded} " +

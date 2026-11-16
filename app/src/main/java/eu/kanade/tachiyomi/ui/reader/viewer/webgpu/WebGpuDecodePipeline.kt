@@ -549,6 +549,10 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
             val dstW = (frameWidth * scale).toInt().coerceIn(8, frameWidth)
             val dstH = (frameHeight * scale).toInt().coerceIn(8, frameHeight)
             traceStage(trace, "downsample", "${frameWidth}x$frameHeight -> ${dstW}x$dstH cap=$maxPixels")
+            // Set before the resize is attempted: a downsample that then OOMs and uploads the
+            // original is still a session that hit its pixel ceiling, which is the fact worth
+            // counting.
+            trace?.downsampled = true
             try {
                 val resized = if (dec.isHdr) {
                     ImageUtil.resizeF16(framePixels, frameWidth, frameHeight, dstW, dstH)

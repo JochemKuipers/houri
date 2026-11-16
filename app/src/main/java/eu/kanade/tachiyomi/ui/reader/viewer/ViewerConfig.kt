@@ -10,7 +10,14 @@ import tachiyomi.core.common.preference.Preference
 /**
  * Common configuration for all viewers.
  */
-abstract class ViewerConfig(readerPreferences: ReaderPreferences, protected val scope: CoroutineScope) {
+abstract class ViewerConfig(
+    // KMK --> A property rather than a bare parameter: a subclass that resolves a setting at access
+    // time (rather than caching it in `init`) needs the store from a member function, where a
+    // constructor parameter is not in scope. Every existing subclass passes it positionally, so this
+    // is source-compatible.
+    protected val readerPreferences: ReaderPreferences,
+    protected val scope: CoroutineScope,
+) {
 
     var imagePropertyChangedListener: (() -> Unit)? = null
 

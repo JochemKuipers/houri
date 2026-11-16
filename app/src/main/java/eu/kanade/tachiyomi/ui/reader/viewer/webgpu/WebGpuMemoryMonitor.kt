@@ -42,7 +42,7 @@ internal fun WebGpuViewer.startMemoryMonitor() {
             while (!isDestroyed) {
                 val pressure = memoryBudget.budget().pressure
                 // Tighter pressure means sampling harder, because that is when the answer changes.
-                delay(if (pressure == WebGpuMemoryBudget.Pressure.ROOMY) ROOMY_INTERVAL_MS else TIGHT_INTERVAL_MS)
+                delay(if (pressure == MemoryPressure.ROOMY) ROOMY_INTERVAL_MS else TIGHT_INTERVAL_MS)
                 if (isDestroyed) break
                 applyMemoryBudget("poll")
             }
@@ -74,6 +74,7 @@ internal fun WebGpuViewer.applyMemoryBudget(reason: String) {
         // The surface may not exist yet, or may be mid-teardown. The budget is re-pushed next tick.
     }
 
+    WebGpuDiagnostics.recordBudget(budget.describe())
     val underPressure = memoryBudget.shouldShrinkDecodedPages()
     val previous = memoryPressureLast
     memoryPressureLast = budget.pressure
@@ -111,5 +112,5 @@ private const val TIGHT_INTERVAL_MS = 2_000L
 private const val RECOVER_COOLDOWN_MS = 12_000L
 
 /** Recovery also needs pressure to actually be good, not merely no longer tight. */
-private val RECOVER_PRESSURE = WebGpuMemoryBudget.Pressure.ROOMY
+private val RECOVER_PRESSURE = MemoryPressure.ROOMY
 // KMK <--
