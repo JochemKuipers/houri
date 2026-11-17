@@ -22,8 +22,8 @@ import eu.kanade.presentation.more.MoreScreen
 import eu.kanade.tachiyomi.data.connections.discord.DiscordRPCService
 import eu.kanade.tachiyomi.data.connections.discord.DiscordScreen
 import eu.kanade.tachiyomi.data.download.DownloadManager
-import eu.kanade.tachiyomi.ui.home.TabEvent
 import eu.kanade.tachiyomi.ui.home.TabReselectEventKey
+import eu.kanade.tachiyomi.ui.home.TopLevelRoute
 import eu.kanade.tachiyomi.ui.setting.addSettingsRoute
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +38,7 @@ import mihon.core.navigation.SettingsRoute
 import mihon.core.navigation.StatsRoute
 import mihon.core.navigation.domain.SettingsDestination
 import mihon.core.navigation.util.LocalBackStack
+import mihon.core.navigation.util.LocalTopLevelBackStack
 import mihon.presentation.core.util.isTabletUi
 import tachiyomi.core.common.util.lang.launchIO
 
@@ -45,6 +46,7 @@ import tachiyomi.core.common.util.lang.launchIO
 fun MoreTab() {
     val context = LocalContext.current
     val backStack = LocalBackStack.current
+    val topLevelBackStack = LocalTopLevelBackStack.current
     val resultEventBus = LocalResultEventBus.current
     val isTabletUi = isTabletUi()
     val viewModel = metroViewModel<MoreViewModel>()
@@ -69,8 +71,12 @@ fun MoreTab() {
         onClickAbout = { backStack.addSettingsRoute(SettingsRoute(SettingsDestination.About), isTabletUi) },
         // SY -->
         onClickBatchAdd = { backStack.add(BatchAddRoute) },
-        onClickUpdates = { resultEventBus.sendResult(TabEvent.Updates) },
-        onClickHistory = { resultEventBus.sendResult(TabEvent.History) },
+        // KMK --> Switch tabs the way the tab bar does (direct setTopLevel) instead of a
+        // TabEvent round-trip through the result bus: users reported these fallback rows
+        // doing nothing when the navbar button was hidden.
+        onClickUpdates = { topLevelBackStack.setTopLevel(TopLevelRoute.Updates) },
+        onClickHistory = { topLevelBackStack.setTopLevel(TopLevelRoute.History) },
+        // KMK <--
         // SY <--
         // KMK -->
         onClickLibraryUpdateErrors = { backStack.add(LibraryUpdateErrorRoute) },

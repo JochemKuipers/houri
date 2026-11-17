@@ -122,7 +122,14 @@ fun BrowseSourceContent(
         // applies its own padding, so padding the modifier as well would inset
         // the placeholder by an extra 8dp and make the grid shift on arrival.
         LibraryLayoutShimmer(
-            displayMode = if (ehentaiBrowseDisplayMode) LibraryDisplayMode.List else displayMode,
+            // The E-Hentai list shape applies only to E-H based sources, like the real content
+            // branch below and the toolbar do; `enhanced_e_hentai_view` defaults to true, so
+            // without the check every other source's first page drew the list skeleton.
+            displayMode = if (ehentaiBrowseDisplayMode && source?.isEhBasedSource() == true) {
+                LibraryDisplayMode.List
+            } else {
+                displayMode
+            },
             columns = columnsCount.takeIf { it > 0 } ?: ADAPTIVE_SKELETON_COLUMNS,
             contentPadding = contentPadding,
         )

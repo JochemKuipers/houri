@@ -97,6 +97,9 @@ class SyncManager(
             readEntries = syncOptions.readEntries,
             savedSearchesFeeds = syncOptions.savedSearchesFeeds,
             // SY <--
+            // KMK -->
+            customCovers = syncOptions.customCovers,
+            // KMK <--
         )
 
         logcat(LogPriority.DEBUG) { "Begin create backup" }

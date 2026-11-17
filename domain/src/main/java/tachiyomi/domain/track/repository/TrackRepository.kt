@@ -19,6 +19,14 @@ interface TrackRepository {
 
     fun getTracksByMangaIdAsFlow(mangaId: Long): Flow<List<Track>>
 
+    // KMK -->
+    /** Every distinct [Track.trackerId] the DB holds, once each; see the achievements watcher. */
+    suspend fun getTrackerIds(): List<Long>
+
+    /** Same as [getTrackerIds] as a stream, re-emitted whenever the track table changes. */
+    fun getTrackerIdsAsFlow(): Flow<List<Long>>
+    // KMK <--
+
     suspend fun delete(mangaId: Long, trackerId: Long)
 
     // KMK -->

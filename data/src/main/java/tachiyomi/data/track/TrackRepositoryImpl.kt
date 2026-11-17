@@ -52,6 +52,16 @@ class TrackRepositoryImpl(
         }
     }
 
+    // KMK -->
+    override suspend fun getTrackerIds(): List<Long> {
+        return handler.awaitList { manga_trackQueries.getTrackerIds() }
+    }
+
+    override fun getTrackerIdsAsFlow(): Flow<List<Long>> {
+        return handler.subscribeToList { manga_trackQueries.getTrackerIds() }
+    }
+    // KMK <--
+
     override suspend fun delete(mangaId: Long, trackerId: Long) {
         handler.await {
             manga_trackQueries.delete(

@@ -250,6 +250,11 @@ data object CreateBackupRoute : NavKey
 @Serializable
 data object DebugInfoRoute : NavKey
 
+// KMK --> In-app log viewer: browse and share crash/dump/logcat files without leaving the app.
+@Serializable
+data object LogViewerRoute : NavKey
+// KMK <--
+
 @Serializable
 data object OpenSourceLicensesRoute : NavKey
 

@@ -141,12 +141,12 @@ internal object WebGpuDiagnostics {
         }
     }
 
-    /** One page dropped from the cache. [key] is the page key, so a repeat is spottable. */
     /** One decode the watchdog reported as sitting in a single stage past its deadline. */
     fun recordStall() {
         synchronized(this) { stallCount++ }
     }
 
+    /** One page dropped from the cache. [key] is the page key, so a repeat is spottable. */
     fun recordEviction(key: String) {
         synchronized(this) {
             evictions++
@@ -219,15 +219,21 @@ internal object WebGpuDiagnostics {
         buildString {
             val elapsedMs = (System.currentTimeMillis() - snapshot.startedAtMs).coerceAtLeast(0L)
             appendLine("WebGPU diagnostics - ${snapshot.header}")
-            appendLine("  elapsed=${elapsedMs}ms decodes=${snapshot.decodeCount} " +
-                "total=${snapshot.decodeTotalMs}ms max=${snapshot.decodeMaxMs}ms (${snapshot.decodeMaxLabel})")
+            appendLine(
+                "  elapsed=${elapsedMs}ms decodes=${snapshot.decodeCount} " +
+                    "total=${snapshot.decodeTotalMs}ms max=${snapshot.decodeMaxMs}ms (${snapshot.decodeMaxLabel})",
+            )
             if (snapshot.decodeOutcomes.isNotEmpty()) {
                 appendLine("  outcomes=" + snapshot.decodeOutcomes.entries.joinToString(" ") { "${it.key}:${it.value}" })
             }
-            appendLine("  downsampled=${snapshot.downsampled} stalls=${snapshot.stalls} " +
-                "evictions=${snapshot.evictions} worstChurn=${snapshot.worstChurn}")
-            appendLine("  deviceLosses=${snapshot.deviceLosses} recoveries=${snapshot.recoveries} " +
-                "failedRecoveries=${snapshot.failedRecoveries} parks=${snapshot.parks}")
+            appendLine(
+                "  downsampled=${snapshot.downsampled} stalls=${snapshot.stalls} " +
+                    "evictions=${snapshot.evictions} worstChurn=${snapshot.worstChurn}",
+            )
+            appendLine(
+                "  deviceLosses=${snapshot.deviceLosses} recoveries=${snapshot.recoveries} " +
+                    "failedRecoveries=${snapshot.failedRecoveries} parks=${snapshot.parks}",
+            )
             if (snapshot.ladder.isNotEmpty()) {
                 appendLine("  ladder=" + snapshot.ladder.entries.joinToString(" ") { "${it.key}:${it.value}" })
             }

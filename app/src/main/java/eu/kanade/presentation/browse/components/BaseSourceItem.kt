@@ -14,9 +14,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import eu.kanade.domain.source.model.installedExtension
 import eu.kanade.tachiyomi.util.system.LocaleHelper
 import tachiyomi.domain.source.model.Source
-import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.padding
-import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.icons.FlagEmoji
 import tachiyomi.presentation.core.util.secondaryItemAlpha
 
@@ -90,16 +88,10 @@ private val defaultContent: @Composable RowScope.(
             }
 
             // KMK -->
-            val contentWarningLabel = source.installedExtension?.contentWarning?.label
-            if (contentWarningLabel != null) {
-                Text(
-                    text = stringResource(contentWarningLabel.title).uppercase(),
-                    color = contentWarningLabel.color,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
+            // No content-warning badge here: this item renders source rows (sources tab, migrate
+            // and filter screens), and the warning belongs on the extension rows in the
+            // extensions tab, which has its own badge (ExtensionsScreenItems).
+            // KMK <--
         }
         // KMK <--
     }

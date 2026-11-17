@@ -8,6 +8,7 @@ import eu.kanade.tachiyomi.data.backup.models.BackupManga
 import eu.kanade.tachiyomi.data.backup.models.backupChapterMapper
 import eu.kanade.tachiyomi.data.backup.models.backupMergedMangaReferenceMapper
 import eu.kanade.tachiyomi.data.backup.models.backupTrackMapper
+import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.source.online.MetadataSource
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import exh.source.getMainSource
@@ -17,8 +18,10 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import mihon.core.concurrency.AppDispatchersHolder
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.DatabaseHandler
 import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.chapter.ChapterMapper
@@ -34,6 +37,9 @@ class MangaBackupCreator(
     private val handler: DatabaseHandler = globalAppGraph.databaseHandler,
     private val getCategories: GetCategories = globalAppGraph.getCategories,
     private val getHistory: GetHistory = globalAppGraph.getHistory,
+    // KMK -->
+    private val coverCache: CoverCache = globalAppGraph.coverCache,
+    // KMK <--
     // SY -->
     private val sourceManager: SourceManager = globalAppGraph.sourceManager,
     private val getCustomMangaInfo: GetCustomMangaInfo = globalAppGraph.getCustomMangaInfo,
@@ -84,6 +90,26 @@ class MangaBackupCreator(
         mangaObject.excludedScanlators = handler.awaitList {
             excluded_scanlatorQueries.getExcludedScanlatorsByMangaId(manga.id)
         }
+
+        // KMK -->
+        // The custom cover is a file in the cover cache rather than a column, so nothing else in
+        // this entry refers to it: without reading it here a restore drops the cover, and the file
+        // is keyed by manga id, which a different device assigns differently - the restore re-keys
+        // these bytes to the id it gets (see MangaRestorer.restoreCustomCover).
+        if (options.customCovers) {
+            val coverFile = coverCache.getCustomCoverFile(manga.id)
+            if (coverFile.isFile) {
+                val bytes = runCatching { coverFile.readBytes() }.getOrNull()
+                if (bytes == null || bytes.isEmpty()) {
+                    logcat(LogPriority.WARN) {
+                        "Failed to read the custom cover of manga ${manga.id}; it will not be in the backup"
+                    }
+                } else {
+                    mangaObject.customCover = bytes
+                }
+            }
+        }
+        // KMK <--
 
         if (options.chapters) {
             // Backup all the chapters

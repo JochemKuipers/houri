@@ -39,6 +39,41 @@ a state machine or a retry ladder is a top-level extension beside it, one concer
 | `WebGpuPlaceholderPages.kt` | `ProgressPage` / `ErrorPage` / `TransitionPage` — drawn procedurally |
 | `WebGpuRestore.kt` | deferred reading-position restore, deferred until the target page has real heights |
 
+**`Viewer` gained three audience hooks (KMK).** The activity is the only thing that knows when it
+stops, so `Viewer` declares `onActivityStop()` / `onActivityStart()` and `onMemoryPressure()`, all
+default no-op. `ReaderActivity` fires the first two from `onPause`/`onResume`, and the last from a
+`readerTrimCallbacks` `ComponentCallbacks2` registered in `onCreate` and unregistered in
+`onDestroy`.
+
+Only `WebGpuViewer` and `NovelWebViewer` implement them:
+
+| Viewer | `onActivityStop/Start` | `onMemoryPressure` |
+|---|---|---|
+| WebGPU | clears/sets `isReaderActive` (monitor idle cadence) + re-samples on resume | `applyMemoryBudget` + `shedMemoryUnderPressure` |
+| Novel | — | clears `inlineCache` (base64-inlined documents) and `readerFontCache` (whole `@font-face` rules) |
+| Pager / Webtoon | — | default no-op, deliberately |
+
+**Why the legacy viewers shed nothing.** This was checked, not assumed: `PagerViewerAdapter.preprocessed`
+is the only derived map in either, and it holds `InsertPage` records for the **next chapter** — read
+when that chapter loads — so clearing it mid-session loses transition pages. Their other memory is
+RecyclerView view pools and Coil's byte cache, both of which already evict correctly
+(`PagerPageHolder.recycle` / `WebtoonPageHolder.recycle` cancel the load job and reset the view). A
+blanket shed there would cost a visible re-decode of the page being read in exchange for memory the
+framework reclaims anyway.
+
+> **Rule: a memory-pressure callback may only drop derived data a render can rebuild.** If the thing
+> being cleared is read back as *content* rather than recomputed, it is not a cache. `preprocessed`
+> is the trap: both its name and its `MutableMap<Int, InsertPage>` shape read like one.
+
+`ReaderActivity` deliberately excludes `TRIM_MEMORY_UI_HIDDEN` from that callback — screen-off is not
+memory pressure, and the WebGPU viewer already handles it separately.
+
+**The memory arithmetic is shared with the rest of the app.** `DeviceTier` / `MemoryPressure` and
+the ceilings now live in `core:common` (`util/system/DeviceMemory*.kt`), read through
+`AppMemoryMonitor`. This folder keeps `WebGpuMemoryMath.kt` for the reader's *own* budget arithmetic
+(decoded pages, tiles) and `WebGpuResourcePolicy.kt` for the action policy — hysteresis, cadence,
+refresh-rate, RGB_565, JXL, parallelism. Do not add a second answer to any of those here.
+
 The render engine is a git **submodule** (`external/webgpuviewer-houri`, `:webgpuviewer`); the app
 never fetches images itself — it hands the library an `ImagePage` per page and the library draws it.
 

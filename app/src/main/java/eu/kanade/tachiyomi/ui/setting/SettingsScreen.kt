@@ -123,8 +123,24 @@ fun SettingsScreen() {
             AppBar(
                 title = stringResource(MR.strings.label_settings),
                 navigateUp = {
-                    if (isTabletUi) backStack.removeLastOrNull()
-                    backStack.removeLastOrNull()
+                    // KMK --> On tablet the hub is the two-pane list pane, and its arrow means
+                    // "leave settings": pop the hub entry together with everything above it.
+                    // Detail screens can navigate deeper (Connections -> Discord RPC), so the
+                    // detail need not sit directly above the hub. The old unconditional
+                    // double-pop assumed it did, and opening a sub-menu left the previous detail
+                    // stranded on top with no list entry beside it, collapsing the two-pane
+                    // scene to the phone layout.
+                    // KMK <--
+                    if (isTabletUi) {
+                        val hubIndex = backStack.indexOfLast { it is SettingsRoute }
+                        if (hubIndex >= 0) {
+                            backStack.subList(hubIndex, backStack.size).clear()
+                        } else {
+                            backStack.removeLastOrNull()
+                        }
+                    } else {
+                        backStack.removeLastOrNull()
+                    }
                 },
                 actions = {
                     AppBarActions(

@@ -5,6 +5,7 @@ import android.content.ComponentCallbacks2
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.PointF
+import android.os.SystemClock
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -228,8 +229,14 @@ open class WebGpuViewer(
      * memory budget exists to prevent, and the decode throughput there is bounded by memory, not
      * by threads.
      */
-    internal fun decodeParallelism(): Int =
-        if (memoryBudget.deviceTier <= DeviceTier.SMALL) 1 else DECODE_WORKER_LIMIT
+    // KMK --> The rule lives in `decodeParallelismFor` (no Android import, harness-asserted) so
+    // the tier comparison, the pressure gate and the worker count cannot disagree. Live pressure
+    // now participates: a LARGE device that has gone TIGHT drops to one worker, because the second
+    // worker's transient bitmap is exactly what it can no longer afford.
+    internal fun decodeParallelism(): Int = decodeParallelismFor(
+        memoryBudget.deviceTier,
+        memoryBudget.budget().pressure,
+    )
 
     /**
      * The traces for the decodes currently in flight, one per worker.
@@ -463,6 +470,32 @@ open class WebGpuViewer(
      */
     @Volatile
     internal var memoryLastShrinkAt: Long = 0L
+
+    /**
+     * When the current pressure reading was first seen, which is what recovery's stability gate
+     * measures against.
+     *
+     * Stamped whenever the sampled pressure *changes*, so it answers "how long has this reading
+     * held" rather than "how long since we last looked". Written by the monitor coroutine and by
+     * `onTrimMemory` (main thread), hence volatile.
+     */
+    @Volatile
+    internal var memoryPressureSinceMs: Long = SystemClock.elapsedRealtime()
+
+    /**
+     * Whether the reader is the thing the user is currently looking at.
+     *
+     * A viewer hook rather than a poll: `ReaderActivity` clears it when the activity stops, because
+     * only the activity knows that. It is what lets the memory monitor back off to the idle cadence
+     * while the reader is backgrounded - the pager's attachment check alone would miss "activity
+     * stopped but the view was never detached", which is the common shape on Android.
+     *
+     * Volatile: written from the main thread (lifecycle callbacks) and read from the monitor
+     * coroutine. Defaults to true so a reader that is alive but whose host never calls the hook is
+     * sampled at the normal rate rather than silently starved.
+     */
+    @Volatile
+    internal var isReaderActive: Boolean = true
     // KMK <--
 
     /**
@@ -971,6 +1004,46 @@ open class WebGpuViewer(
             }
         }
     }
+
+    // KMK --> The audience hooks from [Viewer].
+    //
+    // The activity is the only thing that knows it stopped, so the viewer cannot infer this. What
+    // the WebGPU half does with it is narrow: drop the memory monitor to the idle cadence, because
+    // polling a device nobody is looking at four times a second is pure battery cost.
+    //
+    // The display's refresh-mode request is *not* released here, and that is deliberate rather than
+    // an omission. The library's `RequestMaxRefreshRateFor(motion)` already withdraws its request
+    // the moment motion stops, which covers "the reader stopped" too - a stopped reader is not
+    // flinging or panning. Releasing from here as well would be a second writer of one window
+    // attribute, which is how a mode request outlives the thing that asked for it.
+    override fun onActivityStop() {
+        isReaderActive = false
+    }
+
+    override fun onActivityStart() {
+        isReaderActive = true
+        // Sampled immediately rather than at the next tick: the reader has just come back, the
+        // device may have changed a great deal while it was away (a long background, another app
+        // released or consumed memory), and acting on a ten-second-old idle reading is how a cache
+        // stays the wrong size for the first page the user sees.
+        if (isDestroyed) return
+        runCatching { applyMemoryBudget("resume") }
+    }
+
+    /**
+     * The system says memory is short, or this reader is being backgrounded.
+     *
+     * Routed through the same `applyMemoryBudget` the monitor and `onTrimMemory` use, so there is
+     * one path that resizes caches and one rule for what it may evict. In particular this does *not*
+     * unconditionally shed: the budget may already be at its floor, and shedding below it costs a
+     * visible re-decode of the page being read without helping the OOM it is meant to prevent.
+     */
+    override fun onMemoryPressure() {
+        if (isDestroyed) return
+        applyMemoryBudget("viewer-pressure")
+        shedMemoryUnderPressure()
+    }
+    // KMK <--
 
     override fun destroy() {
         try {

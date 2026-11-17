@@ -72,14 +72,27 @@ fun NovelStatusLineOverlay(
     // The clock and the battery tick together, at a pace that outruns neither: a minute is the
     // clock's resolution and slower than any battery moves, so thirty seconds re-reads both
     // without being a timer that fires between the two things it exists to update.
+    //
+    // KMK --> The loop only exists if a field actually needs the device. With just chapter and
+    // progress selected there is nothing here to refresh - both arrive as parameters - and a
+    // 30-second wakeup for the rest of the reading session buys a recomposition that renders the
+    // same text. The clock is checked first because it is the field that changes most often, and
+    // the battery read is skipped when no field asks for it.
+    val needsClock = NovelStatusLine.Field.TIME in fields
+    val needsBattery = NovelStatusLine.Field.BATTERY in fields
     LaunchedEffect(fields) {
-        val timeFormat = DateFormat.getTimeInstance(DateFormat.SHORT, Locale.getDefault())
-        while (true) {
-            if (NovelStatusLine.Field.TIME in fields) timeText = timeFormat.format(Date())
-            if (NovelStatusLine.Field.BATTERY in fields) {
-                batteryPct = readBatteryPct(context)
+        // Guarded rather than early-returned: `return@LaunchedEffect` would end the lambda before
+        // its first suspension, and the compiler then treats the `delay` below as unreachable from
+        // a suspend context. Wrapping keeps every path suspend-correct.
+        if (needsClock || needsBattery) {
+            val timeFormat = DateFormat.getTimeInstance(DateFormat.SHORT, Locale.getDefault())
+            while (true) {
+                if (needsClock) timeText = timeFormat.format(Date())
+                if (needsBattery) {
+                    batteryPct = readBatteryPct(context)
+                }
+                delay(STATUS_LINE_TICK_MS)
             }
-            delay(30_000)
         }
     }
 
@@ -159,4 +172,10 @@ private fun contrastingForeground(background: Int?): Color {
     val luminance = 0.299 * red + 0.587 * green + 0.114 * blue
     return if (luminance > 140) Color(0xFF1B1B1B) else Color(0xFFEAEAEA)
 }
+
+// KMK --> How often the clock and battery are re-read. A minute is the clock's own resolution, so a
+// shorter tick would only ever re-render the same text; 30s is the compromise that keeps the minute
+// rollover prompt without being a timer that fires between the two things it exists to update.
+// KMK <--
+private const val STATUS_LINE_TICK_MS = 30_000L
 // KMK <--

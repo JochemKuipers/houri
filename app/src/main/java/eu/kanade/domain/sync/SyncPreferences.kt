@@ -75,6 +75,9 @@ class SyncPreferences(
             readEntries = preferenceStore.getBoolean("sync_readEntries", true).get(),
             savedSearchesFeeds = preferenceStore.getBoolean("sync_savedSearchesFeeds", true).get(),
             // SY <--
+            // KMK -->
+            customCovers = preferenceStore.getBoolean("sync_customCovers", false).get(),
+            // KMK <--
         )
     }
 
@@ -94,6 +97,9 @@ class SyncPreferences(
         preferenceStore.getBoolean("sync_readEntries", true).set(syncSettings.readEntries)
         preferenceStore.getBoolean("sync_savedSearchesFeeds", true).set(syncSettings.savedSearchesFeeds)
         // SY <--
+        // KMK -->
+        preferenceStore.getBoolean("sync_customCovers", false).set(syncSettings.customCovers)
+        // KMK <--
     }
 
     fun getSyncTriggerOptions(): SyncTriggerOptions {

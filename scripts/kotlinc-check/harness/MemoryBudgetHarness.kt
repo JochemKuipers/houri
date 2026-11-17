@@ -12,9 +12,11 @@
 // Getting one wrong is not a crash - it is a reader that quietly OOMs two pages into a comic, or a
 // 12GB phone that runs like a 2GB one.
 
+import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.DECODE_WORKERS
 import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.DeviceTier
 import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.MemoryPressure
 import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.budgetScaleFor
+import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.decodeParallelismFor
 import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.deviceTierFor
 import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.deviceTierOfTotalMem
 import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.fitsWorkingSet
@@ -197,6 +199,30 @@ fun main() {
     check("a page that does not fit twice is not", !fitsWorkingSet(300L * MB, 512L * MB))
     check("a zero-byte page is affordable", fitsWorkingSet(0L, 512L * MB))
     check("nothing is affordable with no budget", !fitsWorkingSet(1L, 0L))
+
+    // --- the decode-worker count ------------------------------------------------------------
+    // The rule this replaced was `tier <= SMALL -> 1 else 2` plus a pressure check. It must keep
+    // giving one worker on a small device (two concurrent decodes double the transient bitmap spike
+    // the byte budget exists to prevent) and two on a MEDIUM-or-better device with room.
+    check("TINY gets one decode worker at every pressure", decodeParallelismFor(DeviceTier.TINY, MemoryPressure.ROOMY) == 1)
+    check("SMALL gets one decode worker at every pressure", decodeParallelismFor(DeviceTier.SMALL, MemoryPressure.ROOMY) == 1)
+    check("MEDIUM gets two at ROOMY", decodeParallelismFor(DeviceTier.MEDIUM, MemoryPressure.ROOMY) == 2)
+    check("LARGE gets two at ROOMY", decodeParallelismFor(DeviceTier.LARGE, MemoryPressure.ROOMY) == 2)
+    check("XLARGE gets two at ROOMY", decodeParallelismFor(DeviceTier.XLARGE, MemoryPressure.ROOMY) == 2)
+    // Pressure may only ever reduce the count, never raise it - a device under pressure running two
+    // workers is the shape that loses the GPU device two pages into a comic.
+    for (t in DeviceTier.entries) {
+        for (p in MemoryPressure.entries) {
+            val n = decodeParallelismFor(t, p)
+            check(
+                "${t.name} at $p runs between one and ${DECODE_WORKERS} workers",
+                n in 1..DECODE_WORKERS,
+            )
+            if (p != MemoryPressure.ROOMY) {
+                check("${t.name} at $p runs no more workers than at ROOMY", n <= decodeParallelismFor(t, MemoryPressure.ROOMY))
+            }
+        }
+    }
 
     // --- the mip chain, which is the measurement everything is sized from -----------------------
     // The chain is 4/3 of the base; measuring the base alone undercounts by a third, which is what

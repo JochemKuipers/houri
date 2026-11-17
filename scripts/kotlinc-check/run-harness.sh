@@ -160,6 +160,10 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     # asserts the copy proves nothing about the thing that runs. What stays in the viewer (the
     # ActivityManager reads, the page cache, the state machine) is covered by check.sh.
     WEBGPU_DIR="$REPO_ROOT/app/src/main/java/eu/kanade/tachiyomi/ui/reader/viewer/webgpu"
+    # The app-wide memory arithmetic. Same split as the reader's: the pure class fold and ceilings
+    # live in core:common with no Android import, and DeviceMemory.kt (which reads ActivityManager)
+    # is covered by check.sh. Compiled directly rather than stubbed - a stub would be a copy, and
+    # asserting a copy proves nothing about the thing that runs.
     case "$NAME" in
         DecodePriorityHarness)
             # The queue itself, generic precisely so this file can link the real class.
@@ -169,7 +173,24 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
         SpreadMathHarness)
             SOURCES+=("$WEBGPU_DIR/WebGpuSpreadMath.kt") ;;
         MemoryBudgetHarness)
-            SOURCES+=("$WEBGPU_DIR/WebGpuMemoryMath.kt") ;;
+            # The reader's own budget arithmetic, plus the shared vocabulary it now aliases
+            # (DeviceTier / MemoryPressure and the fold). Both shared files are pure - no Android
+            # import - which is exactly why the reader could adopt them without giving up the
+            # offline harness that proves its ceilings.
+            SOURCES+=("$WEBGPU_DIR/WebGpuMemoryMath.kt")
+            SOURCES+=("$WEBGPU_DIR/WebGpuResourcePolicy.kt")
+            SOURCES+=(
+                "$REPO_ROOT/core/common/src/main/kotlin/tachiyomi/core/common/util/system/DeviceMemoryClass.kt"
+                "$REPO_ROOT/core/common/src/main/kotlin/tachiyomi/core/common/util/system/DeviceMemoryMath.kt"
+            ) ;;
+        DeviceMemoryHarness)
+            # The app-wide half: the tier fold and the ceilings that now govern Coil's image cache,
+            # the JXL dimension cap, the RGB_565 decision, the fetch pool and the RAM gates. Both
+            # files are pure (no Android import), which is exactly why they can be compiled here.
+            SOURCES+=(
+                "$REPO_ROOT/core/common/src/main/kotlin/tachiyomi/core/common/util/system/DeviceMemoryClass.kt"
+                "$REPO_ROOT/core/common/src/main/kotlin/tachiyomi/core/common/util/system/DeviceMemoryMath.kt"
+            ) ;;
         ImageValidationHarness)
             SOURCES+=("$WEBGPU_DIR/WebGpuImageValidation.kt") ;;
         ExifRotationHarness)

@@ -83,6 +83,12 @@ in-flight trace registry is `activeDecodes` (one entry per worker) — **not** a
 stall watchdog watches every entry. Small/TINY devices run one worker on purpose (two concurrent
 decodes double the transient bitmap spike the memory budget exists to prevent).
 
+The watchdog's cadence is two-speed (KMK): 1s while any decode is in flight, 10s when none is. A
+stall cannot exist without an in-flight decode, so parking while `activeDecodes` is empty costs only
+the *noticing* of a newly started decode — detection itself is from the trace's timestamps, never
+from the loop's tick, so no stall is ever reported later than it would have been. Before this, the
+1s tick ran for the whole session whether or not anything was decoding.
+
 ## PAGE STATE MACHINE
 
 ```
@@ -562,6 +568,69 @@ keeps the answer current. This replaced `isLowRamDevice`, which was `totalMem < 
 and publishing the snapshot. Declaration order is load-bearing (`deviceTierFor` and the call sites
 compare with `<=`), and `MemoryPressure`'s ordinal order is the recovery test.
 
+**This arithmetic is now app-wide, and it has a second implementation site.** The tier vocabulary
+and the fold live in `core:common` as `DeviceMemoryClass.kt`, with the ceilings that govern Coil's
+image cache, the JXL dimension cap, the RGB_565 decision and the fetch pool in `DeviceMemoryMath.kt`,
+and the `ActivityManager` read plus the published snapshot in `AppMemoryMonitor.kt` — asserted by
+`DeviceMemoryHarness`. This file keeps `WebGpuMemoryMath.kt` for the reader's *own* per-tier ceilings
+and pixel/measurement helpers, and its `DeviceTier` / `MemoryPressure` are **typealiases** of the
+shared ones, so there is one vocabulary and one comparison. If you change a threshold here, check
+whether it belongs in the shared pair instead: a device that is "low memory" to Coil and "fine" to
+the reader is the bug this split exists to prevent.
+
+> **The two `DeviceTier` enums were a real hazard, not a style question.** The reader's enum carries
+> its per-tier ceilings as constructor data, so it could not simply be deleted in favour of a bare
+> shared one. Moving it to `core:common` *with* its data, and leaving a typealias behind, is what
+> keeps `tier.maxDecodedPagesBytes` reading the same while making the tier comparable app-wide. Two
+> enums of the same name cannot be compared at all, and a policy function in the reader's package
+> binds to whichever is in scope.
+
+**The action policy is `WebGpuResourcePolicy.kt`** — no Android import, asserted by
+`MemoryBudgetHarness`. It answers the questions that turn a *reading* into something a user sees:
+`isMeaningfulPressureChange` (hysteresis), `sampleIntervalMs` / `criticalBackoffMs` (cadence),
+`shouldRequestMaxRefreshRate` (does the panel's top rate earn its battery right now),
+`shouldDowngradeToRgb565`, `jxlMaxDimension`, `coilMemoryCachePercent`, `coilFetchParallelism`,
+`decodeParallelismFor`. Every one of those is a decision a user can see — a cache that rebuilt on a
+passing spike is a visible flash, a display pinned at 120 Hz is an hour of battery, and RGB_565 on
+a page that did not need it is banding on a gradient.
+
+### The monitor backs off when nobody is looking
+
+Three cadences, all from `sampleIntervalMs` so this loop and the app-wide sampler cannot drift:
+
+| Situation | Interval |
+|---|---|
+| Idle — `isReaderIdle()` (activity stopped, or the pager detached from its window) | 10 s |
+| ROOMY / TIGHT | 4 s / 2 s |
+| CRITICAL, sustained | backs off from 1 s toward 16 s (`criticalBackoffMs`) |
+
+The idle case is the battery fix: a reader left open overnight used to wake four times a second to
+re-read a value that had not moved. `onTrimMemory` and `applyMemoryBudget` still run immediately at
+any moment — the idle cadence only governs *polling*.
+
+### Recovery is gated three ways, not two
+
+`RECOVER_COOLDOWN_MS` (12 s) **and** `RECOVER_PRESSURE` (ROOMY) **and** a stability gate: the
+improving reading must have held for `RECOVERY_STABLE_MS` (8 s). The cooldown is about how long ago
+the last shrink was; the stability gate is about whether *this* reading has settled. They are
+separate dials because a device hovering on the TIGHT boundary crosses it for a single sample and
+falls back — and rebuilding the whole page cache on that is a visible flash for nothing. Same
+principle as the stuck-page ladder: **cooldown and escalation are independent.**
+
+### The audience hooks (`Viewer.kt`)
+
+The activity is the only thing that knows it stopped, so `Viewer` gained `onActivityStop()` /
+`onActivityStart()` (default no-op; WebGPU clears/sets `isReaderActive` and re-samples on resume)
+and `onMemoryPressure()`, which the activity's `readerTrimCallbacks` fires for every viewer on the
+severe trim levels. Before this, **only the WebGPU viewer had any trim path at all** — pager, strip
+and novel held their whole decoded working set through a background or a spike, and the system's
+only remaining option was to kill the process.
+
+`ReaderActivity` deliberately excludes `TRIM_MEMORY_UI_HIDDEN` (screen off) from that callback:
+a shed on every lock/unlock costs a visible re-decode, and the WebGPU viewer already handles
+screen-off through its own `trimCallbacks`. The rule is the one in "Low memory reaches the tile
+cache" below — screen-off is not memory pressure.
+
 **A failed `getMemoryInfo` used to demote the device to TINY for the session.** The fallback
 constant read `4L * 1024L * 1024L` — four *mebibytes*, not a device that exists — so every read
 that threw or returned nothing fell through `deviceTierFor` to the smallest tier: fewer resident
@@ -575,7 +644,9 @@ silent downgrade.
 | Is memory short *right now*? | never asked | `Pressure` — ROOMY / TIGHT / CRITICAL |
 | How big is the page cache? | a page *count* | a byte budget, plus the count |
 | How big is the tile cache? | fixed 16–64 MB | `cacheByteBudget`, pushed every tick |
-| Does it recover? | never | after a 12 s cooldown at ROOMY |
+| Does it recover? | never | after a 12 s cooldown at ROOMY, **and** an 8 s stable reading |
+| How often is the system re-read? | every 4 s, forever | 4 s / 2 s / 10 s idle / backing off at CRITICAL |
+| Does the panel stay at max Hz? | yes, always | only while something is moving |
 
 ### Headroom, not `availMem`
 
@@ -639,11 +710,17 @@ armeabi-v7a losing its Vulkan device two pages into a comic). The tier cap also 
 parallelism to one worker (`decodeParallelism` keys on the tier), halving the transient decode
 spike. 32-bit keeps the WebGPU viewer — that is a deliberate decision, not an oversight.
 
-### Recovery is gated twice
+### Recovery is gated three ways
 
-`RECOVER_COOLDOWN_MS` (12 s) **and** `RECOVER_PRESSURE` (ROOMY). The cooldown alone still
-oscillates on a device hovering at the TIGHT boundary, because every transition is a visible tile
-rebuild. Same principle as the stuck-page ladder: **cooldown and escalation are separate dials.**
+`RECOVER_COOLDOWN_MS` (12 s) **and** `RECOVER_PRESSURE` (ROOMY) **and** a stability gate
+(`RECOVERY_STABLE_MS`, 8 s, via `isMeaningfulPressureChange`). The cooldown alone still oscillates on
+a device hovering at the TIGHT boundary, because every transition is a visible tile rebuild — but
+the cooldown measures how long ago the last shed was, and says nothing about whether *this* reading
+has settled. Both are needed. Same principle as the stuck-page ladder: **cooldown and escalation are
+separate dials.**
+
+The escalation direction is deliberately ungated. Any move to worse pressure acts immediately: a
+device about to lose its GPU device gets no benefit from waiting a sample to be sure.
 
 ### `isLowRamDevice` is gone from the reader — do not bring it back
 
@@ -831,6 +908,34 @@ observed on an older APK can come from renderer code that no longer exists — a
 line, for instance, does not appear anywhere in the current tree.
 
 ## KNOWN LANDMINES (each one was a real bug)
+
+- **Never pin the display's top refresh mode for a static page.** `RequestMaxRefreshRate` set
+  `preferredDisplayModeId`, which is what *stops* an LTPO panel dropping to 60 Hz — and it used to run
+  once, unconditionally, when the viewer composed. A reader spends most of its session looking at a
+  page that is not moving, so the panel's most expensive state was held for pixels that never changed.
+  It is now `RequestMaxRefreshRateFor(motion)`, and the motion signal is the viewer's own state:
+  `isFlinging || isPanning || isScaleAnimating` in continuous, `animationJob?.isActive == true` in
+  paged. Releasing means assigning `0` to `preferredDisplayModeId` ("let the system choose"), never a
+  lower mode id — the latter would lock a 60 Hz panel at 60 Hz, which is the opposite of the intent.
+  **Rule: a display-mode preference is a request that must be withdrawn, not a capability to claim.**
+
+- **A trim callback is not a screen-off callback.** `TRIM_MEMORY_UI_HIDDEN` fires whenever the reader
+  is backgrounded, including a plain screen lock. The WebGPU viewer deliberately keeps it out of its
+  device-cache branch, because `TileRenderer.onLowMemory` pins `cacheScreens` to 0.8 and the resulting
+  rebuild would run on every unlock. `ReaderActivity.readerTrimCallbacks` follows the same rule: it
+  forwards only the *severe* levels (`RUNNING_LOW`/`RUNNING_CRITICAL`/`MODERATE`/`COMPLETE` and above)
+  to `Viewer.onMemoryPressure()`, and leaves `UI_HIDDEN` to the viewer's own lifecycle hooks.
+  **Rule: screen-off is an audience event (`onActivityStop`), not a memory event.**
+
+- **A tier enum that carries its own ceilings cannot be shared.** The reader's `DeviceTier` held the
+  per-tier byte budgets as constructor data. When Coil, the JXL cap and the RAM gates needed the same
+  tier, the honest options were to move the enum *with* its data into `core:common` and leave a
+  typealias behind (what happened), or to keep two enums of the same name — which cannot be compared,
+  and silently binds a policy function in the reader's package to whichever is in scope. If a new
+  consumer needs a tier property, it goes on the shared enum; an extension property would work for
+  Kotlin callers but is module-`internal` and so invisible to the offline harness that asserts these
+  numbers.
+  **Rule: one vocabulary, one comparison. A second `DeviceTier` is a silent disagreement.**
 
 - **Never let a 0x0 surface window write a scale.** The 2026-11 field report (e-ink reader:
   view a page, swipe back, swipe forward — the page now draws at ~50px) was a degenerate-scale
@@ -1153,7 +1258,8 @@ thing that runs.
 | `DecodePriorityHarness` | `decodePriorityFor` + the real `PriorityDecodeQueue`: class ordering, distance clamping, the direction flip (travelling-behind beats idle-ahead only within the boost window), `Int.MIN_VALUE` staying positive |
 | `StuckLadderHarness` | the escalation table, the cooldown, the fresh-window boundary, that a full ladder terminates and reaches GIVE_UP exactly once |
 | `SpreadMathHarness` | the height-match plan (never shrinks the taller side, clamps to the upload ceiling), degenerate dimensions as noops, the rescale gate |
-| `MemoryBudgetHarness` | the tier fold (RAM, low-RAM mark, 32-bit cap), pressure thresholds and their ordering, every floor, the JXL-below-page invariant at every tier and pressure, the 4/3 mip measurement |
+| `MemoryBudgetHarness` | the tier fold (RAM, low-RAM mark, 32-bit cap), pressure thresholds and their ordering, every floor, the JXL-below-page invariant at every tier and pressure, the 4/3 mip measurement — **plus** the shared action policy: hysteresis, cadence, refresh-rate, RGB_565 and JXL-dimension rules |
+| `DeviceMemoryHarness` | the app-wide half: the same fold and ceilings as seen from `core:common`, the 48MB RGB_565 threshold, the JXL dimension cap's monotonicity, and that the fallback is a real 4GB device rather than a silent downgrade |
 | `ImageValidationHarness` | every signature `PageBytesValidator` accepts (JPEG/PNG/GIF/BMP/WebP/JXL/AVIF/HEIF/TIFF/ICO), dimensions where the header is cheap, the refusals it exists for (an HTML body served as a page), and that pathological headers terminate |
 | `ExifRotationHarness` | all eight orientations: dimensions, hand-computed corner pixels, and the composition identities (5∘5, 7∘7, 6∘8, 6∘6 = half turn) |
 | `ChapterPreloadGuardHarness` | one winner per key, release and re-begin, stale requeue, blank/oversized keys, the key-set cap |
@@ -1243,6 +1349,10 @@ A clean session writes nothing to the in-app log: the log is read by someone cha
 | decode priority policy (pure, harness-asserted) | `WebGpuDecodePriority.kt` |
 | stuck-ladder escalation table (pure, harness-asserted) | `WebGpuStuckLadder.kt` |
 | device tier + pressure + ceilings (pure, harness-asserted) | `WebGpuMemoryMath.kt` |
+| hysteresis, cadence, refresh-rate + parallelism policy (pure) | `WebGpuResourcePolicy.kt` |
+| app-wide tier vocabulary + fold (pure, harness-asserted) | `core/common/.../util/system/DeviceMemoryClass.kt` |
+| app-wide ceilings + JXL/RGB565 policy (pure, harness-asserted) | `core/common/.../util/system/DeviceMemoryMath.kt` |
+| the `ActivityManager` read + published snapshot | `core/common/.../util/system/AppMemoryMonitor.kt` |
 | spread geometry (pure, harness-asserted) | `WebGpuSpreadMath.kt` |
 | continuous column width (pure, harness-asserted) | `WebGpuColumnWidth.kt` |
 | session diagnostics (bounded counters → in-app log) | `WebGpuDiagnostics.kt` |

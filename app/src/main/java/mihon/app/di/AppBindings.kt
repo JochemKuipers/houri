@@ -30,6 +30,7 @@ import tachiyomi.core.common.preference.AndroidPreferenceStore
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.storage.AndroidStorageFolderProvider
 import tachiyomi.core.common.storage.FolderProvider
+import tachiyomi.data.BlacklistColumnAdapter
 import tachiyomi.data.Chapter
 import tachiyomi.data.Custom_manga_info
 import tachiyomi.data.Database
@@ -123,7 +124,11 @@ object AppBindings {
                 remote_memoAdapter = MemoColumnAdapter,
                 // KMK -->
                 scanlator_priorityAdapter = StringListColumnAdapter,
-                blacklisted_chaptersAdapter = StringListColumnAdapter,
+                // KMK --> Not StringListColumnAdapter: its ", " separator cannot round-trip a
+                // key that contains one (scanlator names, embedded urls), and a list that no
+                // longer holds the key that was written silently un-blacklists the chapter
+                // (issue #68). BlacklistColumnAdapter is lossless with a legacy fallback.
+                blacklisted_chaptersAdapter = BlacklistColumnAdapter,
                 scanlator_range_rulesAdapter = StringListColumnAdapter,
                 // KMK <--
             ),

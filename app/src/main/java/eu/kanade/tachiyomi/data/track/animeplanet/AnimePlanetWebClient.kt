@@ -87,19 +87,40 @@ class AnimePlanetWebClient(context: Context) {
                             val delay = if (loadCount == 1) 3_000L else 1_000L
                             val extractRunnable = Runnable {
                                 if (done) return@Runnable
-                                try {
-                                    view.evaluateJavascript(SCRIPT_EXTRACT_HTML) { html ->
-                                        finish {
-                                            cont.resume(decodeJsString(html))
-                                        }
-                                    }
-                                } catch (_: Exception) {
-                                    // WebView may have been destroyed between the delay and now
-                                    finish(null)
-                                }
+                                pollExtract(view)
                             }
                             pendingExtractRunnable = extractRunnable
                             mainHandler.postDelayed(extractRunnable, delay)
+                        }
+
+                        // KMK --> 2026-11: anime-planet.com now fronts the search page with a
+                        // Cloudflare managed challenge (verified live: plain HTTP is challenged,
+                        // a real browser engine passes). The fixed 3s wait used to extract the
+                        // challenge page itself — "Just a moment…" — and the search parsed zero
+                        // cards from it, so queries returned "no results" while the challenge
+                        // was still clearing (or the challenge's reload loop ran the caller's
+                        // 20s timeout out to an error). A challenge page is never the answer:
+                        // poll until the cleared-challenge reload delivers the real document.
+                        // The caller's withTimeoutOrNull is the hard bound — its cancellation
+                        // path finishes and destroys this WebView either way.
+                        fun pollExtract(view: WebView) {
+                            try {
+                                view.evaluateJavascript(SCRIPT_EXTRACT_HTML) { html ->
+                                    val decoded = decodeJsString(html)
+                                    if (!done && isChallengePage(decoded)) {
+                                        val rearm = Runnable { if (!done) pollExtract(view) }
+                                        pendingExtractRunnable = rearm
+                                        mainHandler.postDelayed(rearm, 1_500L)
+                                        return@evaluateJavascript
+                                    }
+                                    finish {
+                                        cont.resume(decoded)
+                                    }
+                                }
+                            } catch (_: Exception) {
+                                // WebView may have been destroyed between the delay and now
+                                finish(null)
+                            }
                         }
 
                         override fun onReceivedError(
@@ -123,7 +144,12 @@ class AnimePlanetWebClient(context: Context) {
 
                 mainHandler.post(createAndLoad)
             }
-        } ?: throw IOException("WebView fetch timed out for $url")
+        } ?: throw IOException(
+            // Shown verbatim in the tracker search's error screen; name the likely cause
+            // instead of the implementation detail.
+            "Anime-Planet did not respond in time — the site's bot protection may be " +
+                "challenging this request. Try again, and re-login from tracker settings if it keeps failing.",
+        )
     }
 
     /**
@@ -191,6 +217,23 @@ class AnimePlanetWebClient(context: Context) {
     companion object {
         /** JS snippet that returns the outer HTML of the document. */
         private const val SCRIPT_EXTRACT_HTML = "document.documentElement.outerHTML"
+
+        /**
+         * Markers of a Cloudflare interstitial ("Just a moment…", the managed-challenge
+         * script bundle, the Turnstile prompt). Checked on every poll of the extracted
+         * document so a page the challenge has not cleared yet is never handed to the
+         * parser as if it were the answer.
+         */
+        private val CHALLENGE_MARKERS = listOf(
+            "Just a moment",
+            "challenge-platform",
+            "_cf_chl_opt",
+            "cf-chl",
+            "Checking if the site connection is secure",
+            "Verify you are human",
+        )
+
+        fun isChallengePage(html: String): Boolean = CHALLENGE_MARKERS.any { html.contains(it) }
 
         /**
          * Decode a JSON-encoded JS string returned by [WebView.evaluateJavascript].

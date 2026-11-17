@@ -43,6 +43,7 @@ import eu.kanade.presentation.more.settings.screen.data.SyncTriggerOptionsRoute
 import eu.kanade.presentation.more.settings.screen.data.SyncTriggerOptionsScreen
 import eu.kanade.presentation.more.settings.screen.debug.BackupSchemaScreen
 import eu.kanade.presentation.more.settings.screen.debug.DebugInfoScreen
+import eu.kanade.presentation.more.settings.screen.debug.LogViewerScreen
 import eu.kanade.presentation.more.settings.screen.debug.WorkerInfoScreen
 import eu.kanade.presentation.more.settings.screen.downloaded.DownloadedContentScreen
 import eu.kanade.tachiyomi.ui.browse.extension.ExtensionsRoute
@@ -395,6 +396,12 @@ fun EntryProviderScope<NavKey>.appEntries() {
     entry<DebugInfoRoute> {
         DebugInfoScreen()
     }
+
+    // KMK --> In-app log viewer
+    entry<LogViewerRoute> {
+        LogViewerScreen()
+    }
+    // KMK <--
 
     entry<OpenSourceLicensesRoute> {
         OpenSourceLicensesScreen()

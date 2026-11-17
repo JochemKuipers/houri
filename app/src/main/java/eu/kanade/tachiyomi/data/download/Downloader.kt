@@ -148,6 +148,14 @@ class Downloader(
 
     init {
         launchNow {
+            // KMK --> The persisted queue names its chapters' sources by id, and the source map
+            // is only published after the extension scan (AndroidSourceManager gates it on
+            // extensionManager.isInitialized). Restoring at construction raced that: every queued
+            // download whose source was still missing was dropped by restore()'s HttpSource
+            // filter, and the store was cleared afterwards, so a full app close emptied the
+            // queue every time. Wait for the map before rebuilding the queue; the store keeps
+            // its entries meanwhile.
+            sourceManager.isInitialized.first { it }
             val chapters = async { store.restore() }
             addAllToQueue(chapters.await())
         }

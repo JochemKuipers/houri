@@ -311,11 +311,7 @@ object DebugFunctions {
     fun clearLogs(): String {
         return try {
             val context = globalAppGraph.context
-            val deleted = eu.kanade.tachiyomi.crash.CrashLogWriter.deleteAll(context)
-            try {
-                Runtime.getRuntime().exec("logcat -c").waitFor()
-            } catch (_: Exception) {}
-            "Cleared $deleted crash log files and logcat buffer"
+            eu.kanade.tachiyomi.util.CrashLogUtil(context).clearLogs()
         } catch (e: Exception) {
             "Failed to clear logs: ${e.message}"
         }

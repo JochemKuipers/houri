@@ -1137,6 +1137,30 @@ internal class NovelWebViewer(
         webView.destroy()
     }
 
+    // KMK --> The reader's memory-pressure hook.
+    //
+    // This viewer holds two caches that are pure derived data: `inlineCache` keeps finished
+    // `NovelInline` builds, and a build base64-encodes every plate and stylesheet a document reads,
+    // so a single illustrated entry is megabytes of `String`. `readerFontCache` keeps whole
+    // `@font-face` rules - a bundled variable font is half a megabyte of bytes spelled as a `data:`
+    // URI.
+    //
+    // Both are *derived*: dropping them costs a rebuild on the next render, never a lost document,
+    // a lost position or a lost highlight. That is exactly what a memory-pressure callback should
+    // shed, and it is why this does not touch the WebView itself - the live DOM, the reader's
+    // position and the text the reader is looking at are not rebuildable, and dropping them would be
+    // a visible regression rather than a memory fix.
+    //
+    // Deliberately not routed through the *font* cache's own bound: that bound exists to stop a
+    // picker session comparing a dozen families from pinning them all, and it is a steady-state
+    // limit, not an emergency one. Clearing it here is a one-time cost that a subsequent render
+    // repairs, and it is the difference between "the reader shrugs" and "the reader is killed".
+    override fun onMemoryPressure() {
+        synchronized(inlineCache) { inlineCache.clear() }
+        synchronized(readerFontCache) { readerFontCache.clear() }
+    }
+    // KMK <--
+
     override fun handleKeyEvent(event: KeyEvent): Boolean {
         // Action-up only, so a held key does not flip direction mid-hold.
         if (event.action != KeyEvent.ACTION_UP) return false

@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ArrowDropDown
 import androidx.compose.material.icons.outlined.Check
@@ -41,6 +40,7 @@ import eu.kanade.tachiyomi.ui.reader.viewer.novel.NovelFonts.ImportResult
 import eu.kanade.tachiyomi.util.system.toast
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
+import tachiyomi.presentation.core.components.ScrollbarLazyColumn
 import tachiyomi.presentation.core.components.SettingsItemsPaddings
 import tachiyomi.presentation.core.components.material.padding
 import tachiyomi.presentation.core.i18n.stringResource
@@ -178,7 +178,9 @@ internal fun NovelFontPickerDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(KMR.strings.pref_novel_font_family)) },
         text = {
-            LazyColumn(
+            // KMK --> ScrollbarLazyColumn: the bundled + imported families overflow the dialog
+            // height, and a bare LazyColumn gave no affordance for it.
+            ScrollbarLazyColumn(
                 modifier = Modifier.heightIn(max = 420.dp),
                 verticalArrangement = Arrangement.spacedBy(MaterialTheme.padding.extraSmall),
             ) {

@@ -34,6 +34,7 @@ import com.elvishew.xlog.printer.AndroidPrinter
 import com.elvishew.xlog.printer.Printer
 import com.elvishew.xlog.printer.file.backup.NeverBackupStrategy
 import com.elvishew.xlog.printer.file.naming.DateFileNameGenerator
+import com.hippo.unifile.UniFile
 import dev.mihon.injekt.patchInjekt
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.createGraphFactory
@@ -47,6 +48,7 @@ import eu.kanade.domain.ui.model.setAppCompatDelegateThemeMode
 import eu.kanade.tachiyomi.core.security.PrivacyPreferences
 import eu.kanade.tachiyomi.crash.CrashActivity
 import eu.kanade.tachiyomi.crash.GlobalExceptionHandler
+import eu.kanade.tachiyomi.crash.LogcatCapture
 import eu.kanade.tachiyomi.data.coil.BufferedSourceFetcher
 import eu.kanade.tachiyomi.data.coil.MangaCoverFetcher
 import eu.kanade.tachiyomi.data.coil.MangaCoverKeyer
@@ -67,7 +69,6 @@ import eu.kanade.tachiyomi.extension.ExtensionAutoUpdateWorker
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.ui.base.delegate.SecureActivityDelegate
 import eu.kanade.tachiyomi.util.CrashLogUtil
-import eu.kanade.tachiyomi.util.system.DeviceUtil
 import eu.kanade.tachiyomi.util.system.GLUtil
 import eu.kanade.tachiyomi.util.system.WebViewUtil
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
@@ -101,6 +102,8 @@ import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.util.lang.launchIO
+import tachiyomi.core.common.util.system.AppMemoryMonitor
+import tachiyomi.core.common.util.system.DeviceTier
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.manga.model.CustomMangaInfoLookup
@@ -112,6 +115,7 @@ import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.addSingleton
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
+import java.io.File
 import java.security.Security
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -256,6 +260,9 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     readerPreferences = globalAppGraph.readerPreferences,
                     translationPreferences = globalAppGraph.translationPreferences,
                     libraryPreferences = globalAppGraph.libraryPreferences,
+                    // KMK --> tracker-connect achievements count DB-held trackers too
+                    trackRepository = globalAppGraph.trackRepository,
+                    // KMK <--
                 ).install(this)
             }.onFailure { xLogE("Failed to install feature achievement hooks", it) }
         }
@@ -281,7 +288,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
         )
 
         // KMK -->
-        if (isDebugBuildType) Timber.plant(Timber.DebugTree())
+        // Planted in every build: the Discord RPC port (and any other Timber call site) was
+        // completely silent in preview/beta builds, which is exactly when it had to be
+        // diagnosed from a field report — "beta has no icons and no logs" was unanswerable
+        // because the asset errors below never reached logcat at all. DebugTree derives each
+        // call site's tag from its class, same as debug.
+        Timber.plant(Timber.DebugTree())
         // KMK <--
 
         GlobalExceptionHandler.initialize(applicationContext, CrashActivity::class.java)
@@ -317,6 +329,12 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             LogcatLogger.loggers += XLogLogcatLogger() // SY Redirect Logcat to XLog
             LogcatLogger.loggers += AndroidLogcatLogger(minLogPriority)
         }
+        // KMK --> Always-on logcat ring: recent logcat {} / xLog* lines are kept in memory so a
+        // non-crash problem can be diagnosed after the fact, without the system buffer rolling
+        // over. Installed after LogcatLogger so the logcat() calls reach it, and sized for the
+        // device (tighter bounds on low-RAM hardware).
+        LogcatCapture.install(this)
+        // KMK <--
 
         setupNotificationChannels()
 
@@ -470,10 +488,34 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
                     .build(),
             )
 
-            val isLowRam = DeviceUtil.isLowRamDevice(this@App)
+            // KMK --> Coil's memory cache, RGB_565 admission and fetch pool were all sized off one
+            // static boolean (`totalMem < 3GB`), so a 12GB phone and a 2GB phone each got one of two
+            // answers regardless of what was actually free. They now read the shared device tier,
+            // which also folds in the vendor low-RAM mark and the 32-bit ABI cap - so a 4GB phone the
+            // OEM marked low-RAM is no longer treated as a healthy 4GB device here while the reader
+            // demotes it.
+            //
+            // This is also the sample that *primes* the app-wide snapshot: everything after it -
+            // the decoders' pressure checks, `sampleIfStale` - reads a real reading rather than a
+            // tier fallback, from the first image ever loaded. Coil builds the loader lazily, so
+            // this runs at the first image request; one binder call, the only place outside a
+            // decode that pays for it.
+            //
+            // maxSizePercent is a fraction of the *heap*, so the tier's byte figure is expressed as
+            // a share of the runtime ceiling rather than passed through as a percentage. A device
+            // with a large heap and a small tier (a 2GB phone with a generous per-app heap) still
+            // gets the tier's absolute budget, which is the number that was chosen to be safe.
+            val memory = AppMemoryMonitor.sample(context)
+            val heapCeiling = Runtime.getRuntime().maxMemory()
+            val imageCachePercent = if (heapCeiling > 0L) {
+                (memory.imageCacheBytes.toDouble() / heapCeiling)
+                    .coerceIn(0.05, 0.30)
+            } else {
+                0.18
+            }
             memoryCache(
                 MemoryCache.Builder()
-                    .maxSizePercent(context, if (isLowRam) 0.12 else 0.18)
+                    .maxSizePercent(context, imageCachePercent)
                     .build(),
             )
 
@@ -485,14 +527,24 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             if (imageAnimatorScale > 0f) {
                 crossfade((300 * imageAnimatorScale).toInt())
             }
-            allowRgb565(isLowRam)
+            // RGB_565 is allowed on a small tier only. The halving is a *device* capability here
+            // rather than a per-page decision: `allowRgb565` tells Coil it may use the format at all,
+            // and the per-image judgement (is this page big enough to be worth the banding?) stays in
+            // the decoders, where the bytes are actually known.
+            allowRgb565(memory.tier <= DeviceTier.SMALL)
             // KMK -->
             if (EHLogLevel.isExtraLogging()) logger(DebugLogger())
             // KMK <--
 
             fetcherCoroutineContext(
+                // KMK --> Was `if (isLowRam) 4 else 6`. The fetch pool is where the largest
+                // transient buffers live - each in-flight request can hold a page-sized PixelCopy -
+                // so its width is a memory decision. It comes from the startup reading here; the
+                // *per-decode* decisions (RGB_565, the JXL cap) take the fresher path through
+                // `sampleIfStale` inside the decoders, because those run on every image and their
+                // refresh is bounded to once a second.
                 mihon.core.concurrency.AppDispatchersHolder.get().io
-                    .limitedParallelism(if (isLowRam) 4 else 6),
+                    .limitedParallelism(memory.fetchParallelism),
             )
             decoderCoroutineContext(
                 mihon.core.concurrency.AppDispatchersHolder.get().io.limitedParallelism(2),
@@ -564,8 +616,11 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             // KMK -->
             EHLogLevel.isExtremeLogging() -> LogLevel.ALL
             EHLogLevel.isExtraLogging() -> LogLevel.DEBUG
+            // KMK --> At MINIMAL only errors reach the file. Warnings are debug-level detail that
+            // normal users should not accumulate on disk by default — they remain available in the
+            // in-memory ring and to anyone who raises the log level.
+            else -> LogLevel.ERROR
             // KMK <--
-            else -> LogLevel.WARN
         }
 
         val logConfig = LogConfiguration.Builder()
@@ -576,11 +631,21 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
 
         val printers = mutableListOf<Printer>(AndroidPrinter())
 
-        val logFolder = globalAppGraph.storageManager.getLogsDirectory()
+        // KMK --> File logging is opt-in. At MINIMAL only a user-configured SAF storage directory
+        // gets a file (they asked for it); there is no app-private fallback, so a normal user
+        // who never enabled verbose logging writes nothing to disk and the ring buffer (memory)
+        // still backs crash dumps and the in-app log viewer.
+        val userLogFolder = globalAppGraph.storageManager.getLogsDirectory()
+        val logFolder = when {
+            userLogFolder != null -> userLogFolder
+            EHLogLevel.isFileLoggingEnabled() ->
+                UniFile.fromFile(File(cacheDir, "logs").apply { mkdirs() })
+            else -> null
+        }
+        // KMK <--
 
         if (logFolder != null) {
             val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.getDefault())
-
             printers += EnhancedFilePrinter
                 .Builder(logFolder) {
                     fileNameGenerator = object : DateFileNameGenerator() {

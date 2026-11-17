@@ -38,13 +38,39 @@ internal fun WebGpuViewer.startMemoryMonitor() {
     // whole chapter at the device ceiling before the first tick.
     applyMemoryBudget("open")
     scope.launch {
+        // How long the device has been continuously CRITICAL, which is what the backoff is computed
+        // from. Monitor-local on purpose: it describes this loop's cadence, not the reader's state,
+        // and nothing outside the loop has any use for it.
+        var criticalForMs = 0L
         try {
             while (!isDestroyed) {
                 val pressure = memoryBudget.budget().pressure
-                // Tighter pressure means sampling harder, because that is when the answer changes.
-                delay(if (pressure == MemoryPressure.ROOMY) ROOMY_INTERVAL_MS else TIGHT_INTERVAL_MS)
+
+                // Tighter pressure means sampling harder, because that is when the answer changes
+                // and when acting on a stale reading costs a device loss. The curve lives in
+                // `sampleIntervalMs` so the app-wide sampler and this loop cannot drift apart.
+                //
+                // KMK --> Two additions to the cadence. A device that has been CRITICAL for a while
+                // is already being reclaimed by the system, so the wait backs off rather than
+                // polling a dying process every second (`criticalBackoffMs`). And while the reader
+                // is not being looked at - screen off, activity stopped, surface detached - there is
+                // nothing for a tighter cache to buy, so the loop drops to the idle cadence and
+                // stops being a wakeup source across a long session.
+                val idle = isReaderIdle()
+                val waitMs = when {
+                    idle -> IDLE_SAMPLE_INTERVAL_MS
+                    pressure == MemoryPressure.CRITICAL -> criticalBackoffMs(criticalForMs)
+                    else -> sampleIntervalMs(pressure)
+                }
+
+                delay(waitMs)
                 if (isDestroyed) break
-                applyMemoryBudget("poll")
+                applyMemoryBudget(if (idle) "poll-idle" else "poll")
+
+                // Charged against the *previous* reading, deliberately: the pressure that decided
+                // this wait is the one we now know lasted that long. Resetting it after a good
+                // sample is what makes the backoff recover.
+                criticalForMs = if (pressure == MemoryPressure.CRITICAL) criticalForMs + waitMs else 0L
             }
         } catch (_: CancellationException) {
             // Normal teardown.
@@ -53,6 +79,40 @@ internal fun WebGpuViewer.startMemoryMonitor() {
         }
     }
 }
+
+/**
+ * Whether nothing is happening that a tighter or looser cache would change.
+ *
+ * Two signals, because both are ways the reader stops being looked at. [isReaderActive] is the
+ * viewer hook (`ReaderActivity` clears it on stop), and the pager's own attachment to the window is
+ * the automatic backstop for anything that detaches the surface without a lifecycle callback -
+ * screen off, a window teardown, the reader replaced under a configuration change.
+ *
+ * Either one alone would be wrong: the hook covers "activity stopped but view still attached", and
+ * the attachment check covers "surface gone without a callback". A reader mid-construction has
+ * neither, so it answers false and keeps the normal cadence.
+ *
+ * The cost of a wrong answer here is small in both directions - an idle reader that was actually
+ * busy gets a slower sample, and a busy reader that looked idle gets a faster one - which is why it
+ * is worth degrading gracefully rather than threading a new callback through every teardown path.
+ */
+internal fun WebGpuViewer.isReaderIdle(): Boolean {
+    if (isDestroyed) return true
+    if (!isReaderActive) return true
+    return try {
+        !pager.isAttachedToWindow
+    } catch (_: Exception) {
+        false
+    }
+}
+
+/**
+ * While idle, one sample every ten seconds is still more often than the value can change.
+ *
+ * Not a stop: a reader that comes back to the foreground is sampled on the next tick, and
+ * `onTrimMemory` still calls [applyMemoryBudget] directly at any moment.
+ */
+private const val IDLE_SAMPLE_INTERVAL_MS = 10_000L
 
 /**
  * Samples the device once and moves the caches toward the answer.
@@ -77,6 +137,14 @@ internal fun WebGpuViewer.applyMemoryBudget(reason: String) {
     WebGpuDiagnostics.recordBudget(budget.describe())
     val underPressure = memoryBudget.shouldShrinkDecodedPages()
     val previous = memoryPressureLast
+
+    // KMK --> The stability clock. Stamped before the field is overwritten, and only when the
+    // reading actually moved: recovery asks "how long has *this* reading held", so a reading that
+    // oscillates has its clock reset on every crossing and can never satisfy the stability gate.
+    // That is the intended behaviour - it is what stops a boundary-hovering device rebuilding.
+    if (previous != budget.pressure) {
+        memoryPressureSinceMs = SystemClock.elapsedRealtime()
+    }
     memoryPressureLast = budget.pressure
 
     if (underPressure) {
@@ -86,10 +154,23 @@ internal fun WebGpuViewer.applyMemoryBudget(reason: String) {
         return
     }
 
-    // Recovery. Both gates, and the cooldown is the one that is easy to forget: without it a
-    // device hovering on the TIGHT boundary rebuilds its whole page cache several times a minute.
+    // Recovery. Three gates, and each one is a different failure mode:
+    //
+    //  1. the pressure must actually be good, not merely no longer tight;
+    //  2. the reading must have *held* for `RECOVERY_STABLE_MS` - a device hovering on the TIGHT
+    //     boundary crosses it for a single sample and falls back, and rebuilding the whole page
+    //     cache on that is a visible flash for nothing (`isMeaningfulPressureChange`);
+    //  3. enough time must have passed since the last shrink (`RECOVER_COOLDOWN_MS`), which is
+    //     about how long ago the shed was and says nothing about the current reading's stability.
+    //
+    // Two and three are separate dials on purpose: the same principle as the stuck-page ladder,
+    // where cooldown and escalation are independent. Collapsing them means a device that genuinely
+    // recovered waits 12 s for no reason, or one that is oscillating rebuilds every sample.
     val sinceShrink = SystemClock.elapsedRealtime() - memoryLastShrinkAt
-    if (budget.pressure <= RECOVER_PRESSURE && sinceShrink > RECOVER_COOLDOWN_MS) {
+    val improving = previous != null && isPressureImproving(previous, budget.pressure)
+    val stableFor = SystemClock.elapsedRealtime() - memoryPressureSinceMs
+    val stable = isMeaningfulPressureChange(previous ?: budget.pressure, budget.pressure, stableFor)
+    if (improving && stable && budget.pressure <= RECOVER_PRESSURE && sinceShrink > RECOVER_COOLDOWN_MS) {
         try {
             pager.state.restoreMemoryBudget()
         } catch (_: Exception) {
@@ -97,11 +178,6 @@ internal fun WebGpuViewer.applyMemoryBudget(reason: String) {
         if (previous != budget.pressure) logMemoryBudget("$reason recovered -> ${budget.describe()}")
     }
 }
-
-private const val ROOMY_INTERVAL_MS = 4_000L
-
-/** Half the roomy cadence - tight memory changes fast enough to be worth the extra wakeups. */
-private const val TIGHT_INTERVAL_MS = 2_000L
 
 /**
  * How long after a shrink the reader waits before growing anything back.

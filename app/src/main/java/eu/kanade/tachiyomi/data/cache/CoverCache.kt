@@ -77,7 +77,22 @@ class CoverCache(private val context: Context) {
      */
     @Throws(IOException::class)
     fun setCustomCoverToCache(manga: Manga, inputStream: InputStream) {
-        getCustomCoverFile(manga.id).outputStream().use {
+        setCustomCoverToCache(manga.id, inputStream)
+    }
+
+    /**
+     * Saves the given stream as the custom cover of the manga with [mangaId] to cache.
+     *
+     * The id overload exists for the backup restore, which holds the id it has just assigned and no
+     * [Manga] to pass.
+     *
+     * @param mangaId the manga id.
+     * @param inputStream the stream to copy.
+     * @throws IOException if there's any error.
+     */
+    @Throws(IOException::class)
+    fun setCustomCoverToCache(mangaId: Long, inputStream: InputStream) {
+        getCustomCoverFile(mangaId).outputStream().use {
             inputStream.copyTo(it)
         }
     }
