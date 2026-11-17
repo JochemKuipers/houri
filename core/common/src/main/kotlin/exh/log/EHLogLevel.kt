@@ -41,6 +41,16 @@ enum class EHLogLevel(val nameRes: StringResource, val description: StringResour
          */
         fun isExtremeLogging() = shouldLog(EXTREME)
 
+        /**
+         * Whether file logging should be written at all. `MINIMAL` is the default for release
+         * builds and is deliberately *not* verbose: only errors reach the file, and the
+         * app-private fallback log directory is not used. This keeps normal users from
+         * accumulating megabytes of logs on disk — the full ring buffer still lives in memory and
+         * is flushed on demand (crash / manual dump). Opting into `EXTRA`/`EXTREME` (Settings →
+         * Advanced → Log level) is what enables continuous file logging.
+         */
+        fun isFileLoggingEnabled() = shouldLog(EXTRA)
+
         private fun shouldLog(requiredLogLevel: EHLogLevel): Boolean {
             return curLogLevel >= requiredLogLevel.ordinal
         }

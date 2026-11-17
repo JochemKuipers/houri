@@ -135,6 +135,9 @@ class SyncSettingsSelectorViewModel(
                 readEntries = syncSettings.readEntries,
                 savedSearchesFeeds = syncSettings.savedSearchesFeeds,
                 // SY <--
+                // KMK -->
+                customCovers = syncSettings.customCovers,
+                // KMK <--
             )
         }
 
@@ -155,6 +158,9 @@ class SyncSettingsSelectorViewModel(
                 readEntries = backupOptions.readEntries,
                 savedSearchesFeeds = backupOptions.savedSearchesFeeds,
                 // SY <--
+                // KMK -->
+                customCovers = backupOptions.customCovers,
+                // KMK <--
             )
         }
     }

@@ -67,6 +67,16 @@ never compiled into the app.
 `packageHref` property), intra-module type errors, and anything a pure function can be asserted
 against. Add a new stub under `stubs/` when a fresh external class is needed.
 
+`run-harness.sh` is the half that asserts behaviour rather than compilability: one `*Harness.kt` per
+subject in `scripts/kotlinc-check/harness/`, each linking the *real* project source (never a copy)
+and printing `ok:`/`FAIL:` per case. 19 harnesses at the time of writing, covering the archive and
+novel readers, the MTL and upscale spines, and — since the WebGPU reader's policy was extracted into
+Android-free files — its decode priority, stuck ladder, spread geometry, memory budget, image-header
+validation, EXIF rotation, chapter-preload guard, continuous column width and session diagnostics.
+The rule that makes them worth writing: **policy that decides something a user can see belongs in a
+file with no Android import**, so a harness can reach it. `viewer/webgpu/AGENTS.md` lists which
+harness covers what.
+
 It is also the only thing that catches the **nested-KDoc trap**: Kotlin block comments *nest*, so a
 `` `font/*` `` written inside a KDoc opens a second comment — the file's final `*/` closes *that*
 one, the outer one runs to EOF and silently swallows every declaration after it, and the real build

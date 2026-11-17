@@ -37,11 +37,13 @@ import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.persistentMapOf
 import kotlinx.collections.immutable.toImmutableMap
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import mihon.app.di.globalAppGraph
 import mihon.core.navigation.ClearDatabaseRoute
 import mihon.core.navigation.DebugInfoRoute
+import mihon.core.navigation.LogViewerRoute
 import mihon.core.navigation.OnboardingRoute
 import mihon.core.navigation.util.LocalBackStack
 import tachiyomi.core.common.i18n.stringResource
@@ -102,6 +104,25 @@ data object SettingsAdvancedRoute : NavKey, SearchableRoute {
                 title = stringResource(MR.strings.pref_debug_info),
                 onClick = { backStack.add(DebugInfoRoute) },
             ),
+            // KMK --> In-app log viewer + clear-logs action
+            Preference.PreferenceItem.TextPreference(
+                title = stringResource(KMR.strings.pref_log_viewer),
+                subtitle = stringResource(KMR.strings.pref_log_viewer_summary),
+                onClick = { backStack.add(LogViewerRoute) },
+            ),
+            Preference.PreferenceItem.TextPreference(
+                title = stringResource(KMR.strings.pref_clear_logs),
+                onClick = {
+                    scope.launch {
+                        // Disk I/O + logcat -c: keep it off the main thread.
+                        val result = kotlinx.coroutines.withContext(Dispatchers.IO) {
+                            eu.kanade.tachiyomi.util.CrashLogUtil(context).clearLogs()
+                        }
+                        context.toast(result)
+                    }
+                },
+            ),
+            // KMK <--
             Preference.PreferenceItem.TextPreference(
                 title = stringResource(MR.strings.pref_onboarding_guide),
                 onClick = { backStack.add(OnboardingRoute) },

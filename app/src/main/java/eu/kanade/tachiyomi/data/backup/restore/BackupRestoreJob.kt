@@ -57,6 +57,10 @@ class BackupRestoreJob(private val context: Context, workerParams: WorkerParamet
             // KMK -->
             // Kick off a chapter refresh and reconcile restored tracking entries with the
             // remote services right away instead of waiting for the next scheduled update.
+            // The banner listens on backupRestoreStatus, so stop() it BEFORE the follow-up
+            // tracker refresh: refreshing every track on a large library can run for a
+            // minute over rate-limited APIs, and by then the restore itself is done.
+            backupRestoreStatus.stop()
             if (options.libraryEntries && !isSync) {
                 try {
                     globalAppGraph.refreshTracks.awaitAllTracks()
@@ -82,6 +86,7 @@ class BackupRestoreJob(private val context: Context, workerParams: WorkerParamet
         } finally {
             context.cancelNotification(Notifications.ID_RESTORE_PROGRESS)
             // KMK -->
+            // Idempotent for the error path; the success path above already stopped it.
             backupRestoreStatus.stop()
             // KMK <--
         }

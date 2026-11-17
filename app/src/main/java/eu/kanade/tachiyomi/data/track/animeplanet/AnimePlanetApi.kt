@@ -22,6 +22,11 @@ import java.util.Locale
  * `getManga`, `entry-state`), by reading the site's own list-widget code
  * (dist/js/legacy_combined.js) and by observing it fire real requests:
  *
+ * 2026-11: the site now fronts these pages with a Cloudflare managed challenge - plain HTTP
+ * is challenged (api-anything: cf-mitigated), a real browser engine clears it on its own.
+ * The WebView fetch (AnimePlanetWebClient) is the path that survives this; its extract
+ * refuses a challenge page and polls until the real document arrives.
+ *
  * Reads (both server-rendered; one document answers everything about an entry):
  * - GET /manga/all?name={query}          search cards (title = img alt, cover = data-src)
  * - GET /manga/{slug}                    detail page: title (h1), summary (meta description),

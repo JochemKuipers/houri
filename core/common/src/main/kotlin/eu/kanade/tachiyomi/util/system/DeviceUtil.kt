@@ -85,24 +85,28 @@ object DeviceUtil {
         "com.android.intentresolver",
     )
 
-    fun isRamGateDisabled(context: Context): Boolean = runCatching {
-        context.getSharedPreferences("ram_gate_bypass", Context.MODE_PRIVATE).getBoolean("disabled", false)
-    }.getOrDefault(false)
+    // KMK --> Both of these used to be this file's own answer, computed from a 3GB threshold. They
+    // now delegate to `AppMemoryMonitor`, which is the one place the device's memory class and the
+    // RAM-gate bypass are defined - so the reader, Coil, the MTL/WebGPU gates and these two helpers
+    // cannot disagree about what the device is.
+    fun isRamGateDisabled(context: Context): Boolean =
+        tachiyomi.core.common.util.system.AppMemoryMonitor.isRamGateDisabled(context)
 
     /**
-     * ActivityManager#isLowRamDevice is based on a system property, which isn't
-     * necessarily trustworthy. 1GB is supposedly the regular threshold.
+     * Whether this device is "low memory" in the sense every subsystem now shares: a tier below
+     * MEDIUM.
      *
-     * Instead, we consider anything with less than 3GB of RAM as low memory
-     * considering how heavy image processing can be.
+     * The old body was `totalMem < 3GB`, which is the same boundary the tier fold uses but arrived
+     * at without the vendor low-RAM mark or the 32-bit ABI cap - so a 4GB phone the OEM marked
+     * low-RAM answered "not low memory" here and was demoted by the reader. Asking the tier fixes
+     * that in one place.
      */
     fun isLowRamDevice(context: Context): Boolean {
         if (isRamGateDisabled(context)) return false
-        val memInfo = ActivityManager.MemoryInfo()
-        context.getSystemService<ActivityManager>()!!.getMemoryInfo(memInfo)
-        val totalMemBytes = memInfo.totalMem
-        return totalMemBytes < 3L * 1024 * 1024 * 1024
+        return tachiyomi.core.common.util.system.AppMemoryMonitor.deviceTier(context) <
+            tachiyomi.core.common.util.system.DeviceTier.MEDIUM
     }
+    // KMK <--
 
     @SuppressLint("PrivateApi")
     private fun getSystemProperty(key: String?): String? {

@@ -65,6 +65,12 @@ SELECT
 FROM manga_track
 WHERE manga_id = :mangaId;
 
+-- KMK: distinct trackers the DB holds. Feeds the tracker-connect achievements, which must count
+-- tracks restored from a backup (or written by sync) even when this process never logged that
+-- service in - a login event is not the only way a tracker ends up in this table.
+getTrackerIds:
+SELECT DISTINCT tracker_id FROM manga_track;
+
 upsert:
 INSERT INTO manga_track(
     manga_id, tracker_id, remote_id, remote_url, library_id, title, last_chapter_read,

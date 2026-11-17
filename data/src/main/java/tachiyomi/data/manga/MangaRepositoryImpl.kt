@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.map
 import logcat.LogPriority
 import tachiyomi.core.common.util.lang.toLong
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.data.BlacklistColumnAdapter
 import tachiyomi.data.DatabaseHandler
 import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.StringListColumnAdapter
@@ -331,7 +332,9 @@ class MangaRepositoryImpl(
                     memo = value.memo?.let(MemoColumnAdapter::encode),
                     // KMK -->
                     scanlatorPriority = value.scanlatorPriority?.let(StringListColumnAdapter::encode),
-                    blacklistedChapters = value.blacklistedChapters?.let(StringListColumnAdapter::encode),
+                    // KMK --> Lossless encoding for the blacklist: the shared ", "-joined list
+                    // corrupted any key carrying a comma-space (issue #68).
+                    blacklistedChapters = value.blacklistedChapters?.let(BlacklistColumnAdapter::encode),
                     rereadCount = value.rereadCount?.toLong(),
                     rereading = value.rereading,
                     rereadStartedAt = value.rereadStartedAt,

@@ -16,8 +16,10 @@ import coil3.fetch.SourceFetchResult
 import coil3.request.Options
 import logcat.LogPriority
 import okio.BufferedSource
+import tachiyomi.core.common.util.system.AppMemoryMonitor
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
+import tachiyomi.core.common.util.system.shouldDowngradeToRgb565
 
 /**
  * A [Decoder] that uses [ImageDecoder] (libvips-based) to decode image formats not supported
@@ -77,22 +79,27 @@ class NewImageDecoder(private val resources: ImageSource, private val options: O
             dstHeight = dstHeight,
             scale = options.scale,
         )
-        if (isJxl) {
-            val ctx = try {
-                mihon.app.di.globalAppGraph.context
-            } catch (_: Exception) {
-                null
-            }
-            if (ctx != null) {
-                val cap = ImageUtil.lowRamJxlMaxDimension(ctx)
-                val lowRamSample = ImageUtil.lowRamSampleSize(srcWidth, srcHeight, cap)
-                sampleSize = maxOf(sampleSize, lowRamSample)
-                val hardCap = 8192
-                if (maxOf(srcWidth, srcHeight) / sampleSize > hardCap) {
-                    sampleSize = maxOf(sampleSize, ImageUtil.lowRamSampleSize(srcWidth, srcHeight, hardCap))
-                }
+        // KMK --> One context read, reused by both policies below. Both of them used to reach for
+        // `globalAppGraph.context` independently (one wrapped in runCatching), which meant the graph
+        // was consulted twice per decode and the two answers could disagree if it threw once.
+        val appContext = try {
+            mihon.app.di.globalAppGraph.context
+        } catch (_: Exception) {
+            null
+        }
+        if (isJxl && appContext != null) {
+            val cap = ImageUtil.lowRamJxlMaxDimension(appContext)
+            val lowRamSample = ImageUtil.lowRamSampleSize(srcWidth, srcHeight, cap)
+            sampleSize = maxOf(sampleSize, lowRamSample)
+            // The decoder's own hard limit. Kept as a literal rather than the shared
+            // JXL_HARD_DIMENSION constant because this is libvips' constraint, not ours - if the
+            // constant ever moves to follow a different decoder, this must not move with it.
+            val hardCap = 8192
+            if (maxOf(srcWidth, srcHeight) / sampleSize > hardCap) {
+                sampleSize = maxOf(sampleSize, ImageUtil.lowRamSampleSize(srcWidth, srcHeight, hardCap))
             }
         }
+        // KMK <--
 
         // Copy RGBA pixels from the native buffer into a full-resolution bitmap.
         // We must do this while `res` (and its native memory) is still alive.
@@ -111,23 +118,22 @@ class NewImageDecoder(private val resources: ImageSource, private val options: O
         } else {
             fullBitmap
         }
-        if (isJxl) {
-            val ctx2 = try {
-                mihon.app.di.globalAppGraph.context
-            } catch (_: Exception) {
-                null
-            }
-            if (ctx2 != null && eu.kanade.tachiyomi.util.system.DeviceUtil.isLowRamDevice(ctx2) && bitmap.config != android.graphics.Bitmap.Config.RGB_565) {
-                val estBytes = bitmap.width.toLong() * bitmap.height * 4
-                if (estBytes > 24L * 1024 * 1024) {
-                    val rgb565 = bitmap.copy(android.graphics.Bitmap.Config.RGB_565, false)
-                    if (rgb565 != null) {
-                        bitmap.recycle()
-                        bitmap = rgb565
-                    }
+        // KMK --> Was gated on `DeviceUtil.isLowRamDevice(ctx2)` and a flat 24MB threshold. Same
+        // change as the sibling decoder: the live pressure decides whether the halving is worth it,
+        // and the page's own decoded size decides whether it is big enough to matter.
+        // `sampleIfStale` keeps that live answer bounded - at most one system read a second across
+        // every decode, none while the app is idle.
+        if (isJxl && appContext != null && bitmap.config != android.graphics.Bitmap.Config.RGB_565) {
+            val estBytes = bitmap.width.toLong() * bitmap.height * 4
+            if (shouldDowngradeToRgb565(estBytes, AppMemoryMonitor.sampleIfStale(appContext).pressure)) {
+                val rgb565 = bitmap.copy(android.graphics.Bitmap.Config.RGB_565, false)
+                if (rgb565 != null) {
+                    bitmap.recycle()
+                    bitmap = rgb565
                 }
             }
         }
+        // KMK <--
 
         return DecodeResult(
             image = bitmap.asImage(),

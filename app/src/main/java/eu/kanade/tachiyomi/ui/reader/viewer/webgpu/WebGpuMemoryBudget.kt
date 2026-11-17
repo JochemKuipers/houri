@@ -7,39 +7,17 @@ import androidx.core.content.getSystemService
 import exh.yakuyomi.DeviceMemory
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
-import kotlin.math.max
-import kotlin.math.min
 
-/**
- * File-level, not a companion constant on two different classes.
- *
- * Both `Budget` and `DeviceTier` need this number and both are nested inside this class, so two
- * separate `companion object { const val MB }` declarations would make every reference ambiguous
- * about which one it resolves to.
- */
+// The arithmetic these two feed lives in WebGpuMemoryMath.kt (no Android import, asserted by
+// MemoryBudgetHarness); what stays here is the reading of the system and the published snapshot.
+// MB is repeated rather than shared because the math file is compiled on its own by the harness
+// and must not import anything - these two are file-private to this one.
+
+/** Bytes in one mebibyte, as every figure in `describe()` is expressed. */
 private const val MB = 1024L * 1024L
 
-/** Used only when `getMemoryInfo` throws or returns nothing - never seen, but must not be zero. */
-private const val DEFAULT_TOTAL_MEM_BYTES = 4L * 1024L * 1024L
-
-private const val HEAP_TIGHT = 0.70
-private const val HEAP_CRITICAL = 0.88
-
-/**
- * Floors. Below these, holding fewer pages stops helping and starts hurting: the cache cannot hold
- * the visible page plus a neighbour, so every scroll becomes a re-decode.
- */
-private const val MIN_DECODED_PAGES_BYTES = 64L * MB
-private const val MIN_TILE_CACHE_BYTES = 16L * MB
-private const val MIN_MAX_PAGE_BYTES = 24L * MB
-private const val MIN_JXL_PAGE_BYTES = 8L * MB
-
-/**
- * Pixel floor for the decoded-page ceiling: the 1440p-phone display itself is ~4.6MP, so
- * anything lower would downsample the page below what the screen shows even zoomed out.
- * 2MP covers a 720p screen at up to ~2x zoom and nothing smaller survives here.
- */
-private const val MIN_DECODED_PIXELS = 2L * 1000 * 1000
+/** Used only when `getMemoryInfo` throws or returns nothing; see WebGpuMemoryMath for why 4GB. */
+private const val DEFAULT_TOTAL_MEM_BYTES = 4L * 1024L * 1024L * 1024L
 
 /**
  * How much memory the reader may hold, derived from the device *and* from what is free right now.
@@ -57,6 +35,10 @@ private const val MIN_DECODED_PIXELS = 2L * 1000 * 1000
  *   only ever read a volatile field.
  * - [sample] is the only place that talks to the system, and it is called on a timer by
  *   `WebGpuMemoryMonitor`, not from a getter.
+ *
+ * The arithmetic itself - the size class, the pressure reading, the byte and pixel ceilings - lives
+ * in `WebGpuMemoryMath.kt`, which has no Android import and is asserted by `MemoryBudgetHarness`.
+ * What stays here is the two things Android owns: reading the system, and publishing the snapshot.
  *
  * **Headroom, not `availMem`.** `availMem` counts swap, so a device that has been swapping for an
  * hour reports plenty available and then gets killed. `MemoryInfo.threshold` is where the system
@@ -92,8 +74,8 @@ internal class WebGpuMemoryBudget(context: Context) {
 
     /**
      * Whether the process runs a 64-bit ABI. A 32-bit device keeps the WebGPU viewer (that
-     * decision is deliberate) but its whole memory story shrinks: see [DeviceMemory.is64Bit]'s
-     * use in [deviceTierFor] and the address-space argument there.
+     * decision is deliberate) but its whole memory story shrinks: see [deviceTierFor]'s use of
+     * `DeviceMemory.is64Bit` and the address-space argument there.
      */
     val is64Bit: Boolean = DeviceMemory.is64Bit()
 
@@ -105,30 +87,21 @@ internal class WebGpuMemoryBudget(context: Context) {
      * times the smaller, so orientation drops out. A page holds no more viewable detail than
      * the screen it is shown on - the rest is memory spent on texels nothing can resolve, which
      * on an e-ink panel (about a megapixel) or a small tablet is most of a high-resolution scan.
-     * [DISPLAY_AREA_HEADROOM] multiplies in zoom room: twice the linear scale on both axes is
+     * [resolvePixelCeiling] multiplies in zoom room: twice the linear scale on both axes is
      * the point where more source resolution stops being visible.
      */
     val displayPixels: Long = runCatching {
         val dm = context.resources.displayMetrics
-        val w = max(dm.widthPixels, dm.heightPixels).toLong()
-        val h = max(1, min(dm.widthPixels, dm.heightPixels)).toLong()
+        val w = maxOf(dm.widthPixels, dm.heightPixels).toLong()
+        val h = maxOf(1, minOf(dm.widthPixels, dm.heightPixels)).toLong()
         w * h
     }.getOrDefault(0L)
-
-    /** 2x linear zoom headroom on each axis = 4x the display's pixel area. */
-    private val displayAreaHeadroom = 4L
 
     /**
      * The static decoded-pixel ceiling: the device tier's figure, capped by what the display can
      * resolve with zoom headroom. Both [Budget] factories scale this by live pressure.
      */
-    val maxDecodedPixelsBase: Long =
-        if (displayPixels > 0L) {
-            minOf(deviceTier.maxDecodedPixels, displayPixels * displayAreaHeadroom)
-                .coerceAtLeast(MIN_DECODED_PIXELS)
-        } else {
-            deviceTier.maxDecodedPixels
-        }
+    val maxDecodedPixelsBase: Long = resolvePixelCeiling(deviceTier.maxDecodedPixels, displayPixels)
 
     /**
      * Published snapshot. Written only by [sample]; every getter is a volatile read.
@@ -189,7 +162,8 @@ internal class WebGpuMemoryBudget(context: Context) {
      * dual-page height match. Asking "is this device low RAM" was the wrong question: it is answer-
      * able before the page exists, while this is not.
      */
-    fun canAffordWorkingSet(bytes: Long): Boolean = bytes * 2L <= current.decodedPagesBytes
+    fun canAffordWorkingSet(bytes: Long): Boolean =
+        fitsWorkingSet(bytes, current.decodedPagesBytes)
 
     /**
      * Whether decoded pages should be dropped from outside `onTrimMemory`.
@@ -198,7 +172,7 @@ internal class WebGpuMemoryBudget(context: Context) {
      * its residency trimmed on a real signal. What is new is the live half.
      */
     fun shouldShrinkDecodedPages(): Boolean =
-        current.pressure.ordinal >= Pressure.TIGHT.ordinal || isLowRam || deviceTier == DeviceTier.TINY
+        current.pressure.ordinal >= MemoryPressure.TIGHT.ordinal || isLowRam || deviceTier == DeviceTier.TINY
 
     fun describe(): String = current.describe()
 
@@ -212,7 +186,7 @@ internal class WebGpuMemoryBudget(context: Context) {
 
     /** Immutable, precomputed, and the only thing hot paths ever touch. */
     internal data class Budget(
-        val pressure: Pressure,
+        val pressure: MemoryPressure,
         /** Claimable working set: what the system says is free *above* where it starts killing. */
         val headroomBytes: Long,
         val decodedPagesBytes: Long,
@@ -224,11 +198,11 @@ internal class WebGpuMemoryBudget(context: Context) {
          *
          * A page above this is downsampled at decode (WebGpuDecodePipeline) rather than
          * uploaded whole: the mip chain multiplies the cost by 4/3, so an uncapped 64MP page
-         * is ~600MB of GPU textures — the shape that presents as
+         * is ~600MB of GPU textures - the shape that presents as
          * `VK_ERROR_OUT_OF_DEVICE_MEMORY` device loss two pages into a high-resolution comic.
          * The ceiling tracks the budget's own philosophy: device tier decides the default,
          * live pressure moves it, and a floor keeps the cap from starving the display itself.
-         * Quality therefore varies across the session exactly when memory does — the same
+         * Quality therefore varies across the session exactly when memory does - the same
          * trade the byte ceilings already make.
          */
         val maxDecodedPixels: Long,
@@ -246,7 +220,7 @@ internal class WebGpuMemoryBudget(context: Context) {
              * it may grow, and the monitor's first sample lands within a few seconds anyway.
              */
             fun deviceCeiling(tier: DeviceTier, pixelCeiling: Long): Budget = Budget(
-                pressure = if (tier <= DeviceTier.SMALL) Pressure.TIGHT else Pressure.ROOMY,
+                pressure = if (tier <= DeviceTier.SMALL) MemoryPressure.TIGHT else MemoryPressure.ROOMY,
                 headroomBytes = 0L,
                 decodedPagesBytes = tier.maxDecodedPagesBytes,
                 tileCacheBytes = tier.maxTileCacheBytes,
@@ -262,146 +236,35 @@ internal class WebGpuMemoryBudget(context: Context) {
                 isLowRam: Boolean,
                 pixelCeiling: Long,
             ): Budget {
-                val headroom = max(0L, info.availMem - info.threshold)
-                val pressure = pressureOf(info, headroom, javaHeapCeilingBytes, isLowRam)
+                val headroom = memoryHeadroom(info.availMem, info.threshold)
+                val rt = Runtime.getRuntime()
+                val heapUsed = rt.totalMemory() - rt.freeMemory()
+                val pressure = memoryPressureOf(
+                    systemLowMemory = info.lowMemory,
+                    headroomBytes = headroom,
+                    heapUsedBytes = heapUsed,
+                    javaHeapCeilingBytes = javaHeapCeilingBytes,
+                    isLowRam = isLowRam,
+                )
 
-                // Scale the device's ceiling by how much room is actually left. A device at its
-                // ceiling with a full headroom keeps the full ceiling; the same device one split
-                // segment from an OOM gets a fraction of it.
-                val scale = when (pressure) {
-                    Pressure.ROOMY -> 1.0f
-                    Pressure.TIGHT -> 0.55f
-                    Pressure.CRITICAL -> 0.25f
-                }
-                // Gentler than the byte scale on purpose: a lower pixel ceiling is a visible
-                // quality change, not just fewer cached pages, so pressure has to halve it
-                // only when memory is genuinely critical - not on every ordinary tight day.
-                val pixelScale = when (pressure) {
-                    Pressure.ROOMY -> 1.0f
-                    Pressure.TIGHT -> 0.75f
-                    Pressure.CRITICAL -> 0.5f
-                }
+                // Both ceilings scale by live pressure, the pixel one more gently: see the
+                // two scale functions in WebGpuMemoryMath for why they differ.
+                val pixelCeilingScaled =
+                    (tier.maxDecodedPixels * pixelScaleFor(pressure)).toLong()
+                        .coerceAtLeast(scaledDecodedPixelsFloor())
+
                 return Budget(
                     pressure = pressure,
                     headroomBytes = headroom,
-                    decodedPagesBytes = (tier.maxDecodedPagesBytes * scale).toLong()
-                        .coerceAtLeast(MIN_DECODED_PAGES_BYTES),
-                    tileCacheBytes = (tier.maxTileCacheBytes * scale).toLong()
-                        .coerceAtLeast(MIN_TILE_CACHE_BYTES),
-                    maxPageBytes = (tier.maxPageBytesBytes * scale).toLong()
-                        .coerceAtLeast(MIN_MAX_PAGE_BYTES),
-                    jxlPageBytes = (tier.maxJxlPageBytes * scale).toLong()
-                        .coerceAtLeast(MIN_JXL_PAGE_BYTES),
-                    maxDecodedPixels = (tier.maxDecodedPixels * pixelScale).toLong()
-                        .coerceAtLeast(MIN_DECODED_PIXELS),
+                    decodedPagesBytes = scaledDecodedPagesBytes(tier, pressure),
+                    tileCacheBytes = scaledTileCacheBytes(tier, pressure),
+                    maxPageBytes = scaledMaxPageBytes(tier, pressure),
+                    jxlPageBytes = scaledJxlPageBytes(tier, pressure),
+                    maxDecodedPixels = pixelCeilingScaled,
                 )
             }
-
-            private fun pressureOf(
-                info: ActivityManager.MemoryInfo,
-                headroomBytes: Long,
-                javaHeapCeilingBytes: Long,
-                isLowRam: Boolean,
-            ): Pressure {
-                // The system's own verdict, and the strongest signal there is.
-                if (info.lowMemory) return Pressure.CRITICAL
-
-                // Our Java heap is where the decode buffers live, so its exhaustion precedes the
-                // system noticing. Measured against the runtime's ceiling, not the device's RAM.
-                val rt = Runtime.getRuntime()
-                val heapUsed = rt.totalMemory() - rt.freeMemory()
-                if (javaHeapCeilingBytes > 0 && heapUsed > javaHeapCeilingBytes * HEAP_CRITICAL) {
-                    return Pressure.CRITICAL
-                }
-                if (javaHeapCeilingBytes > 0 && heapUsed > javaHeapCeilingBytes * HEAP_TIGHT) {
-                    return Pressure.TIGHT
-                }
-
-                if (headroomBytes < tierHeadroom(DeviceTier.TINY)) return Pressure.CRITICAL
-                if (headroomBytes < tierHeadroom(DeviceTier.MEDIUM)) return Pressure.TIGHT
-                if (isLowRam && headroomBytes < tierHeadroom(DeviceTier.LARGE)) return Pressure.TIGHT
-                return Pressure.ROOMY
-            }
-
-            private fun tierHeadroom(tier: DeviceTier) = when (tier) {
-                DeviceTier.TINY -> 256L * MB
-                DeviceTier.SMALL -> 512L * MB
-                DeviceTier.MEDIUM -> 1_024L * MB
-                DeviceTier.LARGE -> 2_048L * MB
-                DeviceTier.XLARGE -> 3_072L * MB
-            }
         }
     }
-
-    /**
-     * Size class of the device.
-     *
-     * A coarse bucket is the point - the live signal is what actually moves the numbers, and
-     * finer tiers here would imply a precision the static half cannot deliver.
-     */
-    internal enum class DeviceTier(
-        val maxDecodedPagesBytes: Long,
-        val maxTileCacheBytes: Long,
-        val maxPageBytesBytes: Long,
-        val maxJxlPageBytes: Long,
-        val maxDecodedPixels: Long,
-    ) {
-        /**
-         * Below 2GB. A webtoon segment is ~47MB of texture; these cannot hold many. The pixel
-         * ceiling keeps a high-resolution comic's page (a 4000x6000 scan is 24MP / 128MB of
-         * GPU textures before its mip chain) from being a one-page device loss.
-         */
-        TINY(96L * MB, 16L * MB, 24L * MB, 12L * MB, 6L * 1000 * 1000),
-
-        /** 2-3GB. The old `isLowRamDevice` boundary. */
-        SMALL(160L * MB, 24L * MB, 40L * MB, 16L * MB, 10L * 1000 * 1000),
-
-        /** 3-6GB - the common modern phone. */
-        MEDIUM(288L * MB, 48L * MB, 64L * MB, 24L * MB, 16L * 1000 * 1000),
-
-        /** 6-12GB. */
-        LARGE(448L * MB, 64L * MB, 80L * MB, 32L * MB, 24L * 1000 * 1000),
-
-        /** Above 12GB. 32MP covers anything a display can resolve with zoom headroom to spare. */
-        XLARGE(640L * MB, 64L * MB, 96L * MB, 40L * MB, 32L * 1000 * 1000),
-    }
-
-    internal enum class Pressure { ROOMY, TIGHT, CRITICAL }
-
-    private companion object {
-        fun deviceTierFor(totalMemBytes: Long, isLowRam: Boolean, is64Bit: Boolean): DeviceTier {
-            val tier = when {
-                totalMemBytes < 2L * 1024 * MB -> DeviceTier.TINY
-                totalMemBytes < 3L * 1024 * MB -> DeviceTier.SMALL
-                totalMemBytes < 6L * 1024 * MB -> DeviceTier.MEDIUM
-                totalMemBytes < 12L * 1024 * MB -> DeviceTier.LARGE
-                else -> DeviceTier.XLARGE
-            }
-            // A vendor low-RAM mark on an otherwise large device is still a low-RAM device.
-            val lowRamTier = if (isLowRam && tier > DeviceTier.MEDIUM) DeviceTier.MEDIUM else tier
-            // So is a 32-bit userspace, for a different reason: the whole address space - Java
-            // heap, native decode buffers, and the GPU's own allocations on a unified-memory
-            // device - shares ~3GB, so the byte budgets a 64-bit MEDIUM/LARGE device comfortably
-            // holds are the spike that loses the device there. The field report behind this was
-            // armeabi-v7a losing its Vulkan device two pages into a comic. 32-bit is capped at
-            // SMALL, which also pins decode parallelism to one worker (decodeParallelism keys
-            // on the tier), halving the transient decode spike.
-            return if (!is64Bit && lowRamTier > DeviceTier.SMALL) DeviceTier.SMALL else lowRamTier
-        }
-    }
-}
-
-/**
- * What a `width` x `height` RGBA image occupies on the GPU once its mip chain exists.
- *
- * The chain sums `1/4 + 1/16 + ...` of the base, which is `1/3` more, so the total is `4/3` of
- * the base. Measuring the base alone undercounts by a third on every page - small enough to look
- * like rounding, large enough that a cache sized on it overflows.
- */
-internal fun uploadedImageBytes(width: Int, height: Int): Long {
-    if (width <= 0 || height <= 0) return 0L
-    val base = width.toLong() * height.toLong() * 4L
-    return base + base / 3L
 }
 
 internal fun WebGpuViewer.logMemoryBudget(reason: String) {

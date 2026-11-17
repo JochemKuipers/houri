@@ -250,7 +250,11 @@ internal object PageBytesValidator {
                 ImageFormat.WEBP to webpDimensions(bytes)
 
             startsWithAscii(bytes, "BM") -> ImageFormat.BMP to bmpDimensions(bytes)
-            startsWithAscii(bytes, "II", 0) && beU16(bytes, 2)?.let { it == 42 } == true ->
+            // The byte-order mark is read with the byte order it declares: "II" stores the magic
+            // 42 little-endian, "MM" big-endian. Reading both as big-endian recognised the MM half
+            // only, so every little-endian TIFF - which is most of them - was refused as
+            // `not an image` before the decoder ever saw it.
+            startsWithAscii(bytes, "II", 0) && leU16(bytes, 2)?.let { it == 42 } == true ->
                 ImageFormat.TIFF to null
 
             startsWithAscii(bytes, "MM", 0) && beU16(bytes, 2)?.let { it == 42 } == true ->

@@ -66,6 +66,13 @@ class BackupManga(
     @ProtoNumber(615) var blacklistedChapters: List<String> = emptyList(),
     @ProtoNumber(616) var scanlatorRangeRules: List<String> = emptyList(),
     @ProtoNumber(617) var isLightNovel: Boolean = false,
+    /**
+     * The entry's custom cover as raw image bytes. The cover lives in the cover cache, keyed by
+     * manga id - and the id is whatever the database assigned, so it differs between devices and
+     * a fresh restore. The bytes ride inside the entry and [restore][eu.kanade.tachiyomi.data.backup.restore.restorers.MangaRestorer]
+     * re-keys them to the id it assigned. Null when the entry carries no custom cover.
+     */
+    @ProtoNumber(618) var customCover: ByteArray? = null,
     // KMK <--
 
     // SY specific values

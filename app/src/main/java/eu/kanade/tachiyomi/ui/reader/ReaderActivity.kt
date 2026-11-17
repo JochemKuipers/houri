@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.app.assist.AssistContent
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -143,6 +144,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
@@ -199,6 +201,42 @@ class ReaderActivity : BaseActivity() {
         get() = uiPreferences.themeCoverBased().get()
     // KMK <--
 
+    // KMK --> The reader's own trim callback.
+    //
+    // Only the WebGPU viewer had one (it registers its own `ComponentCallbacks2` with a detailed,
+    // load-bearing rule set - see `WebGpuViewer.trimCallbacks`). Every other viewer - pager, strip,
+    // novel - had no memory-pressure path at all, so the system's only remaining option was to kill
+    // the process. This routes the same signal to whichever viewer is current, through the
+    // [Viewer.onMemoryPressure] seam.
+    //
+    // The level set is deliberately narrower than "anything the system says": `UI_HIDDEN` (screen
+    // off) is excluded, because a full shed on every lock/unlock costs a visible re-decode and the
+    // WebGPU path already treats it separately. These are the levels that mean memory is *actually*
+    // short. `onLowMemory` covers the older, unstructured signal.
+    //
+    // The activity forwards rather than acting itself, because each viewer knows which of its caches
+    // is cheap to rebuild. A viewer that declines is not a bug.
+    private val readerTrimCallbacks = object : ComponentCallbacks2 {
+        override fun onConfigurationChanged(newConfig: Configuration) = Unit
+
+        override fun onLowMemory() {
+            viewModel.state.value.viewer?.onMemoryPressure()
+        }
+
+        @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+        override fun onTrimMemory(level: Int) {
+            val isSevere = level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW ||
+                level == ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL ||
+                level == ComponentCallbacks2.TRIM_MEMORY_MODERATE ||
+                level == ComponentCallbacks2.TRIM_MEMORY_COMPLETE ||
+                level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND
+            if (isSevere) {
+                viewModel.state.value.viewer?.onMemoryPressure()
+            }
+        }
+    }
+    // KMK <--
+
     // AM (CONNECTIONS) -->
     @Inject private lateinit var connectionsPreferences: ConnectionsPreferences
     // <-- AM (CONNECTIONS)
@@ -243,6 +281,10 @@ class ReaderActivity : BaseActivity() {
         // KMK <--
         graph.inject(this)
         registerSecureActivity(this)
+        // KMK --> Registered here rather than in `init`, so the callback exists only while the
+        // activity does, and so it cannot fire before `viewModel` is available.
+        registerComponentCallbacks(readerTrimCallbacks)
+        // KMK <--
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             overrideActivityTransition(
                 OVERRIDE_TRANSITION_OPEN,
@@ -724,6 +766,10 @@ class ReaderActivity : BaseActivity() {
      * Called when the activity is destroyed. Cleans up the viewer, configuration and any view.
      */
     override fun onDestroy() {
+        // KMK --> Paired with the registerComponentCallbacks in onCreate, so a destroyed reader
+        // cannot receive a trim callback and touch a viewer that has just been torn down.
+        unregisterComponentCallbacks(readerTrimCallbacks)
+        // KMK <--
         // KMK --> One continuous stretch: recorded here and reported here, so quitting and
         // reopening starts a new session rather than stitching two sittings into one run.
         val sessionMs = System.currentTimeMillis() - readerOpenedAtMs
@@ -745,6 +791,10 @@ class ReaderActivity : BaseActivity() {
 
     override fun onPause() {
         // KMK -->
+        // Tell the viewer it is no longer being looked at. The WebGPU viewer uses this to drop its
+        // memory monitor to the idle cadence; see `Viewer.onActivityStop`.
+        viewModel.state.value.viewer?.onActivityStop()
+
         // Bank the open reading segment so backgrounded time is paused for webhook
         // reading-time reports instead of being silently discarded on resume.
         viewModel.pauseWebhookReadingTime()
@@ -768,6 +818,12 @@ class ReaderActivity : BaseActivity() {
     override fun onResume() {
         super.onResume()
         viewModel.restartReadTimer()
+
+        // KMK -->
+        // The counterpart to onPause's hook: a viewer that backed off while stopped samples its
+        // live state again immediately, rather than waiting out the idle cadence's ten seconds.
+        viewModel.state.value.viewer?.onActivityStart()
+        // KMK <--
 
         // AM (DISCORD) -->
         updateDiscordRPC(exitingReader = false)
@@ -1268,13 +1324,21 @@ class ReaderActivity : BaseActivity() {
                 if (enabled) {
                     repeatOnLifecycle(Lifecycle.State.STARTED) {
                         val interval = intervalFloat.seconds
+                        // KMK --> This loop used to poll every 100ms while the menu was visible,
+                        // which is ten wakeups a second for a condition that changes on a tap. It
+                        // now *waits* for the menu to close, and waits on the longer of the two
+                        // intervals only when it has somewhere to go.
+                        //
+                        // The `first { !menuVisible }` is the whole fix: a menu open for a minute
+                        // used to cost six thousand no-op wakeups, and an auto-scroll left running
+                        // behind an open menu cost them for as long as the reader sat there.
                         while (true) {
-                            if (!viewModel.state.value.menuVisible) {
-                                viewModel.state.value.viewer?.moveToNext()
-                                delay(interval)
-                            } else {
-                                delay(100)
+                            if (viewModel.state.value.menuVisible) {
+                                viewModel.state.first { !it.menuVisible }
+                                // Falls through: the menu just closed, so this pass scrolls.
                             }
+                            viewModel.state.value.viewer?.moveToNext()
+                            delay(interval)
                         }
                     }
                 }

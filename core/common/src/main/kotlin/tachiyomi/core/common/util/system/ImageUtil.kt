@@ -627,13 +627,24 @@ object ImageUtil {
         return options
     }
 
+    // KMK --> Was `if (isLowRamDevice) 2048 else 4096` - a device-size answer that refused a 3000px
+    // JXL on a 2GB phone and then let a 12GB phone OOM on the same page. The cap is now the tier's
+    // figure scaled by the live pressure, so the same page gets the same answer on both devices when
+    // the tier and the pressure match, and the policy is asserted offline in `DeviceMemoryMath`.
+    //
+    // `sampleIfStale` because this runs per image, same as the Coil decoders: the cap answers for
+    // *this* page under *current* memory, and the refresh is bounded to one system read a second.
+    // The catch keeps the old ceiling on failure - a cap that refused to answer must not refuse the
+    // page.
     fun lowRamJxlMaxDimension(context: Context): Int {
         return try {
-            if (eu.kanade.tachiyomi.util.system.DeviceUtil.isLowRamDevice(context)) 2048 else 4096
+            val snapshot = AppMemoryMonitor.sampleIfStale(context)
+            jxlMaxDimension(snapshot.jxlMaxDimension, snapshot.pressure)
         } catch (_: Exception) {
             4096
         }
     }
+    // KMK <--
 
     fun lowRamSampleSize(srcWidth: Int, srcHeight: Int, cap: Int): Int {
         val maxDim = max(srcWidth, srcHeight)

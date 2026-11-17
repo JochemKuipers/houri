@@ -91,6 +91,16 @@ internal class DecodeTrace(
     @Volatile
     var transformed: Boolean? = null
 
+    /**
+     * Whether the page exceeded the budget's pixel ceiling and was resized before upload.
+     *
+     * A quality change the reader can see (see the memory-budget section of the folder AGENTS), and
+     * the one decode-path event that is *normal* but worth counting: a session that downsamples
+     * every page is a session whose budget is wrong for the device, not one with a broken page.
+     */
+    @Volatile
+    var downsampled: Boolean = false
+
     /** The reason [complete] was last called with, or null while the decode is still running. */
     @Volatile
     var outcome: String? = null
@@ -150,7 +160,8 @@ internal class DecodeTrace(
 
     /** A compact description of what is known about the page, for reuse across the log lines. */
     private fun describe(): String =
-        "bytes=$bytes fmt=${format ?: "?"} dims=${dimensions ?: "?"} transformed=${transformed ?: "?"}"
+        "bytes=$bytes fmt=${format ?: "?"} dims=${dimensions ?: "?"} transformed=${transformed ?: "?"} " +
+            "downsampled=$downsampled"
 }
 
 /**
@@ -183,13 +194,32 @@ internal fun WebGpuViewer.traceStage(
  */
 internal fun WebGpuViewer.startDecodeStallWatchdog() {
     scope.launch {
+        // KMK --> How long to wait before the next check is not a constant.
+        //
+        // A stall can only be reported for a decode that is *in flight*, so with nothing running
+        // there is nothing to watch, and waking every second to discover that is a pure battery
+        // cost across a long reading session. The loop now parks while the in-flight set is empty
+        // and ticks at full rate the moment a worker picks a page up.
+        //
+        // The stall itself is still detected from the trace's own timestamps rather than from this
+        // loop's cadence, so a slower idle tick cannot make a stall invisible - it only delays
+        // *noticing a new decode* by up to [IDLE_WATCHDOG_TICK_MS], which is far inside a stall's
+        // own threshold.
         while (!isDestroyed) {
             try {
+                if (snapshotActiveDecodes().isEmpty()) {
+                    delay(IDLE_WATCHDOG_TICK_MS)
+                    continue
+                }
                 delay(DECODE_WATCHDOG_TICK_MS)
                 // A lambda, not a value: reportStallIfDue only invokes it on a tick that actually
                 // reports, so a healthy decode never pays for the lock or the string building.
                 for (trace in snapshotActiveDecodes()) {
-                    trace.reportStallIfDue(System.currentTimeMillis(), ::decodeQueueSummary)
+                    if (trace.reportStallIfDue(System.currentTimeMillis(), ::decodeQueueSummary)) {
+                        // The watchdog's line goes to logcat, which is what a phone-only user
+                        // cannot see; the counter is what their report can carry.
+                        WebGpuDiagnostics.recordStall()
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -201,6 +231,15 @@ internal fun WebGpuViewer.startDecodeStallWatchdog() {
         }
     }
 }
+
+/**
+ * How often the watchdog re-checks while nothing is decoding.
+ *
+ * Ten times the active cadence: a stall cannot exist without an in-flight decode, so the only cost
+ * of a slow answer here is that a newly started decode is noticed up to this late - still well
+ * inside [DECODE_WATCHDOG_TICK_MS]'s own threshold, so no stall is ever reported later than before.
+ */
+private const val IDLE_WATCHDOG_TICK_MS = 10_000L
 
 /** What is queued behind the pages being decoded, so a stall reports how much of the chapter is stuck. */
 private fun WebGpuViewer.decodeQueueSummary(): String {

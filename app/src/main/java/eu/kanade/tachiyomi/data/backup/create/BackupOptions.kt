@@ -23,6 +23,13 @@ data class BackupOptions(
     // SY <--
     // KMK -->
     /**
+     * Include each entry's custom cover. A cover is a file in the cover cache rather than a column,
+     * so it is read separately at backup time and carried inside the entry; see
+     * `MangaBackupCreator`. On for a manual backup, off for sync, where the bytes would ride on
+     * every sync (see `SyncSettingsSelector`).
+     */
+    val customCovers: Boolean = true,
+    /**
      * Category ids to include in a manual backup. Null means all categories.
      * Kept outside [asBooleanArray] so worker payloads stay back-compatible.
      */
@@ -45,6 +52,9 @@ data class BackupOptions(
         customInfo,
         savedSearchesFeeds,
         // SY <--
+        // KMK -->
+        customCovers,
+        // KMK <--
     )
 
     fun canCreate() =
@@ -101,6 +111,14 @@ data class BackupOptions(
                 setter = { options, enabled -> options.copy(savedSearchesFeeds = enabled) },
             ),
             // SY <--
+            // KMK -->
+            Entry(
+                label = KMR.strings.custom_covers,
+                getter = BackupOptions::customCovers,
+                setter = { options, enabled -> options.copy(customCovers = enabled) },
+                enabled = { it.libraryEntries },
+            ),
+            // KMK <--
         )
 
         val settingsOptions = persistentListOf(
@@ -142,6 +160,10 @@ data class BackupOptions(
             customInfo = array[10],
             savedSearchesFeeds = array[11],
             // SY <--
+            // KMK -->
+            // getOrNull: a worker payload written by a build without this flag carries 12 elements.
+            customCovers = array.getOrNull(12) ?: true,
+            // KMK <--
         )
     }
 

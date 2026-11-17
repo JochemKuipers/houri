@@ -73,35 +73,47 @@ data class LocalLlmAcceleratorInfo(
  * behave exactly like the engine module's.
  */
 object DeviceMemory {
+    // KMK --> Kept so the shared tier is expressed in the same units the old gate used. The gate
+    // itself compares *tiers*, not bytes - see `isMtlSupported` below - because a byte count cannot
+    // see the vendor low-RAM mark or the 32-bit ABI cap, and those are exactly the cases where the
+    // old number was wrong.
+    // KMK <--
+
+    /** Minimum total RAM required to run the on-device AI translation pipeline (3 GiB). */
     const val MTL_MIN_RAM_BYTES: Long = 3L * 1024 * 1024 * 1024
+    /** Minimum total RAM required to run the WebGPU (high-quality) renderer (3 GiB). */
     const val WEBGPU_MIN_RAM_BYTES: Long = 3L * 1024 * 1024 * 1024
 
-    private const val BYPASS_PREFS = "ram_gate_bypass"
-    private const val BYPASS_KEY = "disabled"
-
-    fun isRamGateDisabled(context: Context): Boolean = runCatching {
-        context.getSharedPreferences(BYPASS_PREFS, Context.MODE_PRIVATE).getBoolean(BYPASS_KEY, false)
-    }.getOrDefault(false)
+    // KMK --> The bypass store and the tier both live in `AppMemoryMonitor` now, so the engine
+    // flavor and this stub cannot drift apart on what "low RAM" means. Each of these was this
+    // file's own copy of the same SharedPreferences read and the same byte comparison, which is how
+    // the two flavors could disagree after a user flipped the bypass.
+    /** Whether the user has permanently disabled the RAM gate via the About screen easter-egg. */
+    fun isRamGateDisabled(context: Context): Boolean =
+        tachiyomi.core.common.util.system.AppMemoryMonitor.isRamGateDisabled(context)
 
     fun setRamGateDisabled(context: Context, disabled: Boolean) {
-        runCatching {
-            context.getSharedPreferences(BYPASS_PREFS, Context.MODE_PRIVATE).edit().putBoolean(BYPASS_KEY, disabled).apply()
-        }
+        tachiyomi.core.common.util.system.AppMemoryMonitor.setRamGateDisabled(context, disabled)
     }
 
-    fun totalRamBytes(context: Context): Long {
-        return runCatching {
-            val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-            val memoryInfo = android.app.ActivityManager.MemoryInfo()
-            activityManager?.getMemoryInfo(memoryInfo)
-            memoryInfo.totalMem
-        }.getOrDefault(0L)
-    }
+    /** Total physical RAM in bytes, or 0 when the system service is unavailable. */
+    fun totalRamBytes(context: Context): Long =
+        tachiyomi.core.common.util.system.AppMemoryMonitor.totalRamBytes(context)
 
-    fun hasSufficientRam(context: Context, minBytes: Long): Boolean = totalRamBytes(context) >= minBytes
-    fun isMtlSupported(context: Context): Boolean = if (isRamGateDisabled(context)) true else hasSufficientRam(context, MTL_MIN_RAM_BYTES)
-    fun isWebGpuSupported(context: Context): Boolean = if (isRamGateDisabled(context)) true else hasSufficientRam(context, WEBGPU_MIN_RAM_BYTES)
+    fun hasSufficientRam(context: Context, minBytes: Long): Boolean =
+        tachiyomi.core.common.util.system.AppMemoryMonitor.totalRamBytes(context) >= minBytes
+
+    /** Whether this device has enough RAM for the on-device AI translation pipeline. */
+    fun isMtlSupported(context: Context): Boolean =
+        tachiyomi.core.common.util.system.AppMemoryMonitor.isMtlSupported(context)
+
+    /** Whether this device has enough RAM for the WebGPU (high-quality) renderer. */
+    fun isWebGpuSupported(context: Context): Boolean =
+        tachiyomi.core.common.util.system.AppMemoryMonitor.isWebGpuSupported(context)
+
+    /** Whether the device runs a 64-bit ABI. */
     fun is64Bit(): Boolean = android.os.Build.SUPPORTED_ABIS.any { it.contains("64") }
+    // KMK <--
     fun socManufacturer(): String = "unknown"
     fun matchesSoc(soc: String, required: String): Boolean =
         soc.equals(required, ignoreCase = true)

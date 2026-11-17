@@ -8,9 +8,13 @@ import eu.kanade.tachiyomi.data.backup.models.BackupHistory
 import eu.kanade.tachiyomi.data.backup.models.BackupManga
 import eu.kanade.tachiyomi.data.backup.models.BackupMergedMangaReference
 import eu.kanade.tachiyomi.data.backup.models.BackupTracking
+import eu.kanade.tachiyomi.data.cache.CoverCache
 import exh.EXHMigrations
 import exh.source.isMergedSourceId
+import logcat.LogPriority
 import mihon.app.di.globalAppGraph
+import tachiyomi.core.common.util.system.logcat
+import tachiyomi.data.BlacklistColumnAdapter
 import tachiyomi.data.Database
 import tachiyomi.data.DatabaseHandler
 import tachiyomi.data.MemoColumnAdapter
@@ -48,6 +52,9 @@ class MangaRestorer(
     private val updateManga: UpdateManga = globalAppGraph.updateManga,
     private val getTracks: GetTracks = globalAppGraph.getTracks,
     private val insertTrack: InsertTrack = globalAppGraph.insertTrack,
+    // KMK -->
+    private val coverCache: CoverCache = globalAppGraph.coverCache,
+    // KMK <--
     // KMK --> Kept as a val: the restore computes fetch intervals from the backup's own
     // chapter list (see restoreMangaDetails), which needs the interactor, not just its window.
     private val fetchInterval: FetchInterval = globalAppGraph.fetchInterval,
@@ -211,11 +218,37 @@ class MangaRestorer(
             // SY <--
         )
 
+        // KMK --> After the rest, so a failed cover write costs the cover only, not the entry.
+        restoreCustomCover(restoredManga.id, backupManga.customCover)
+        // KMK <--
+
         if (isSync) {
             mangaQueries.resetIsSyncing()
             chapterQueries.resetIsSyncing()
         }
     }
+
+    // KMK -->
+    /**
+     * Writes the entry's custom cover back into the cover cache under this restore's manga id.
+     *
+     * The cover is a file keyed by manga id, and the id is this device's (a restore of a new entry
+     * inserts a fresh row), so the bytes are written here rather than copied by path. A cover the
+     * user has set on this device is left alone when the backup carries none; when it carries one it
+     * wins, matching every other field of the entry.
+     *
+     * A failed write is logged and swallowed: the rest of the entry is already restored and a cover
+     * is not worth rolling a batch back for.
+     */
+    private suspend fun restoreCustomCover(mangaId: Long, cover: ByteArray?) {
+        if (cover == null || cover.isEmpty()) return
+        runCatching {
+            coverCache.setCustomCoverToCache(mangaId, cover.inputStream())
+        }.onFailure { e ->
+            logcat(LogPriority.ERROR, e) { "Failed to restore the custom cover of manga $mangaId" }
+        }
+    }
+    // KMK <--
 
     private suspend fun findExistingManga(backupManga: BackupManga): Manga? {
         return getMangaByUrlAndSourceId.await(backupManga.url, backupManga.source)
@@ -285,7 +318,9 @@ class MangaRestorer(
                 memo = manga.memo.let(MemoColumnAdapter::encode),
                 // KMK -->
                 scanlatorPriority = manga.scanlatorPriority.let(StringListColumnAdapter::encode),
-                blacklistedChapters = manga.blacklistedChapters.let(StringListColumnAdapter::encode),
+                // KMK --> Lossless blacklist encoding; the restore write is the other path
+                // that puts keys in this column (issue #68).
+                blacklistedChapters = manga.blacklistedChapters.let(BlacklistColumnAdapter::encode),
                 rereadCount = manga.rereadCount.toLong(),
                 rereading = manga.rereading,
                 rereadStartedAt = manga.rereadStartedAt,

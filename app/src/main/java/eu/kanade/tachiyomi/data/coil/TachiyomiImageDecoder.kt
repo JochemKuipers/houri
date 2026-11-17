@@ -16,7 +16,9 @@ import mihon.core.archive.CbzCrypto
 import mihon.core.archive.CbzCrypto.getCoverStream
 import mihon.core.archive.archiveReader
 import okio.BufferedSource
+import tachiyomi.core.common.util.system.AppMemoryMonitor
 import tachiyomi.core.common.util.system.ImageUtil
+import tachiyomi.core.common.util.system.shouldDowngradeToRgb565
 import tachiyomi.decoder.ImageDecoder
 import java.io.BufferedInputStream
 
@@ -86,9 +88,19 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                 bitmap.recycle()
                 bitmap = hwBitmap
             }
-        } else if (isJxl && eu.kanade.tachiyomi.util.system.DeviceUtil.isLowRamDevice(context) && bitmap.config != Bitmap.Config.RGB_565) {
+        } else if (isJxl && bitmap.config != Bitmap.Config.RGB_565) {
+            // KMK --> Was gated on `DeviceUtil.isLowRamDevice(context)` and a flat 32MB threshold.
+            // The device-size question is now the live pressure and the page-size question is the
+            // page's own decoded bytes - see `shouldDowngradeToRgb565`. The practical difference: a
+            // 12GB phone that has gone TIGHT now halves a huge page instead of keeping full colour
+            // and risking the device, and a 2GB phone with headroom keeps full colour on a page it
+            // can comfortably hold.
+            //
+            // `sampleIfStale` rather than a plain read: this runs on every JXL page, and the point
+            // of the check is *now*, not "whatever startup saw". The refresh is bounded to one
+            // binder call a second across all decodes, so the live answer costs nothing measurable.
             val estBytes = bitmap.width.toLong() * bitmap.height * 4
-            if (estBytes > 32L * 1024 * 1024) {
+            if (shouldDowngradeToRgb565(estBytes, AppMemoryMonitor.sampleIfStale(context).pressure)) {
                 val rgb565 = bitmap.copy(Bitmap.Config.RGB_565, false)
                 if (rgb565 != null) {
                     bitmap.recycle()
@@ -96,6 +108,7 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                 }
             }
         }
+        // KMK <--
 
         return DecodeResult(
             image = bitmap.asImage(),

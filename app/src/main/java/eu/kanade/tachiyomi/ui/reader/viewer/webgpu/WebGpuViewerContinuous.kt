@@ -1,15 +1,21 @@
 // Mihon -->
 package eu.kanade.tachiyomi.ui.reader.viewer.webgpu
 
+import android.view.Gravity
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.View
+import android.widget.FrameLayout
 import ca.mpreg.webgpuviewer.ImageViewContinuous
 import ca.mpreg.webgpuviewer.viewer.ImageViewerContinuousState
 import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.reader.viewer.JoystickScrollHelper
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlin.math.max
 
 /** Ceiling on how far past the baseline window [cacheSize] grows to follow the drawn reach. */
@@ -57,15 +63,73 @@ class WebGpuViewerContinuous(activity: ReaderActivity, val useGap: Boolean = fal
         get() {
             val drawn = max(state.pagesBelow, state.pagesAbove).coerceAtMost(MAX_CACHED_REACH)
             val slack = when {
-                memoryBudget.deviceTier <= WebGpuMemoryBudget.DeviceTier.SMALL -> 3
-                memoryBudget.budget().pressure == WebGpuMemoryBudget.Pressure.CRITICAL -> 2
-                memoryBudget.budget().pressure == WebGpuMemoryBudget.Pressure.TIGHT -> 4
+                memoryBudget.deviceTier <= DeviceTier.SMALL -> 3
+                memoryBudget.budget().pressure == MemoryPressure.CRITICAL -> 2
+                memoryBudget.budget().pressure == MemoryPressure.TIGHT -> 4
                 else -> 7
             }
             return slack + 2 * max(ImageViewerContinuousState.MAX_VISIBLE_PAGES, drawn)
         }
 
     private val state get() = (pager as ImageViewContinuous).state
+
+    // KMK -->
+    /**
+     * The pager inside a full-screen frame, so the continuous column can be narrower than the
+     * window.
+     *
+     * The library sizes every page to the surface it renders into, so "narrower column" has exactly
+     * one expression available from this side: give the pager a narrower layout width and centre it.
+     * The frame is what allows that without disturbing the activity's own viewer container, which
+     * also carries the fullscreen/cutout insets.
+     *
+     * It is always in the hierarchy, even when the column is the full width, so turning the padding
+     * up later is a layout change rather than a re-parenting. The one trade-off worth knowing: the
+     * margins belong to the frame, so a tap in the margin is not a tap on a page and does nothing.
+     * At the setting's maximum (25% per side) that is a deliberate, visible column - the same shape
+     * the legacy viewer has, where the margin is a page-frame margin rather than a page.
+     */
+    private val columnFrame = FrameLayout(activity)
+
+    /**
+     * The pager's width inside [columnFrame]; the height is always the full window.
+     *
+     * The width comes from the frame rather than the display metrics so a split-screen or
+     * free-form window - where the activity is not as wide as the screen - pads the window it
+     * actually has. The frame is `MATCH_PARENT`, so its width is independent of the child's and
+     * re-reading it cannot oscillate.
+     */
+    private fun applyColumnWidth() {
+        val params = pager.layoutParams as? FrameLayout.LayoutParams ?: return
+        val available = if (columnFrame.width > 0) {
+            columnFrame.width
+        } else {
+            activity.resources.displayMetrics.widthPixels
+        }
+        val target = resolveColumnWidth(
+            screenWidth = available,
+            sidePaddingPercent = readerPreferences.webtoonSidePadding().get(),
+        )
+        if (params.width != target) {
+            params.width = target
+            pager.layoutParams = params
+        }
+    }
+
+    /**
+     * The view the activity hosts: the frame, not the pager.
+     *
+     * Callers that need the renderer itself go through the viewer (`state`, `pager`), which is
+     * unchanged - only the host's view is wrapped.
+     */
+    override fun getView(): View = columnFrame
+
+    override fun onViewerConfigurationChanged() {
+        // A rotation, a fold or a multi-window resize changes the width the column is derived from,
+        // and the frame is not otherwise re-laid out until something invalidates it.
+        columnFrame.post { applyColumnWidth() }
+    }
+    // KMK <--
 
     // KMK -->
     private val joystickScroll = JoystickScrollHelper(
@@ -76,6 +140,26 @@ class WebGpuViewerContinuous(activity: ReaderActivity, val useGap: Boolean = fal
     // KMK <--
 
     init {
+        // KMK --> The pager is wrapped before anything can lay it out, so the very first frame is
+        // already at the reader's column width rather than a full-width frame that snaps narrower.
+        columnFrame.addView(
+            pager,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                Gravity.CENTER_HORIZONTAL,
+            ),
+        )
+        applyColumnWidth()
+        // Re-applied after the first layout, because until then the frame has no width of its own
+        // and the display metrics answer is the whole screen - wrong in a split-screen window.
+        columnFrame.post { applyColumnWidth() }
+        readerPreferences.webtoonSidePadding()
+            .changes()
+            .drop(1)
+            .onEach { applyColumnWidth() }
+            .launchIn(scope)
+        // KMK <--
         // KMK --> Library flag replaces the old DoubleTapZoomGateLayout proxy.
         // Resolved here (not in the base init) because isContinuous is only
         // assigned after super construction, and reseeding the diff baseline so
@@ -88,6 +172,10 @@ class WebGpuViewerContinuous(activity: ReaderActivity, val useGap: Boolean = fal
         state.cropBorders = config.imageCropBorders
         // KMK <--
         config.reseedDiffBaseline()
+        // KMK --> Tap zones resolve by reading mode, and the config's init ran while
+        // `isContinuous` was still the base class's false - so the pair is re-resolved now that
+        // the override is assigned.
+        config.reseedNavigationProfile()
         // KMK <--
         // Scrolling clear of a transition page is the only point this mode can call the chapter
         // before it finished - reaching a page's top comes a screen too early. Reported on every

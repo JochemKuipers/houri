@@ -16,6 +16,23 @@ import android.os.Build
  */
 object DeviceMemory {
 
+    // KMK --> The RAM gates used to be this module's own byte threshold (`totalRam >= 3GB`),
+    // re-implemented in the stub module as well. They now delegate to the shared device tier, which
+    // is the same answer the reader, Coil and the JXL cap use - so a device cannot be "big enough
+    // for MTL" here and "low memory" everywhere else.
+    //
+    // The constants are kept, but as the *byte equivalent of the tier boundary* rather than the
+    // thing the check compares against. A caller that wants the old number still compiles; the
+    // gate itself is the tier, because the tier also folds in the vendor low-RAM mark and the
+    // 32-bit ABI cap, which a byte comparison cannot see.
+    //
+    // WebGPU shares the MTL boundary deliberately. The reader's own docs record that a 32-bit
+    // userspace keeps the WebGPU viewer (it is capped at SMALL rather than excluded), and SMALL is
+    // below MEDIUM - so gating WebGPU on the tier means a 32-bit device is *offered* the renderer
+    // the reader is willing to run, instead of being shown the legacy viewer for no reason the
+    // reader agrees with.
+    // KMK <--
+
     /** Minimum total RAM required to run the on-device AI translation pipeline (3 GiB). */
     const val MTL_MIN_RAM_BYTES: Long = 3L * 1024 * 1024 * 1024
 
@@ -52,11 +69,23 @@ object DeviceMemory {
         return total >= minBytes
     }
 
+    // KMK --> Both gates now ask the shared tier rather than comparing bytes. The tier is the one
+    // answer that also accounts for the vendor low-RAM mark and the 32-bit ABI cap, so a device
+    // cannot be admitted here and demoted by the reader.
+    //
+    // `isRamGateDisabled` is folded into the shared implementation, so it is no longer repeated at
+    // each call site - which is what kept the bypass and the check in separate places before.
+    //
+    // The `context` parameter is kept even though the tier is cached, because every existing caller
+    // passes one and an overload would be a second answer to the same question.
     /** Whether this device has enough RAM for the on-device AI translation pipeline. */
-    fun isMtlSupported(context: Context): Boolean = if (isRamGateDisabled(context)) true else hasSufficientRam(context, MTL_MIN_RAM_BYTES)
+    fun isMtlSupported(context: Context): Boolean =
+        tachiyomi.core.common.util.system.AppMemoryMonitor.isMtlSupported(context)
 
     /** Whether this device has enough RAM for the WebGPU (high-quality) renderer. */
-    fun isWebGpuSupported(context: Context): Boolean = if (isRamGateDisabled(context)) true else hasSufficientRam(context, WEBGPU_MIN_RAM_BYTES)
+    fun isWebGpuSupported(context: Context): Boolean =
+        tachiyomi.core.common.util.system.AppMemoryMonitor.isWebGpuSupported(context)
+    // KMK <--
 
     /** Whether the device runs a 64-bit ABI (32-bit processes have a much smaller address space). */
     fun is64Bit(): Boolean = Build.SUPPORTED_ABIS.any { it.contains("64") }

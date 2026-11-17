@@ -50,7 +50,7 @@ Lambdas (KMK): `LibraryUpdateErrorMapper`, `LibraryUpdateErrorWithRelationsMappe
 
 ## Column adapters
 
-`DateColumnAdapter` (Long↔Date), `StringListColumnAdapter` (String↔List<String>), `UpdateStrategyColumnAdapter` (Long↔UpdateStrategy), `MemoColumnAdapter` (ByteArray↔JsonObject)
+`DateColumnAdapter` (Long↔Date), `StringListColumnAdapter` (String↔List<String>), `UpdateStrategyColumnAdapter` (Long↔UpdateStrategy), `MemoColumnAdapter` (ByteArray↔JsonObject), `BlacklistColumnAdapter` (String↔List<String>, JSON — lossless; the shared ", "-joined adapter corrupts any key carrying a comma-space, which is how blacklisted chapters came back, issue #68; decode still reads legacy rows)
 
 ## SQL patterns
 

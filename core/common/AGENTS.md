@@ -65,6 +65,53 @@ migration in `mihon/core/migration/migrations/`.
 | `LogcatExtensions.kt` | `logcat {}` wrapper |
 | `Localize.kt` | Moko Resources string resolution |
 
+## Device memory (`util/system/DeviceMemory*.kt` + `AppMemoryMonitor.kt`, KMK)
+
+The one place that answers "what is this device, and how much room is left right now". Three files,
+split so the policy can be asserted offline:
+
+| File | Owns | Testable offline |
+|---|---|---|
+| `DeviceMemoryClass.kt` | `DeviceTier` + the fold (`deviceTierFor`: RAM, vendor low-RAM mark, 32-bit ABI cap) | yes — `DeviceMemoryHarness` |
+| `DeviceMemoryMath.kt` | `MemoryPressure`, headroom, tier ceilings, `shouldDowngradeToRgb565`, `jxlMaxDimension` | yes — same harness |
+| `AppMemoryMonitor.kt` | `ActivityManager` reads, the published `Snapshot`, the RAM-gate bypass | no (Android) |
+
+**Who samples, and when.** `AppMemoryMonitor.sample(context)` is the only method that touches the
+system (a binder call). The image-loader factory — `App.newImageLoader`, invoked by Coil when the
+first image is requested — calls it once to *prime* the snapshot. `sampleIfStale(context)` is the
+per-image entry point — Coil's decoders and `ImageUtil.lowRamJxlMaxDimension` — and answers from the
+published reading when it is younger than one second, re-reading only when it is not. That bounds the
+live answer to one system read a second across all decodes and zero when the app is idle.
+
+**There is no read-without-sampling accessor, on purpose.** A draft had `snapshot(context)` that never
+sampled; the decoders' pressure checks then read a startup reading for the whole session — dead code
+wearing a live API's clothes. If you find yourself wanting a free read on a hot path, the question to
+ask is what decision the read is for: if the answer is "per image", use `sampleIfStale`; if it is "once
+at startup", call `sample` there and keep the result.
+
+**The static half is resolved once.** `totalMem`, the vendor low-RAM mark and the ABI do not change
+during a process, so `static(context)` caches them behind a double-checked lock. Only the pressure
+is re-read.
+
+**Consumers, so a change here knows its blast radius:**
+
+| Consumer | What it reads |
+|---|---|
+| WebGPU reader (`viewer/webgpu/`) | tier + pressure for its own decoded-page/tile ceilings |
+| Coil (`App.newImageLoader`) | `imageCacheBytes`, `fetchParallelism` (the startup prime) |
+| Coil decoders (JXL/AVIF/HEIF) | `sampleIfStale` → `shouldDowngradeToRgb565` |
+| `ImageUtil.lowRamJxlMaxDimension` | `sampleIfStale` → `jxlMaxDimension` |
+| MTL / WebGPU RAM gates | `isMtlSupported` / `isWebGpuSupported` (tier ≥ MEDIUM) |
+| `DeviceUtil.isLowRamDevice` | the tier, for legacy callers |
+
+**Do not reintroduce a device-size boolean.** `totalMem < 3GB` was the old answer everywhere, and it
+was wrong in both directions: a 4GB phone the OEM marked low-RAM looked healthy, and a 12GB phone
+that had gone TIGHT looked fine. Everything asks the tier or the live pressure instead.
+
+**`is64Bit` and the 32-bit cap.** A 32-bit process shares ~3GB of address space across the Java heap,
+the native decode buffers and the GPU's allocations, so `deviceTierFor` caps it at SMALL. That also
+pins decode parallelism to one worker, which is the real reason the cap exists.
+
 ## Logging
 
 - **KMK code:** `xLogE()` / `xLog()` from `exh.log` (XLog with safe pre-init fallback)

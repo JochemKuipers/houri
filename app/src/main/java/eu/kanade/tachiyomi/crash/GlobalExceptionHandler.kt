@@ -29,21 +29,44 @@ class GlobalExceptionHandler private constructor(
             encoder.encodeString(value.stackTraceToString())
     }
 
-    @Volatile
-    private var lastCrashMs = 0L
+    /**
+     * Crash-loop guard. The old code used a single `lastCrashMs` with a 3s window, which only
+     * suppressed *adjacent* crashes; a crash in CrashActivity itself (or the :error_handler
+     * process re-entering onCreate) could still re-crash without limit.
+     *
+     * We keep a small ring of recent crash timestamps and only launch the crash activity if we
+     * haven't exceeded [MAX_CRASHES_PER_WINDOW] crashes inside [CRASH_WINDOW_MS]. Once the
+     * threshold is crossed we stop launching the activity and let the default handler kill the
+     * process — the user gets a normal "app keeps stopping" dialog instead of a crash-screen
+     * loop.
+     */
+    private val recentCrashTimes = ArrayDeque<Long>(MAX_CRASHES_PER_WINDOW + 1)
+
+    @Synchronized
+    private fun shouldLaunchCrashActivity(now: Long): Boolean {
+        recentCrashTimes.addLast(now)
+        while (recentCrashTimes.size > MAX_CRASHES_PER_WINDOW) {
+            recentCrashTimes.removeFirst()
+        }
+        if (recentCrashTimes.size < MAX_CRASHES_PER_WINDOW) {
+            return true
+        }
+        val windowStart = recentCrashTimes.first()
+        return now - windowStart > CRASH_WINDOW_MS
+    }
 
     override fun uncaughtException(thread: Thread, exception: Throwable) {
         logcat(priority = LogPriority.ERROR, throwable = exception)
         val now = System.currentTimeMillis()
-        val isCrashLoop = now - lastCrashMs < 3000
-        lastCrashMs = now
-        if (!isCrashLoop) {
+        if (shouldLaunchCrashActivity(now)) {
             try {
                 val report = CrashReport.from(
                     throwable = exception,
                     thread = thread,
-                    debugInfo = runCatching { eu.kanade.tachiyomi.util.CrashLogUtil(applicationContext).getDebugInfo() }.getOrDefault("debugInfo unavailable"),
-                    extensionsInfo = runCatching { eu.kanade.tachiyomi.util.CrashLogUtil(applicationContext).let { it.javaClass.getDeclaredMethod("getExtensionsInfo").apply { isAccessible = true }.invoke(it) as? String } }.getOrNull(),
+                    debugInfo = runCatching { CrashDiagnostics.debugInfo(applicationContext) }
+                        .getOrDefault("debugInfo unavailable"),
+                    extensionsInfo = runCatching { CrashDiagnostics.extensionsInfo() }
+                        .getOrNull(),
                 )
                 val file = CrashLogWriter.write(applicationContext, report)
                 launchActivityWithReport(applicationContext, activityToBeLaunched, exception, file.absolutePath)
@@ -88,6 +111,11 @@ class GlobalExceptionHandler private constructor(
     companion object {
         private const val INTENT_EXTRA = "Throwable"
         const val INTENT_EXTRA_REPORT_PATH = "crash_report_path"
+
+        /** Max number of crashes tolerated inside [CRASH_WINDOW_MS] before we stop launching the
+         * crash activity and let the process die. */
+        private const val MAX_CRASHES_PER_WINDOW = 3
+        private const val CRASH_WINDOW_MS = 10_000L
 
         fun initialize(
             applicationContext: Context,

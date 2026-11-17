@@ -40,7 +40,13 @@ class WebGpuConfig(
     var imageZoomType = ReaderPageImageView.ZoomStartPosition.LEFT
         private set
 
-    var imageCropBorders = false
+    /**
+     * The Pager group's crop switch.
+     *
+     * Kept under its own name because it is no longer the answer for every mode - see
+     * [imageCropBorders].
+     */
+    internal var pagerCropBorders = false
         private set
 
     var navigateToPan = false
@@ -182,6 +188,76 @@ class WebGpuConfig(
     // KMK <--
 
     // KMK -->
+    /**
+     * The tap-zone preference for whichever group the reading mode belongs to.
+     *
+     * Held as two fields rather than read at access time because `register` needs something to
+     * write into; [applyNavigationProfile] folds them into the base's `navigationMode`.
+     */
+    private var pagerNavigationMode = 0
+
+    private var webtoonNavigationMode = 0
+
+    private var pagerNavInvertedMode = ReaderPreferences.TappingInvertMode.NONE
+
+    private var webtoonNavInvertedMode = ReaderPreferences.TappingInvertMode.NONE
+
+    /**
+     * Re-resolves the tap zones now that the reading mode is known.
+     *
+     * The `init`-time registrations resolve while `viewer.isContinuous` is still the base class's
+     * `false` - the continuous subclass assigns its override after super construction - so without
+     * this a continuous viewer would keep the Pager pair until the user touched a setting. The
+     * subclass calls it next to [reseedDiffBaseline], for the same reason.
+     */
+    fun reseedNavigationProfile() {
+        applyNavigationProfile()
+    }
+
+    /**
+     * Rebuilds the tap zones from the pair of preferences the reading mode selects.
+     *
+     * All four registrations call this, so whichever preference changed - and whichever mode is
+     * open - the result is the same. The order inside is load-bearing: `updateNavigation` replaces
+     * the navigator, and the replacement re-applies `invertMode` from `tappingInverted`, so an
+     * inversion that arrived first has to be re-asserted after the new navigator is in place.
+     */
+    private fun applyNavigationProfile() {
+        val continuous = viewer.isContinuous
+        tappingInverted = if (continuous) webtoonNavInvertedMode else pagerNavInvertedMode
+        navigationMode = if (continuous) webtoonNavigationMode else pagerNavigationMode
+        updateNavigation(navigationMode)
+        navigator.invertMode = tappingInverted
+    }
+
+    /**
+     * Whether decoded pages are trimmed to their content, resolved by reading mode.
+     *
+     * Three switches, three modes, and the WebGPU reader used to read the Pager one for all of
+     * them - so *Crop borders* in the Webtoon group changed nothing while the strip was open. The
+     * legacy viewers make the same split (`WebtoonConfig` registers `cropBordersWebtoon`,
+     * `WebtoonPageHolder` picks `cropBordersContinuousVertical` for the paged mode), and the
+     * reading-mode-to-switch mapping is the one the reader modes are built from:
+     *
+     *   - L2R / R2L / vertical (paged) -> the Pager group's switch, which is where those modes
+     *     configure it;
+     *   - WEBTOON (continuous, no gap) -> the Webtoon group's switch;
+     *   - CONTINUOUS_VERTICAL (continuous, gapped) -> its own switch, exactly as the legacy
+     *     `WebtoonViewer(isContinuous = false)` reads it.
+     *
+     * Resolved at access time for the same reason [doubleTapZoom] is: `isContinuous` is only
+     * assigned after the base constructor has run.
+     */
+    val imageCropBorders: Boolean
+        get() {
+            if (!viewer.isContinuous) return pagerCropBorders
+            return if ((viewer as? WebGpuViewerContinuous)?.useGap == true) {
+                readerPreferences.cropBordersContinuousVertical().get()
+            } else {
+                readerPreferences.cropBordersWebtoon().get()
+            }
+        }
+
     private val pagedDoubleTapZoomPref = readerPreferences.pagedDoubleTapZoomEnabled()
     private val webtoonDoubleTapZoomPref = readerPreferences.webtoonDoubleTapZoomEnabled()
 
@@ -310,7 +386,21 @@ class WebGpuConfig(
             .register({ zoomTypeFromPreference(it) }, { emitSettingsChange() })
 
         readerPreferences.cropBorders()
-            .register({ imageCropBorders = it }, { emitSettingsChange() })
+            .register({ pagerCropBorders = it }, { emitSettingsChange() })
+
+        // KMK --> The continuous modes read their own switches (see [imageCropBorders]); watched so
+        // a flip re-applies while the strip is open instead of on the next viewer rebuild.
+        readerPreferences.cropBordersWebtoon()
+            .changes()
+            .drop(1)
+            .onEach { emitSettingsChange() }
+            .launchIn(scope)
+        readerPreferences.cropBordersContinuousVertical()
+            .changes()
+            .drop(1)
+            .onEach { emitSettingsChange() }
+            .launchIn(scope)
+        // KMK <--
 
         readerPreferences.navigateToPan()
             .register({ navigateToPan = it })
@@ -318,15 +408,23 @@ class WebGpuConfig(
         readerPreferences.landscapeZoom()
             .register({ landscapeZoom = it }, { emitSettingsChange() })
 
+        // KMK --> Tap zones are a per-mode setting, and the WebGPU reader used to read the Pager
+        // group's for every mode - so "Viewer navigation" in the Webtoon group changed nothing while
+        // a strip was open, and half the readers that navigate by tapping were on the wrong zones.
+        // Both groups are registered and [applyNavigationProfile] picks the pair for the mode, which
+        // is exactly the split the legacy `WebtoonViewer` makes.
         readerPreferences.navigationModePager()
-            .register({ navigationMode = it }, { updateNavigation(navigationMode) })
+            .register({ pagerNavigationMode = it }, { applyNavigationProfile() })
+
+        readerPreferences.navigationModeWebtoon()
+            .register({ webtoonNavigationMode = it }, { applyNavigationProfile() })
 
         readerPreferences.pagerNavInverted()
-            .register({ tappingInverted = it }, { navigator.invertMode = it })
-        readerPreferences.pagerNavInverted().changes()
-            .drop(1)
-            .onEach { navigationModeChangedListener?.invoke() }
-            .launchIn(scope)
+            .register({ pagerNavInvertedMode = it }, { applyNavigationProfile() })
+
+        readerPreferences.webtoonNavInverted()
+            .register({ webtoonNavInvertedMode = it }, { applyNavigationProfile() })
+        // KMK <--
 
         readerPreferences.dualPageSplitPaged()
             .register(

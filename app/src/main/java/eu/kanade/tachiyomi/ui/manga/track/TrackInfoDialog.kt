@@ -9,10 +9,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.NavBackStack
 import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import eu.kanade.presentation.components.AdaptiveSheet
 import kotlinx.serialization.Serializable
@@ -53,6 +55,18 @@ fun TrackInfoDialog(
                 onBack = {
                     if (sheetBackStack.size > 1) sheetBackStack.removeLastOrNull()
                 },
+                // KMK <--
+                // KMK --> The nested NavDisplay's default decorator list carries no
+                // ViewModel-store decorator, so every nested entry resolved its
+                // assistedMetroViewModel from the sheet entry's single store, keyed by class:
+                // pushing TrackerSearchRoute for a second tracker reused the first tracker's
+                // cached ViewModel (its serviceId/query were baked in at creation), and "add to
+                // another tracker" kept showing the previous tracker's search. Match the main
+                // display's decorator list so each push owns its store.
+                entryDecorators = listOf(
+                    rememberSaveableStateHolderNavEntryDecorator(),
+                    rememberViewModelStoreNavEntryDecorator(),
+                ),
                 // KMK <--
                 sizeTransform = SizeTransform(),
                 transitionSpec = { trackFade },

@@ -16,9 +16,11 @@ class CrashActivity : BaseActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         val exception = GlobalExceptionHandler.getThrowableFromIntent(intent)
+        val reportPath = GlobalExceptionHandler.getReportPathFromIntent(intent)
         setComposeContent {
             CrashScreen(
                 exception = exception,
+                reportPath = reportPath,
                 onRestartClick = {
                     finishAffinity()
                     startActivity(Intent(this@CrashActivity, MainActivity::class.java))
