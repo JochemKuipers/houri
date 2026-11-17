@@ -456,9 +456,9 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
 
         enterPipelineStage(page, trace, PageStage.DECODE, "bytes=${displayBytes.size}")
         val dec = try {
-            // KMK --> Bytes already sit in a heap array; newBytes hands them over in one native
-            // copy instead of wrapping them in a stream and re-reading them 8 KiB at a time.
-            ImageDecoder.newBytes(displayBytes).also { d ->
+            // KMK --> Upstream's decoder takes a stream; the bytes are already a heap array, so
+            // the stream is a thin view over them with no copy.
+            ImageDecoder.open(displayBytes.inputStream()).also { d ->
                 if (d.pages <= 0) {
                     try {
                         d.close()
@@ -476,7 +476,7 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
         }
 
         val pageCount = dec.pages
-        trace?.format = runCatching { dec.format }.getOrNull()
+        trace?.format = runCatching { dec.format.name.lowercase() }.getOrNull()
 
         if (pageCount == 0) throw Exception("No frames decoded")
 
@@ -590,7 +590,7 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
                 } catch (_: Exception) {}
                 return
             }
-            val isJxl = dec.format == "jxl"
+            val isJxl = dec.format == ImageDecoder.Format.JXL
             val trimColors = if (!isJxl && config.imageCropBorders && !isDualPageMode()) {
                 listOf(
                     floatArrayOf(1f, 1f, 1f),
@@ -622,6 +622,11 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
                 // KMK <--
             )
 
+            // KMK --> Upstream frames own native pixels until closed; the upload above copied
+            // them, so both the frame and the decoder are released here.
+            runCatching { firstFrame.close() }
+            runCatching { dec.close() }
+            // KMK <--
             ImagePage.ImageSingle(firstImage)
         } else {
             val frames = ArrayList<Pair<Image, Int>>(pageCount)
@@ -647,6 +652,9 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
             )
 
             frames.add(Pair(firstImage, firstFrame.duration))
+            // KMK --> Copied into the uploaded texture above; the native pixels can go.
+            runCatching { firstFrame.close() }
+            // KMK <--
 
             // KMK -->
             try {
@@ -713,6 +721,9 @@ internal suspend fun WebGpuViewer.decodeReaderPage(page: ViewerReaderPage, trace
                         backgroundColor = firstImage.backgroundColor,
                     )
                     frames.add(Pair(image, frame.duration))
+                    // KMK --> As above: one frame's native pixels, released after its upload.
+                    runCatching { frame.close() }
+                    // KMK <--
                 }
             } catch (e: Throwable) {
                 discardFrames()

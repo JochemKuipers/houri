@@ -19,18 +19,15 @@ import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.connections.ConnectionsManager
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
 import eu.kanade.tachiyomi.data.notification.Notifications
-import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.util.system.notificationBuilder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
-import kotlinx.serialization.json.Json
 import mihon.app.di.appGraph
 import mihon.app.di.globalAppGraph
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.util.lang.launchIO
-import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.domain.category.interactor.GetCategories
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.category.model.Category.Companion.UNCATEGORIZED_ID
@@ -308,25 +305,32 @@ class DiscordRPCService : Service() {
         private const val MP_PREFIX = "mp:"
 
         /**
-         * Discord asset reference for a presence image.
+         * Discord asset reference for the *large* presence image.
          *
-         * An mp: path is Discord's media proxy and only resolves for paths on their own CDN
-         * (emojis/<snowflake>.webp). An already-proxied value - what the external-assets API
-         * hands back - has to be left alone. Anything else is an external URL, which Discord
-         * fetches directly and which must NOT carry the prefix: mp:https://... is not a path on
-         * their CDN and renders as a broken asset.
+         * Large images accept two shapes over the IPC: an `mp:` media-proxy path (their CDN, or
+         * an `external/<hash>/...` path minted by the external-assets API) and a plain `https://`
+         * URL, which the client fetches itself. Anything else is an uploaded asset key and is
+         * passed through for the prefix to be added by Discord's own lookup.
          */
         private fun toRpcImage(imageUrl: String): String = when {
             imageUrl.startsWith(MP_PREFIX) -> imageUrl
             imageUrl.startsWith("http") -> imageUrl
             else -> "$MP_PREFIX$imageUrl"
         }
-        private const val EXTERNAL_PREFIX = "external/"
-        private const val ID_MARKER = "\"id\": \""
-        private val json = Json {
-            encodeDefaults = true
-            allowStructuredMapKeys = true
-            ignoreUnknownKeys = true
+
+        /**
+         * Discord asset reference for the *small* presence image, or null to leave it out.
+         *
+         * Only `large_image` accepts an external URL; a raw `https://` value in `small_image` is
+         * not fetched, the whole asset is dropped, and the card renders with no art at all - the
+         * "icons are missing" report. The app's own icon is already attached to the activity by
+         * Discord from the application record, so omitting the slot is what shows it; there is
+         * nothing useful to send for a value that is not already a proxy path.
+         */
+        private fun toRpcSmallImage(imageUrl: String): String? = when {
+            imageUrl.startsWith(MP_PREFIX) -> imageUrl
+            imageUrl.startsWith("http") -> null
+            else -> imageUrl
         }
 
         private const val TAG = "DiscordRPCService"
@@ -443,7 +447,7 @@ class DiscordRPCService : Service() {
                     timestamps = timestamps,
                     assets = Activity.Assets(
                         largeImage = toRpcImage(imageUrl),
-                        smallImage = toRpcImage(DiscordScreen.APP.imageUrl),
+                        smallImage = toRpcSmallImage(DiscordScreen.APP.imageUrl),
                         largeText = buildString {
                             append(
                                 context.getString(
@@ -495,28 +499,31 @@ class DiscordRPCService : Service() {
                 val chapterNumber = getFormattedChapterNumber(context, readerData, discordIncognito)
                 val (startTime, _) = getTimestamps(readerData)
 
-                withIOContext {
-                    val rpcExternalAsset = getRPCExternalAsset()
-                    val mangaThumbnail =
-                        getDiscordThumbnail(rpcExternalAsset, readerData.thumbnailUrl, discordIncognito)
+                // KMK --> The cover goes to Discord as the URL the source gave us. The
+                // external-assets API that used to mint an mp: path for it authenticates with the
+                // *application's* token, and what this app holds is the user's own account token -
+                // the call answered 401 every time, the asset came back null, and the card showed
+                // no art. `large_image` accepts an external https URL directly, so the URL is
+                // passed through untouched.
+                val mangaThumbnail = readerData.thumbnailUrl.takeUnless { discordIncognito }
+                // KMK <--
 
-                    discordScope.launchIO {
-                        setScreen(
-                            context = context,
-                            discordScreen = DiscordScreen.MANGA,
-                            readerData = readerData.copy(
-                                mangaTitle = mangaTitle,
-                                chapterNumber = chapterNumber,
-                                thumbnailUrl = mangaThumbnail,
-                                startTimestamp = startTime,
-                                // KMK -->
-                                currentPage = readerData.currentPage.takeUnless { discordIncognito },
-                                totalPages = readerData.totalPages.takeUnless { discordIncognito },
-                                sourceName = readerData.sourceName.takeUnless { discordIncognito },
-                                // KMK <--
-                            ),
-                        )
-                    }
+                discordScope.launchIO {
+                    setScreen(
+                        context = context,
+                        discordScreen = DiscordScreen.MANGA,
+                        readerData = readerData.copy(
+                            mangaTitle = mangaTitle,
+                            chapterNumber = chapterNumber,
+                            thumbnailUrl = mangaThumbnail,
+                            startTimestamp = startTime,
+                            // KMK -->
+                            currentPage = readerData.currentPage.takeUnless { discordIncognito },
+                            totalPages = readerData.totalPages.takeUnless { discordIncognito },
+                            sourceName = readerData.sourceName.takeUnless { discordIncognito },
+                            // KMK <--
+                        ),
+                    )
                 }
             } catch (e: Exception) {
                 Timber.tag(TAG).e(e, "Error setting reader activity: ${e.message}")
@@ -609,45 +616,6 @@ class DiscordRPCService : Service() {
                 readerData.startTimestamp ?: System.currentTimeMillis(),
                 null,
             )
-
-        private fun getRPCExternalAsset(): RPCExternalAsset {
-            val connectionsManager: ConnectionsManager by lazy { globalAppGraph.connectionsManager }
-            val networkService: NetworkHelper by lazy { globalAppGraph.networkHelper }
-
-            return RPCExternalAsset(
-                applicationId = RICH_PRESENCE_APPLICATION_ID,
-                token = connectionsPreferences.connectionsToken(connectionsManager.discord).get(),
-                client = networkService.client,
-                json = json,
-            )
-        }
-
-        private suspend fun getDiscordThumbnail(
-            rpcExternalAsset: RPCExternalAsset,
-            thumbnailUrl: String?,
-            incognito: Boolean,
-        ): String? {
-            if (incognito || thumbnailUrl == null) return null
-
-            return try {
-                rpcExternalAsset.getDiscordUri(thumbnailUrl)
-                    ?.takeIf { !it.contains("external/Not Found") }
-                    ?.let { response ->
-                        // Bail on unexpected payloads: substringAfter returns the whole
-                        // string when the marker is absent, which would forge a garbage id.
-                        if (!response.contains(ID_MARKER)) return@let null
-                        response.substringAfter(ID_MARKER)
-                            .substringBefore("\"}")
-                            .split(EXTERNAL_PREFIX)
-                            .getOrNull(1)
-                            ?.takeIf { it.isNotBlank() && !it.any { c -> c == '"' || c == '}' || c.isWhitespace() } }
-                            ?.let { id -> "$EXTERNAL_PREFIX$id" }
-                    }
-            } catch (e: Exception) {
-                Timber.tag(TAG).e(e, "Error getting Discord URI: ${e.message}")
-                null
-            }
-        }
     }
 }
 // <-- AM (DISCORD)

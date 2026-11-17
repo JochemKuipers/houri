@@ -255,7 +255,17 @@ class GoogleDriveService(
 ) {
     var driveService: Drive? = null
     companion object {
-        const val REDIRECT_URI = "eu.kanade.google.oauth:/oauth2redirect"
+        /**
+         * Where Google returns the authorisation code.
+         *
+         * Google matches this against the OAuth client in `client_secrets.json` exactly, so it
+         * belongs to the build rather than to the code: a fork registers its own client for its own
+         * application id and passes `-PgoogleDriveRedirect=app.<id>:/oauth2redirect`. The default
+         * is the reverse-DNS name the inherited client was registered with, which the manifest
+         * still declares - an existing secrets file therefore keeps working, and the per-application
+         * scheme is declared too for a build that switches over (issue #73).
+         */
+        val REDIRECT_URI: String get() = eu.kanade.tachiyomi.BuildConfig.GOOGLE_DRIVE_REDIRECT
 
         private const val CLIENT_SECRETS_FILE = "client_secrets.json"
     }

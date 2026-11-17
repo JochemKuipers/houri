@@ -49,3 +49,15 @@ async data, login widgets) stay hand-built as escape hatches.
 
 Webhooks (`WebhookSettingKeys`, `WebhookSettingsHost`, `SettingsWebhookScreen`): 17 rows
 migrated, test button / info / async category multi-select kept custom.
+
+## Tablet two-pane navigation (issue #74)
+
+The settings hub (`SettingsRoute`) is the left pane; the top back-stack entry is the right one
+(`TwoPaneSettingsScene` in `core/navigation`). The hub's row handler lives in
+`eu/kanade/tachiyomi/ui/setting/SettingsScreen.kt` (`NavBackStack<NavKey>.navigate`): in two-pane
+mode it **pops everything above the hub and then opens the row**, rather than replacing the top
+entry. Replacing only the top left the previous section (and any sub-screen opened from it)
+stranded in the stack, and the duplicate guard that runs first then matched the route being
+returned to — the row became a dead tap until the user left settings entirely. Any new settings
+entry point must go through that helper; adding rows with a bare `backStack.add(route)` on tablet
+reintroduces the same dead row.

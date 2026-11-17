@@ -28,10 +28,10 @@ import tachiyomi.core.common.util.system.shouldDowngradeToRgb565
 class NewImageDecoder(private val resources: ImageSource, private val options: Options) : Decoder {
 
     /**
-     * Wraps a raw [ImageDecoder.DecodeResult] as a Coil [Image] for callers that want
-     * direct access to the RGBA [java.nio.ByteBuffer] (e.g. the new-decoder path).
+     * Wraps a raw [ImageDecoder.Frame] as a Coil [Image] for callers that want direct access to
+     * the RGBA [java.nio.ByteBuffer] (e.g. the new-decoder path).
      */
-    class DecodeResultImage(val res: ImageDecoder.DecodeResult) : Image {
+    class DecodeResultImage(val res: ImageDecoder.Frame) : Image {
         override val size: Long get() = res.image.capacity().toLong()
         override val width: Int get() = res.width
         override val height: Int get() = res.height
@@ -42,9 +42,9 @@ class NewImageDecoder(private val resources: ImageSource, private val options: O
     override suspend fun decode(): DecodeResult {
         val decoder = resources.source().use {
             try {
-                ImageDecoder.new(it.inputStream())
+                ImageDecoder.open(it.inputStream())
             } catch (e: ImageDecoder.DecodeException) {
-                logcat(LogPriority.ERROR, e) { "ImageDecoder.new failed: ${e.message}" }
+                logcat(LogPriority.ERROR, e) { "ImageDecoder.open failed: ${e.message}" }
                 null
             }
         }
@@ -104,8 +104,16 @@ class NewImageDecoder(private val resources: ImageSource, private val options: O
         // Copy RGBA pixels from the native buffer into a full-resolution bitmap.
         // We must do this while `res` (and its native memory) is still alive.
         val fullBitmap = createBitmap(srcWidth, srcHeight)
-        res.image.rewind()
-        fullBitmap.copyPixelsFromBuffer(res.image)
+        // KMK --> A whole frame owns native pixels until it is closed; they are copied here and
+        // released immediately.
+        try {
+            res.image.rewind()
+            fullBitmap.copyPixelsFromBuffer(res.image)
+        } finally {
+            runCatching { res.close() }
+        }
+        runCatching { decoder.close() }
+        // KMK <--
 
         // Downsample if needed. sampleSize is a power-of-two factor; the target
         // dimensions are src / sampleSize, matching BitmapFactory inSampleSize behaviour.

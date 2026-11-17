@@ -28,12 +28,14 @@ class Bitmap private constructor() {
     fun recycle() { }
     fun compress(format: CompressFormat, quality: Int, stream: java.io.OutputStream): Boolean = false
     fun getPixels(pixels: IntArray, offset: Int, stride: Int, x: Int, y: Int, width: Int, height: Int) { }
+    fun getPixel(x: Int, y: Int): Int = 0
 
     companion object {
         @JvmStatic
         fun createScaledBitmap(src: Bitmap, dstWidth: Int, dstHeight: Int, filter: Boolean): Bitmap = Bitmap()
         @JvmStatic
         fun createBitmap(colors: IntArray, width: Int, height: Int, config: Config): Bitmap = Bitmap()
+        fun createBitmap(src: Bitmap, x: Int, y: Int, width: Int, height: Int): Bitmap = Bitmap()
     }
 }
 

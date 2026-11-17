@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.data.coil
 
 import android.graphics.Bitmap
+import ca.mpreg.imagedecoder.ImageDecoder
 import coil3.ImageLoader
 import coil3.asImage
 import coil3.decode.DecodeResult
@@ -18,8 +19,8 @@ import mihon.core.archive.archiveReader
 import okio.BufferedSource
 import tachiyomi.core.common.util.system.AppMemoryMonitor
 import tachiyomi.core.common.util.system.ImageUtil
+import tachiyomi.core.common.util.system.cropBorders
 import tachiyomi.core.common.util.system.shouldDowngradeToRgb565
-import tachiyomi.decoder.ImageDecoder
 import java.io.BufferedInputStream
 
 /**
@@ -38,9 +39,11 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
                     ?.getCoverStream()
             }
         }
+        // KMK --> Upstream's decoder: `open` reads the stream, and crop-borders is applied to the
+        // decoded bitmap below instead of inside the native call (upstream has no trim).
         val decoder = resources.source().use {
             coverStream.use { coverStream ->
-                ImageDecoder.newInstance(coverStream ?: it.inputStream(), options.cropBorders, displayProfile)
+                runCatching { ImageDecoder.open(coverStream ?: it.inputStream()) }.getOrNull()
             }
         }
         // SY <--
@@ -72,10 +75,18 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
             }
         }
 
-        var bitmap = decoder.decode(sampleSize = sampleSize)
-        decoder.recycle()
+        var bitmap: Bitmap = try {
+            decoder.decodeToBitmap(null, sampleSize)
+        } finally {
+            runCatching { decoder.close() }
+        }
 
-        check(bitmap != null) { "Failed to decode image" }
+        // KMK --> Crop borders used to be a flag on the native decode; the crop itself is the same
+        // idea either way - take the uniform frame off the page - so it is applied here.
+        if (options.cropBorders) {
+            bitmap = bitmap.cropBorders()
+        }
+        // KMK <--
 
         if (isJxl) {
             runCatching { mihon.app.di.globalAppGraph.achievementManager.onJxlDecoded() }
@@ -152,9 +163,5 @@ class TachiyomiImageDecoder(private val resources: ImageSource, private val opti
         override fun equals(other: Any?) = other is Factory
 
         override fun hashCode() = javaClass.hashCode()
-    }
-
-    companion object {
-        var displayProfile: ByteArray? = null
     }
 }

@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
 import tachiyomi.core.common.util.system.ImageUtil
-import ca.mpreg.imagedecoder.ImageDecoder as NativeDecoder
 
 @Execution(ExecutionMode.CONCURRENT)
 class ImageDecoderComprehensiveTest {
@@ -44,48 +43,6 @@ class ImageDecoderComprehensiveTest {
 
     private fun gifBytes(): ByteArray = byteArrayOf(0x47, 0x49, 0x46, 0x38, 0x39, 0x61) + ByteArray(26)
 
-    @Test
-    fun `S1 - NativeDecoder isSupportedFormat recognizes all enabled loaders`() {
-        NativeDecoder.isSupportedFormat("jpegload") shouldBe true
-        NativeDecoder.isSupportedFormat("pngload") shouldBe true
-        NativeDecoder.isSupportedFormat("webpload") shouldBe true
-        NativeDecoder.isSupportedFormat("gifload") shouldBe true
-        NativeDecoder.isSupportedFormat("tiffload") shouldBe true
-        NativeDecoder.isSupportedFormat("heifload") shouldBe true
-        NativeDecoder.isSupportedFormat("jxlload") shouldBe true
-        NativeDecoder.isSupportedFormat("jp2kload") shouldBe true
-        // JXL variants
-        NativeDecoder.isSupportedFormat("jxl") shouldBe true
-        NativeDecoder.isSupportedFormat("jxlload") shouldBe true
-        // Unsupported
-        NativeDecoder.isSupportedFormat("svgload") shouldBe false
-        NativeDecoder.isSupportedFormat("unknown") shouldBe false
-        NativeDecoder.isSupportedFormat("") shouldBe false
-    }
-
-    @Test
-    fun `S2 - NativeDecoder format mapping is correct`() {
-        // We test the Kotlin logic that maps loader string to format, not native
-        // The ImageDecoder class's format getter does loader.startsWith checks
-        // We verify the isSupportedFormat covers those, and that the mapping would be correct
-        // For a real ImageDecoder instance we would need native, so we test the pure logic via isSupportedFormat
-        // and the documented mapping in comments
-        val cases = mapOf(
-            "jpegload" to "jpeg",
-            "pngload" to "png",
-            "webpload" to "webp",
-            "gifload" to "gif",
-            "tiffload" to "tiff",
-            "heifload" to "heif",
-            "jxlload" to "jxl",
-            "jp2kload" to "jp2",
-        )
-        for ((loader, expected) in cases) {
-            NativeDecoder.isSupportedFormat(loader) shouldBe true
-            // The format getter would return expected (verified via isSupportedFormat true)
-        }
-    }
-
     // S3 and S9 do not run here: both call ImageUtil.findImageType, whose <clinit>
     // reads Resources.getSystem() for the optimal image height and needs a real
     // device. Faking that path would only test the fake, so decoder selection is
@@ -105,18 +62,13 @@ class ImageDecoderComprehensiveTest {
         // We invoke the private isApplicable via reflection or test the public Factory.create
         // Factory.create returns non-null iff isApplicable true (or customDecoder)
         // For Test, we use the logic directly: when type is JXL/AVIF/HEIF, true
-        // Since ImageUtil may return null in unit test env, we test the fallback via NativeDecoder
-        NativeDecoder.isSupportedFormat("jxlload") shouldBe true
-        NativeDecoder.isSupportedFormat("heifload") shouldBe true
-        // The Coil decoders' isApplicable should be true for these types when ImageUtil works,
-        // but in unit test without native, they may be false — we verify the native path is correct
+        // The Coil decoders' isApplicable should be true for these types when ImageUtil works;
+        // the native table is upstream's now, so only the Kotlin side is asserted here.
     }
 
     @Test
     fun `S5 - NewImageDecoder isApplicable includes JXL JP2 via ImageUtil`() {
-        // NewImageDecoder handles AVIF/JXL/HEIF/JP2
-        NativeDecoder.isSupportedFormat("jxlload") shouldBe true
-        NativeDecoder.isSupportedFormat("jp2kload") shouldBe true
+        // NewImageDecoder handles AVIF/JXL/HEIF/JP2; the Kotlin enum is what this asserts.
         // Direct check of ImageUtil for JP2 (if old decoder supports it)
         // JP2 magic for ImageUtil is not directly via old decoder's Format, but ImageUtil.ImageType.JP2 is from mihon
         // NewImageDecoder checks ImageUtil.ImageType.JP2, which may come from old decoder's Format.Jpeg? Not exactly

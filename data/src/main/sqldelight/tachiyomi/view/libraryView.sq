@@ -93,8 +93,18 @@ LEFT JOIN (
     AND (
         BM.blacklisted_chapters = ''
         OR (
+            -- Both encodings are matched. The column holds a JSON array now (BlacklistColumnAdapter,
+            -- issue #68) while rows written before that adapter hold the ', '-joined text, and a
+            -- predicate that understood only one of them dropped the filter for the other: the badge
+            -- and the History tab counted a blacklisted chapter again while the details list hid it.
+            --
             -- Broad key: every upload of that number from that scanlator.
             instr(
+                BM.blacklisted_chapters,
+                '"' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
+                    || '@' || trim(coalesce(chapter.remote_scanlator, '')) || '"'
+            ) = 0
+            AND instr(
                 ', ' || BM.blacklisted_chapters || ', ',
                 ', ' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
                     || '@' || trim(coalesce(chapter.remote_scanlator, '')) || ', '
@@ -103,6 +113,12 @@ LEFT JOIN (
             -- and blacklisting the pair would take both. Matching the broad key only left these
             -- chapters in the count, so a read upload the reader had blacklisted still subtracted
             -- its number from the badge while its unread twin was the one on screen.
+            AND instr(
+                BM.blacklisted_chapters,
+                '"' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
+                    || '@' || trim(coalesce(chapter.remote_scanlator, '')) || '#'
+                    || substr(trim(chapter.remote_url), 1, 256) || '"'
+            ) = 0
             AND instr(
                 ', ' || BM.blacklisted_chapters || ', ',
                 ', ' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
@@ -205,10 +221,26 @@ LEFT JOIN(
     AND (
         BM.blacklisted_chapters = ''
         OR (
+            -- Both encodings, as in the non-merged arm above: JSON array from BlacklistColumnAdapter,
+            -- ', '-joined text from rows written before it (issue #68).
+            --
+            -- Broad key: every upload of that number from that scanlator.
             instr(
+                BM.blacklisted_chapters,
+                '"' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
+                    || '@' || trim(coalesce(chapter.remote_scanlator, '')) || '"'
+            ) = 0
+            AND instr(
                 ', ' || BM.blacklisted_chapters || ', ',
                 ', ' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
                     || '@' || trim(coalesce(chapter.remote_scanlator, '')) || ', '
+            ) = 0
+            -- Narrowed key: the single upload a scanlator published twice.
+            AND instr(
+                BM.blacklisted_chapters,
+                '"' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
+                    || '@' || trim(coalesce(chapter.remote_scanlator, '')) || '#'
+                    || substr(trim(chapter.remote_url), 1, 256) || '"'
             ) = 0
             AND instr(
                 ', ' || BM.blacklisted_chapters || ', ',

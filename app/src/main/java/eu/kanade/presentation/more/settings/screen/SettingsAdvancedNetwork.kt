@@ -462,6 +462,9 @@ internal fun getDeveloperToolsGroup(): Preference.PreferenceGroup {
     val sourcePreferences = remember { globalAppGraph.sourcePreferences }
     val exhPreferences = remember { globalAppGraph.exhPreferences }
     val securityPreferences = remember { globalAppGraph.securityPreferences }
+    // KMK -->
+    val delegateSourcePreferences = remember { globalAppGraph.delegateSourcePreferences }
+    // KMK <--
     return Preference.PreferenceGroup(
         title = stringResource(SYMR.strings.developer_tools),
         preferenceItems = persistentListOf(
@@ -491,6 +494,19 @@ internal fun getDeveloperToolsGroup(): Preference.PreferenceGroup {
                 preference = sourcePreferences.extensionErrorTextEnabled(),
                 title = stringResource(KMR.strings.ext_error_text_enabled),
                 subtitle = stringResource(KMR.strings.ext_error_text_enabled_summary),
+            ),
+            Preference.PreferenceItem.SwitchPreference(
+                // KMK --> The switch the app was left without after the delegated sources were
+                // pruned: the preference survived and still gates the substitution in
+                // AndroidSourceManager, but nothing could flip it (issue #69). Komga is now the
+                // only source this applies to, so it is named rather than listed dynamically.
+                preference = delegateSourcePreferences.delegateSources(),
+                title = stringResource(SYMR.strings.toggle_delegated_sources),
+                subtitle = stringResource(
+                    SYMR.strings.toggle_delegated_sources_summary,
+                    stringResource(MR.strings.app_name),
+                    "Komga",
+                ),
             ),
             // KMK <--
             Preference.PreferenceItem.ListPreference(

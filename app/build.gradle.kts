@@ -47,6 +47,11 @@ android {
         buildConfigField("boolean", "TELEMETRY_INCLUDED", "${Config.includeTelemetry}")
         buildConfigField("boolean", "UPDATER_ENABLED", "${Config.enableUpdater}")
         buildConfigField("boolean", "IS_NOMTL", "false")
+        // KMK --> Overridable with -PmalClientId=..., so a fork can authenticate with its own
+        // MyAnimeList application instead of the bundled one (issue #72).
+        buildConfigField("String", "MAL_CLIENT_ID", "\"${Config.malClientId}\"")
+        buildConfigField("String", "GOOGLE_DRIVE_REDIRECT", "\"${Config.googleDriveRedirect}\"")
+        // KMK <--
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -248,6 +253,11 @@ configurations.all {
         force("androidx.compose.material3:material3:1.4.0")
         force("androidx.compose.material3:material3-android:1.4.0")
     }
+    // KMK --> One image decoder in this APK. The old com.github.tachiyomiorg decoder arrives
+    // transitively (the subsampling view depends on it, among others) and its libimagedecoder.so
+    // is the same soname as upstream's ca.mpreg one, so mergeNativeLibs fails. Excluded centrally
+    // so a future dependency cannot reintroduce it by accident.
+    exclude(group = "com.github.tachiyomiorg", module = "image-decoder")
 }
 // KMK <--
 
@@ -352,14 +362,16 @@ dependencies {
     implementation(platform(libs.coil.bom))
     implementation(libs.bundles.coil)
     implementation(libs.subsamplingscaleimageview) {
+        // KMK --> Its transitive com.github.tachiyomiorg:image-decoder is gone from this app: that
+        // AAR ships libimagedecoder.so, the same soname as upstream's ca.mpreg decoder, and two
+        // copies fail mergeNativeLibs. The library itself decodes through BitmapRegionDecoder.
         exclude(module = "image-decoder")
     }
-    implementation(libs.image.decoder)
 
     // Mihon -->
     implementation("ca.mpreg:webgpuviewer:0.0.0")
     implementation("androidx.webgpu:webgpu:1.0.0-dev05")
-    implementation("ca.mpreg:imagedecoder:0.0.0")
+    implementation(libs.imagedecoder)
     implementation(libs.kim)
     // Mihon <--
 

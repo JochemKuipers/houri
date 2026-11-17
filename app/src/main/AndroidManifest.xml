@@ -202,6 +202,12 @@
 
                 <data android:scheme="houri" />
                 <data android:scheme="mihon" />
+                <!-- KMK: the MyAnimeList client id this app ships was registered for Komikku, whose
+                     redirect is komikku://myanimelist-auth. Without this scheme the browser hands the
+                     callback to a package that is not installed and MAL reports the redirect as
+                     unusable. Harmless when Komikku is also installed: the scheme is only opened by
+                     the tracker login, and the app that owns the choice can handle both. -->
+                <data android:scheme="komikku" />
 
                 <data android:host="anilist-auth" />
                 <data android:host="bangumi-auth" />
@@ -239,6 +245,12 @@
 
                 <data
                     android:scheme="eu.kanade.google.oauth" />
+                <!-- KMK: the redirect Google Drive returns to is a build setting
+                     (GoogleDriveService.REDIRECT_URI, gradle -PgoogleDriveRedirect). This filter is
+                     what lets a client registered for the app's own reverse-DNS scheme work; the
+                     legacy scheme above stays so a secrets file registered against it keeps
+                     working. -->
+                <data android:scheme="${applicationId}" />
             </intent-filter>
         </activity>
 

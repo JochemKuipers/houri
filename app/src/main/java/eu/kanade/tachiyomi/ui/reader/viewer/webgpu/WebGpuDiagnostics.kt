@@ -127,6 +127,19 @@ internal object WebGpuDiagnostics {
         }
     }
 
+    /**
+     * How many pages this session finished decoding.
+     *
+     * Read by the viewer's close-out to separate "the reader never got that far" (a chapter
+     * closed before anything resolved - nothing to say) from "pages decoded and the display still
+     * showed nothing" (the black-screen shape, which deserves a health strike).
+     */
+    fun decodedPages(): Int = decodeCount
+
+    /** How long the session has been open, 0 before [beginSession]. */
+    fun sessionDurationMs(): Long =
+        if (startedAtMs == 0L) 0L else (System.currentTimeMillis() - startedAtMs).coerceAtLeast(0L)
+
     /** One finished decode: how it ended, how long it took, and whether it had to be downsampled. */
     fun recordDecode(outcome: String, totalMs: Long, label: String, downsampled: Boolean) {
         synchronized(this) {

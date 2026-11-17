@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.util.Base64
 import androidx.annotation.ColorInt
+import ca.mpreg.imagedecoder.ImageDecoder
 import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.saver.Image
@@ -28,7 +29,6 @@ import tachiyomi.core.common.util.lang.withIOContext
 import tachiyomi.core.common.util.lang.withUIContext
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
-import tachiyomi.decoder.ImageDecoder
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.source.local.image.LocalCoverManager
 import tachiyomi.source.local.isLocal
@@ -175,8 +175,9 @@ internal class ReaderImageActions(
         ImageUtil.findImageType(stream1) ?: throw Exception("Not an image")
         val stream2 = page2.stream ?: throw Exception("Page ${page2.number} has no image stream")
         ImageUtil.findImageType(stream2) ?: throw Exception("Not an image")
-        val imageBitmap = ImageDecoder.newInstance(stream1())?.decode()!!
-        val imageBitmap2 = ImageDecoder.newInstance(stream2())?.decode()!!
+        // KMK --> Upstream decoder: open() reads the stream and the frame is copied into a bitmap.
+        val imageBitmap = ImageDecoder.open(stream1()).use { it.decodeToBitmap() }
+        val imageBitmap2 = ImageDecoder.open(stream2()).use { it.decodeToBitmap() }
 
         val chapter = page1.chapter.chapter
 

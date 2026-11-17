@@ -1,5 +1,8 @@
 [versions]
 aboutlib_version = "15.2.0"
+# KMK --> Upstream mpreg-ca/imagedecoder release. Bump only with a check of its API:
+# open(stream) + decode()/decodeNext() return a closeable Frame; decodeToBitmap(region, sample).
+imagedecoder = "18"
 leakcanary = "2.14"
 moko = "0.26.4"
 okhttp_version = "5.5.0"
@@ -18,7 +21,11 @@ metrox-viewmodel = "1.4.2"
 metrox-viewmodel-compose = "1.4.2"
 ben-manes-versions = "0.61.0"
 kim = "0.38.1"
-# webgpuviewer and imagedecoder now provided via local submodules (external/webgpuviewer-houri, external/imagedecoder-houri) via includeBuild substitution — no version catalog entry
+# webgpuviewer is provided via a local submodule (external/webgpuviewer-houri) through includeBuild
+# substitution - no version catalog entry. The image decoder is upstream's published artifact.
+# KMK --> It replaced com.github.tachiyomiorg:image-decoder, which is gone: both AARs ship
+# lib/arm64-v8a/libimagedecoder.so and both call System.loadLibrary("imagedecoder"), so exactly one
+# of them can be in the APK. This one is upstream's, unmodified and unbuilt.
 mlkit_text = "16.0.1"
 mlkit_text_chinese = "16.0.1"
 mlkit_text_japanese = "16.0.1"
@@ -29,6 +36,7 @@ onnxruntime = "1.20.0"
 
 [libraries]
 desugar = "com.android.tools:desugar_jdk_libs:2.1.5"
+imagedecoder = { module = "ca.mpreg:imagedecoder", version.ref = "imagedecoder" }
 
 
 rxjava = "io.reactivex:rxjava:1.3.8"
@@ -69,7 +77,6 @@ coil-compose = { module = "io.coil-kt.coil3:coil-compose" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp" }
 
 subsamplingscaleimageview = "com.github.tachiyomiorg:subsampling-scale-image-view:66e0db195d"
-image-decoder = "com.github.tachiyomiorg:image-decoder:41c059e540"
 
 natural-comparator = "com.github.gpanther:java-nat-sort:natural-comparator-1.1"
 

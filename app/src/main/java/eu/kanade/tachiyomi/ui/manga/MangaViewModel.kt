@@ -394,9 +394,9 @@ class MangaViewModel(
     )
 
     private val scanlatorControls = MangaScanlatorController(
-        scope = viewModelScope,
         setExcludedScanlators = setExcludedScanlators,
         updateManga = updateManga,
+        getManga = getManga,
         provideMangaId = { mangaId },
         provideAllChapters = { allDomainChapters },
         provideBlacklistedChapters = { successState?.manga?.blacklistedChapters.orEmpty() },

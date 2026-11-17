@@ -23,13 +23,12 @@ import androidx.core.graphics.get
 import androidx.core.graphics.green
 import androidx.core.graphics.red
 import androidx.exifinterface.media.ExifInterface
+import ca.mpreg.imagedecoder.ImageDecoder
 import com.hippo.unifile.UniFile
 import eu.kanade.tachiyomi.util.system.GLUtil
 import logcat.LogPriority
 import okio.Buffer
 import okio.BufferedSource
-import tachiyomi.decoder.Format
-import tachiyomi.decoder.ImageDecoder
 import java.io.File
 import java.io.InputStream
 import java.security.SecureRandom
@@ -56,23 +55,16 @@ object ImageUtil {
     }
 
     fun findImageType(stream: InputStream): ImageType? {
+        // KMK --> Header-only read: upstream's decoder takes `complete = false` as "what this
+        // stream holds now", enough for the format. Throwing is caught for the same reason as
+        // before (a native library that fails to load is a NoClassDefFoundError, not an
+        // Exception), and the decoder is closed so its native handle does not outlive the probe.
         return try {
-            when (getImageType(stream)?.format) {
-                Format.Avif -> ImageType.AVIF
-                Format.Gif -> ImageType.GIF
-                Format.Heif -> ImageType.HEIF
-                Format.Jpeg -> ImageType.JPEG
-                Format.Jxl -> ImageType.JXL
-                Format.Png -> ImageType.PNG
-                Format.Webp -> ImageType.WEBP
-                else -> null
-            }
+            ImageDecoder.open(stream, complete = false).use { it.format.toImageType() }
         } catch (_: Throwable) {
-            // Catch Throwable (not just Exception) to handle NoClassDefFoundError
-            // when the native image decoder .so fails to load on devices with
-            // 16KB page sizes (the .so has 4096-byte ELF alignment)
             null
         }
+        // KMK <--
     }
 
     fun getExtensionFromMimeType(mime: String?, openStream: () -> InputStream): String {
@@ -81,20 +73,24 @@ object ImageUtil {
     }
 
     fun isAnimatedAndSupported(source: BufferedSource): Boolean {
+        // KMK --> One header read answers both questions now: the format and whether the file
+        // carries more than one frame.
         return try {
-            val type = getImageType(source.peek().inputStream()) ?: return false
-            // https://coil-kt.github.io/coil/getting_started/#supported-image-formats
-            when (type.format) {
-                Format.Gif -> true
-                // Animated WebP on Android 9+
-                Format.Webp -> type.isAnimated && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
-                // Animated Heif on Android 11+
-                Format.Heif -> type.isAnimated && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                else -> false
+            ImageDecoder.open(source.peek().inputStream(), complete = false).use { decoder ->
+                // https://coil-kt.github.io/coil/getting_started/#supported-image-formats
+                when (decoder.format) {
+                    ImageDecoder.Format.GIF -> true
+                    // Animated WebP on Android 9+
+                    ImageDecoder.Format.WEBP -> decoder.isAnimated && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                    // Animated Heif on Android 11+
+                    ImageDecoder.Format.HEIF -> decoder.isAnimated && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                    else -> false
+                }
             }
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             false
         }
+        // KMK <--
     }
 
     fun isAnimatedAndSupported(bytes: ByteArray): Boolean {
@@ -103,21 +99,17 @@ object ImageUtil {
         return isAnimatedAndSupported(Buffer().write(bytes, 0, headerSize))
     }
 
-    private fun getImageType(stream: InputStream): tachiyomi.decoder.ImageType? {
-        val bytes = ByteArray(32)
-
-        val length = if (stream.markSupported()) {
-            stream.mark(bytes.size)
-            stream.read(bytes, 0, bytes.size).also { stream.reset() }
-        } else {
-            stream.read(bytes, 0, bytes.size)
-        }
-
-        if (length == -1) {
-            return null
-        }
-
-        return ImageDecoder.findType(bytes)
+    /** Upstream decoder format to this app's [ImageType], or null for a format it does not name. */
+    private fun ImageDecoder.Format.toImageType(): ImageType? = when (this) {
+        ImageDecoder.Format.AVIF -> ImageType.AVIF
+        ImageDecoder.Format.GIF -> ImageType.GIF
+        ImageDecoder.Format.HEIF -> ImageType.HEIF
+        ImageDecoder.Format.JPEG -> ImageType.JPEG
+        ImageDecoder.Format.JXL -> ImageType.JXL
+        ImageDecoder.Format.PNG -> ImageType.PNG
+        ImageDecoder.Format.WEBP -> ImageType.WEBP
+        ImageDecoder.Format.JP2 -> ImageType.JP2
+        else -> null
     }
 
     enum class ImageType(val mime: String, val extension: String) {
@@ -230,7 +222,8 @@ object ImageUtil {
         viewHeight: Int,
         backgroundContext: Context,
     ): BufferedSource {
-        val imageBitmap = ImageDecoder.newInstance(imageSource.inputStream())?.decode()!!
+        // KMK --> Upstream decoder: open() the stream, copy the frame into a bitmap, release both.
+        val imageBitmap = ImageDecoder.open(imageSource.inputStream()).use { it.decodeToBitmap() }
         val height = imageBitmap.height
         val width = imageBitmap.width
 
@@ -395,9 +388,9 @@ object ImageUtil {
      * Algorithm for determining what background to accompany a comic/manga page
      */
     fun chooseBackground(context: Context, imageSource: BufferedSource): Drawable {
-        val decoder = ImageDecoder.newInstance(imageSource.inputStream())
-        val image = decoder?.decode()
-        decoder?.recycle()
+        val image = runCatching {
+            ImageDecoder.open(imageSource.inputStream()).use { it.decodeToBitmap() }
+        }.getOrNull()
 
         val whiteColor = Color.WHITE
         if (image == null) return whiteColor.toDrawable()
@@ -868,3 +861,46 @@ object ImageUtil {
 
 val getDisplayMaxHeightInPx: Int
     get() = Resources.getSystem().displayMetrics.let { max(it.heightPixels, it.widthPixels) }
+
+/**
+ * Trims a uniform border - the white frame a scanned page comes with - by cropping to the
+ * bounding box of everything that differs from the top-left pixel.
+ *
+ * The reader's crop-borders option used to be a flag passed into the native decoder, which
+ * trimmed inside the same call. Upstream's decoder has no trim, so the same decision is taken
+ * here on the decoded bitmap. `tolerance` is a per-channel sum, the same 0..765 scale the
+ * pixel comparison uses; a page with no border is returned unchanged.
+ */
+fun Bitmap.cropBorders(tolerance: Int = 12): Bitmap {
+    val w = width
+    val h = height
+    if (w < 3 || h < 3) return this
+    val base = getPixel(0, 0)
+    val baseA = base ushr 24 and 0xFF
+    val baseR = base shr 16 and 0xFF
+    val baseG = base shr 8 and 0xFF
+    val baseB = base and 0xFF
+
+    fun differs(x: Int, y: Int): Boolean {
+        val c = getPixel(x, y)
+        return abs((c ushr 24 and 0xFF) - baseA) +
+            abs((c shr 16 and 0xFF) - baseR) +
+            abs((c shr 8 and 0xFF) - baseG) +
+            abs((c and 0xFF) - baseB) > tolerance
+    }
+
+    var top = 0
+    while (top < h && (0 until w).none { differs(it, top) }) top++
+    if (top == h) return this // a single flat colour: nothing to keep
+    var bottom = h - 1
+    while (bottom > top && (0 until w).none { differs(it, bottom) }) bottom--
+    var left = 0
+    while (left < w && (top..bottom).none { differs(left, it) }) left++
+    var right = w - 1
+    while (right > left && (top..bottom).none { differs(right, it) }) right--
+
+    if (left == 0 && top == 0 && right == w - 1 && bottom == h - 1) return this
+    val cropped = Bitmap.createBitmap(this, left, top, right - left + 1, bottom - top + 1)
+    if (cropped !== this) recycle()
+    return cropped
+}

@@ -52,6 +52,8 @@ Lambdas (KMK): `LibraryUpdateErrorMapper`, `LibraryUpdateErrorWithRelationsMappe
 
 `DateColumnAdapter` (Long↔Date), `StringListColumnAdapter` (String↔List<String>), `UpdateStrategyColumnAdapter` (Long↔UpdateStrategy), `MemoColumnAdapter` (ByteArray↔JsonObject), `BlacklistColumnAdapter` (String↔List<String>, JSON — lossless; the shared ", "-joined adapter corrupts any key carrying a comma-space, which is how blacklisted chapters came back, issue #68; decode still reads legacy rows)
 
+**A JSON-encoded column cannot be matched by SQL text comparisons that assume the old encoding.** `libraryView` and `historyView` keep blacklisted chapters out of the badge and the History totals with `instr()` against `blacklisted_chapters`; after the blacklist moved to JSON those predicates matched nothing and every blacklisted chapter was counted again. Both views now test both encodings — `instr(col, '"key"')` for the JSON array and the old `', '||col||', '` form for legacy rows — in all three arms (non-merged, merged, history). Any future change to a column's encoding needs the views and migrations revisited in the same change, and `migrations/NN.sqm` must carry the recreated view body verbatim (no schema bump recreates a view by itself).
+
 ## SQL patterns
 
 - **Coalesce updates:** `SET col = coalesce(:param, col)` for partial updates

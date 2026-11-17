@@ -1074,16 +1074,30 @@ open class WebGpuViewer(
             }.getOrDefault(0)
             val parkedThisSession = parksThisSession > 0
             WebGpuDiagnostics.recordPark(parksThisSession)
-            if (deadAtExit || parkedThisSession ||
+            // KMK --> The fourth degraded shape, and the one behind "black screen inside reader":
+            // pages decoded and uploaded, the session ran for a while, and the display never drew
+            // any of them. `isOnScreen` is the library's record of what the last rendered frame
+            // put on screen, so an empty answer here is the renderer never presenting a frame -
+            // distinct from a chapter closed before a decode finished, which is why the count has
+            // to be non-zero. Without this the session closed looking healthy: the device is
+            // alive, nothing parked, no loss, and the next launch did the same thing again.
+            // Two decoded pages and five seconds keep a session that was opened and closed again
+            // (or closed while its first page was still arriving) out of the count: the shape
+            // being struck is someone reading for a while with nothing on screen.
+            val nothingEverOnScreen = WebGpuDiagnostics.decodedPages() >= 2 &&
+                WebGpuDiagnostics.sessionDurationMs() >= 5_000L &&
+                (currentPage as? ViewerReaderPage)?.imagePage?.isOnScreen != true
+            if (deadAtExit || parkedThisSession || nothingEverOnScreen ||
                 sessionDeviceLosses.get() >= WebGpuHealth.SESSION_LOSS_STRIKE_THRESHOLD
             ) {
                 WebGpuHealth.recordStrike(activity)
                 logcat(LogPriority.WARN) {
                     "WebGPU session ended degraded (deadAtExit=$deadAtExit, " +
-                        "parked=$parkedThisSession, losses=${sessionDeviceLosses.get()}) - " +
-                        "strike recorded"
+                        "parked=$parkedThisSession, nothingDrawn=$nothingEverOnScreen, " +
+                        "losses=${sessionDeviceLosses.get()}) - strike recorded"
                 }
             }
+            // KMK <--
         } catch (_: Exception) {}
         // KMK <--
         // KMK --> Closes the session record. A notable session writes itself to the in-app log

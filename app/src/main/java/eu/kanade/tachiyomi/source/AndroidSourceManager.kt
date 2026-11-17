@@ -42,6 +42,14 @@ import tachiyomi.domain.source.service.SourceManager
 import tachiyomi.source.local.LocalSource
 import java.util.concurrent.ConcurrentHashMap
 
+// KMK -->
+/**
+ * Package the Keiyoushi Komga extension lives in. Matched on the package rather than the class
+ * name so a build of the extension that renames the class still delegates.
+ */
+private const val KOMGA_EXTENSION_PACKAGE = "eu.kanade.tachiyomi.extension.all.komga"
+// KMK <--
+
 @Inject
 @SingleIn(AppScope::class)
 @ContributesBinding(AppScope::class)
@@ -202,10 +210,49 @@ class AndroidSourceManager(
             )
             null
         } else {
-            src
+            // KMK -->
+            src.delegateToBuiltInKomga()
+            // KMK <--
         }
         // EXH <--
     }
+
+    // KMK -->
+    /**
+     * Serves an installed Komga extension through this app's own Komga implementation.
+     *
+     * The extension lists a series' comics only: its books that are not Divina-compatible (i.e.
+     * actual EPUBs) are hidden from browse and cannot be opened, which is the "delegated Komga
+     * features are not accessible" report (issue #69). The built-in implementation listed them
+     * nowhere either, because the extension was what got registered.
+     *
+     * Substituting it keeps everything the user set up: the id stays the extension's, and the
+     * settings live in the standard `source_<id>` file under the same keys, so the server address
+     * and credentials are read as-is; urls are stored absolute in the extension's format, so
+     * library entries and the Komga tracker keep resolving. Only the code serving them changes.
+     *
+     * Opt-in, because it replaces the extension's behaviour with ours wholesale: the switch is
+     * the same "delegated sources" preference the app has always consulted for this class of
+     * substitution, and a change needs a restart because the source map is built at startup.
+     */
+    private fun Source.delegateToBuiltInKomga(): Source {
+        val sourcePackage = this::class.qualifiedName?.substringBeforeLast('.', "") ?: return this
+        if (sourcePackage != KOMGA_EXTENSION_PACKAGE) return this
+        // Read through runCatching: this runs while the source map is being built, and a preference
+        // store that is not reachable yet must leave the extension as the user installed it rather
+        // than fail every source in the map.
+        val delegated = runCatching { globalAppGraph.delegateSourcePreferences.delegateSources().get() }
+            .getOrDefault(false)
+        if (!delegated) return this
+        return runCatching {
+            xLogD("Delegating Komga extension to the built-in implementation: (id: %s)!", id)
+            Komga(context, id, lang)
+        }.getOrElse {
+            xLogD("Failed to delegate Komga extension (id: %s): %s", id, it.message)
+            this
+        }
+    }
+    // KMK <--
 
     override fun get(sourceKey: Long): Source? {
         return sourcesMapFlow.value[sourceKey]

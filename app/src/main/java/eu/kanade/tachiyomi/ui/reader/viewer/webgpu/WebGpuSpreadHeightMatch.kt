@@ -270,11 +270,25 @@ internal suspend fun WebGpuViewer.rescaleImageToHeight(bytes: ByteArray, targetH
     var srcHeight = 0
     var frameImage: ByteBuffer? = null
     var frameToClose: ImageDecoder? = null
+    // KMK --> Upstream frames own their native pixels until close(); closing the decoder does not
+    // free them, so the frame is released through the same path.
+    var frameToCloseObj: ImageDecoder.Frame? = null
+    // KMK --> One place that releases both halves: the frame's native pixels, then the decoder.
+    fun closeDecoder() {
+        try {
+            frameToCloseObj?.close()
+        } catch (_: Exception) {}
+        frameToCloseObj = null
+        try {
+            frameToClose?.close()
+        } catch (_: Exception) {}
+        frameToClose = null
+    }
+
     try {
         dec = try {
-            // KMK --> newBytes: one native copy of the bytes the caller already holds, no
-            // stream wrapper, no chunked read.
-            ImageDecoder.newBytes(bytes)
+            // KMK --> Upstream's decoder takes a stream; a thin view over the bytes, no copy.
+            ImageDecoder.open(bytes.inputStream())
             // KMK <--
         } catch (e: Exception) {
             null
@@ -290,6 +304,7 @@ internal suspend fun WebGpuViewer.rescaleImageToHeight(bytes: ByteArray, targetH
                 srcHeight = frame.height
                 frameImage = frame.image
                 frameToClose = dec
+                frameToCloseObj = frame
                 dec = null
             } else {
                 try {
@@ -313,21 +328,13 @@ internal suspend fun WebGpuViewer.rescaleImageToHeight(bytes: ByteArray, targetH
             }
         }
         if (srcWidth < 8 || srcHeight < 8) {
-            frameToClose?.let {
-                try {
-                    it.close()
-                } catch (_: Exception) {}
-            }
+            closeDecoder()
             fallbackBitmap?.recycle()
             throw IllegalArgumentException("src too small ${srcWidth}x$srcHeight (<8) to rescale, avoiding gralloc")
         }
         require(srcWidth in 1..8192 && srcHeight in 1..8192) { "src dimensions out of range: ${srcWidth}x$srcHeight" }
     } catch (e: Exception) {
-        frameToClose?.let {
-            try {
-                it.close()
-            } catch (_: Exception) {}
-        }
+        closeDecoder()
         fallbackBitmap?.recycle()
         throw e
     }
@@ -338,19 +345,11 @@ internal suspend fun WebGpuViewer.rescaleImageToHeight(bytes: ByteArray, targetH
         val bmp = try {
             createBitmap(srcWidth, srcHeight)
         } catch (e: OutOfMemoryError) {
-            frameToClose?.let {
-                try {
-                    it.close()
-                } catch (_: Exception) {}
-            }
+            closeDecoder()
             System.gc()
             throw e
         } catch (e: Exception) {
-            frameToClose?.let {
-                try {
-                    it.close()
-                } catch (_: Exception) {}
-            }
+            closeDecoder()
             throw e
         }
         try {
@@ -359,18 +358,10 @@ internal suspend fun WebGpuViewer.rescaleImageToHeight(bytes: ByteArray, targetH
             bmp.copyPixelsFromBuffer(image)
         } catch (e: Exception) {
             bmp.recycle()
-            frameToClose?.let {
-                try {
-                    it.close()
-                } catch (_: Exception) {}
-            }
+            closeDecoder()
             throw e
         } finally {
-            frameToClose?.let {
-                try {
-                    it.close()
-                } catch (_: Exception) {}
-            }
+            closeDecoder()
         }
         bmp
     }

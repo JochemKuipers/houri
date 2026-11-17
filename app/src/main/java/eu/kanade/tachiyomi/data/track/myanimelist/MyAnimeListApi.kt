@@ -312,7 +312,11 @@ class MyAnimeListApi(
     }
 
     companion object {
-        private const val CLIENT_ID = "2be14959235191ece14eebdc2eea0466"
+        // KMK --> Shipped by the build (gradle `-PmalClientId=...`), so a fork authenticates with
+        // its own MyAnimeList application; the default is the upstream client whose registered
+        // redirect is what the manifest's scheme list answers (issue #72).
+        private val CLIENT_ID: String get() = eu.kanade.tachiyomi.BuildConfig.MAL_CLIENT_ID
+        // KMK <--
 
         private const val BASE_OAUTH_URL = "https://myanimelist.net/v1/oauth2"
         private const val BASE_API_URL = "https://api.myanimelist.net/v2"

@@ -72,7 +72,6 @@ import mihon.core.navigation.SettingsRoute
 import mihon.core.navigation.SettingsSearchRoute
 import mihon.core.navigation.domain.SettingsDestination
 import mihon.core.navigation.util.LocalBackStack
-import mihon.core.navigation.util.replace
 import mihon.presentation.core.util.isTabletUi
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.kmk.KMR
@@ -105,8 +104,27 @@ fun NavBackStack<NavKey>.addSettingsRoute(settingsRoute: SettingsRoute, isTablet
 // KMK <-- A settings row that is a whole sub-hub keeps its own back-press handling, so route
 // navigation between them goes through the same throttle the old nested navigator had.
 private fun NavBackStack<NavKey>.navigate(route: NavKey, twoPane: Boolean) {
-    if (any { it == route }) return
-    if (twoPane) replace(route) else add(route)
+    if (!twoPane) {
+        if (any { it == route }) return
+        add(route)
+        return
+    }
+
+    // KMK --> Two-pane: the row always becomes the detail pane, so everything above the hub is
+    // dropped first. Replacing only the top entry left the previous category - and whatever
+    // sub-screen was open above it - stranded in the stack; the duplicate guard then saw the route
+    // it was returning to and returned without navigating, which is why a section could not be
+    // reopened after visiting a sub-menu without leaving settings entirely (issue #74). Popping to
+    // the hub also resets a section's own sub-navigation when another section is chosen, which is
+    // what tapping a different row means.
+    val hubIndex = indexOfLast { it is SettingsRoute }
+    if (hubIndex >= 0 && size > hubIndex + 1) {
+        subList(hubIndex + 1, size).clear()
+    }
+    if (lastOrNull() != route) {
+        add(route)
+    }
+    // KMK <--
 }
 
 @Composable

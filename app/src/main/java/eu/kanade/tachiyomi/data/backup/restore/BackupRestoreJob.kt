@@ -24,6 +24,7 @@ import kotlinx.coroutines.runBlocking
 import logcat.LogPriority
 import mihon.app.di.globalAppGraph
 import tachiyomi.core.common.i18n.stringResource
+import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 
@@ -62,11 +63,20 @@ class BackupRestoreJob(private val context: Context, workerParams: WorkerParamet
             // minute over rate-limited APIs, and by then the restore itself is done.
             backupRestoreStatus.stop()
             if (options.libraryEntries && !isSync) {
-                try {
-                    globalAppGraph.refreshTracks.awaitAllTracks()
-                } catch (e: Exception) {
-                    logcat(LogPriority.ERROR, e) { "Post-restore tracker sync failed" }
+                // KMK --> Off this worker. `doWork` is what keeps the job foregrounded, and
+                // WorkManager holds its progress notification until the worker returns - so
+                // reconciling every track here (a rate-limited API call per entry, half an hour on
+                // a large library) left "Restoring backup 100%" pinned on screen long after the
+                // restore itself had finished. The refresh is best-effort reconciliation, so it
+                // runs on the app scope and the worker reports success now.
+                launchIO {
+                    try {
+                        globalAppGraph.refreshTracks.awaitAllTracks()
+                    } catch (e: Exception) {
+                        logcat(LogPriority.ERROR, e) { "Post-restore tracker sync failed" }
+                    }
                 }
+                // KMK <--
             }
             // KMK <--
             globalAppGraph.appEventBus.emit(

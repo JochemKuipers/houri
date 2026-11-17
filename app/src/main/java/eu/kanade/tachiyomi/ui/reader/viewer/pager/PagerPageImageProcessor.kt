@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.graphics.Bitmap
+import ca.mpreg.imagedecoder.ImageDecoder
 import eu.kanade.tachiyomi.ui.reader.model.InsertPage
 import eu.kanade.tachiyomi.ui.reader.model.ReaderPage
 import kotlinx.coroutines.delay
@@ -9,7 +10,6 @@ import logcat.LogPriority
 import okio.BufferedSource
 import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
-import tachiyomi.decoder.ImageDecoder
 import kotlin.math.max
 
 /**
@@ -144,7 +144,7 @@ internal fun PagerPageHolder.handleWideImage(imageSource: BufferedSource): Buffe
 
 internal fun PagerPageHolder.decodeImage(imageSource: BufferedSource): Bitmap? {
     return try {
-        ImageDecoder.newInstance(imageSource.inputStream())?.decode()
+        ImageDecoder.open(imageSource.inputStream()).use { it.decodeToBitmap() }
     } catch (e: Exception) {
         logcat(LogPriority.ERROR, e) { "Cannot decode image" }
         null

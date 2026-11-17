@@ -162,7 +162,8 @@ Before `git push`, confirm the working tree contains only the intended changes (
 | `llamatik-native/` (`:llamatik-native`) | Vendored llamatik/llama.cpp native runtime + Kotlin wrapper (replaces the `com.llamatik:library` AAR, which is CPU-only) |
 | `external/yakuyomi-engine` | Git **submodule** (houri-engine): native pipeline `li.joye.yakuyomi.engine.*` — commit it BEFORE the main repo |
 | `external/llamatik` | Git **submodule** (Llamatik fork) with **nested** submodules: needs `git submodule update --init --recursive`. Supplies llama.cpp for `:llamatik-native`; commit it BEFORE the main repo |
-| `external/webgpuviewer-houri`, `external/imagedecoder-houri` | Git submodules (composite builds): WebGPU viewer, image decoder |
+| `external/webgpuviewer-houri` | Git submodule (composite build): WebGPU viewer, our fork of `mpreg-ca/webgpuviewer` (app-layer policies live in `app/.../reader/viewer/webgpu/`) |
+| _(image decoder)_ | `ca.mpreg:imagedecoder` from Maven Central — **upstream** `mpreg-ca/imagedecoder`, no fork and no composite build (`gradle/libs.versions.toml` `imagedecoder`). It is the app's only decoder: `com.github.tachiyomiorg:image-decoder` was removed with it, so nothing else ships `libimagedecoder.so` (two copies fail `mergeNativeLibs`). API: `ImageDecoder.open(stream)`, `decode()`/`decodeNext()` → **`Frame` owning native pixels until `close()`**, `decodeToBitmap(region, sample)`, `format: Format`; upstream has **no trim**, so crop-borders is the CPU `Bitmap.cropBorders` helper in `ImageUtil` |
 | `i18n/` | Mihon strings → `MR` (moko-resources) |
 | `i18n-kmk/` | Komikku strings → `KMR` |
 | `i18n-sy/` | TachiyomiSY strings → `SYMR` |

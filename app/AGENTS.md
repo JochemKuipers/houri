@@ -32,6 +32,14 @@ storage format: the enhanced tracker GETs `manga.url` directly, and this source'
 interoperate with the extension's. Chapter urls carry the book id; `KomgaEpubAdapter.bookIdOf`
 parses it out wherever it is needed.
 
+**Delegated Komga (issue #69)**: when the Keiyoushi Komga extension is installed *and* the
+"delegated sources" preference (`DelegateSourcePreferences.delegateSources()`, Settings → Advanced →
+Developer tools) is on, `AndroidSourceManager.toInternalSource` substitutes `Komga(context, id, lang)`
+under the extension's own source id — same id, same `source_<id>` prefs, same absolute urls, so
+settings, library entries and the tracker carry over and EPUB books open in the book reader. Matched
+on the extension's *package* (`KOMGA_EXTENSION_PACKAGE`). The switch is read at source-map build
+time, so flipping it needs a restart.
+
 **Entry typing**: `entryTypeOf` deliberately answers null (a series may mix books and comics);
 `detectBookEntry` probes the book's `mediaProfile` — `EPUB` and *not* Divina-compatible means the
 book reader claims the chapter, everything else goes to image pages. The host's explicit-user-first

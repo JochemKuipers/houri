@@ -99,10 +99,23 @@ LEFT JOIN(
     AND (
         BM.blacklisted_chapters = ''
         OR (
+            -- Both encodings: the JSON array BlacklistColumnAdapter writes now, and the ', '-joined
+            -- text rows written before it carry (issue #68). See libraryView for why both.
             instr(
+                BM.blacklisted_chapters,
+                '"' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
+                    || '@' || trim(coalesce(chapter.remote_scanlator, '')) || '"'
+            ) = 0
+            AND instr(
                 ', ' || BM.blacklisted_chapters || ', ',
                 ', ' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
                     || '@' || trim(coalesce(chapter.remote_scanlator, '')) || ', '
+            ) = 0
+            AND instr(
+                BM.blacklisted_chapters,
+                '"' || CAST(round(chapter.remote_chapter_number * 100) / 100.0 AS TEXT)
+                    || '@' || trim(coalesce(chapter.remote_scanlator, '')) || '#'
+                    || substr(trim(chapter.remote_url), 1, 256) || '"'
             ) = 0
             AND instr(
                 ', ' || BM.blacklisted_chapters || ', ',
