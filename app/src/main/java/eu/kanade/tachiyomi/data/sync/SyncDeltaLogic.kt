@@ -1,14 +1,11 @@
 package eu.kanade.tachiyomi.data.sync
 
-/**
- * Pure helpers for SyncYomi protocol v2 delta uploads. Kept free of backup-model and Android
- * imports so `scripts/kotlinc-check/harness/SyncDeltaHarness.kt` can compile them on a plain JVM.
- *
- * Server contract ([sync-protocol-v2.md](https://github.com/SyncYomi/SyncYomi/blob/master/docs/sync-protocol-v2.md)):
- * a manga without chapters in the body means "nothing to say about chapters", never "no chapters".
- * [chaptersForDelta] still sends the full chapter list when the manga itself changed, as a local
- * safety net against a server that treated absence as authoritative.
- */
+// Pure helpers for SyncYomi protocol v2 delta uploads. Kept free of backup-model and Android
+// imports so scripts/kotlinc-check/harness/SyncDeltaHarness.kt can compile them on a plain JVM.
+// Server contract (SyncYomi docs/sync-protocol-v2.md): a manga without chapters in the body means
+// "nothing to say about chapters", never "no chapters". chaptersForDelta still sends the full
+// chapter list when the manga itself changed, as a local safety net against a server that treated
+// absence as authoritative.
 
 /** True when the manga row or any of its chapters was modified at or after [since]. */
 fun mangaNeedsDelta(
