@@ -97,6 +97,7 @@ This is the **only** build-adjacent command an agent may run. `./gradlew` remain
 | Branch | Work on `master`. Do **not** create a feature branch unless the user asks for one. |
 | Commit | Do **not** commit unless the user asks. When they do, committing to `master` is fine. |
 | Push | **OK** to push when work is ready and the user asks. Never push without being asked. |
+| Submodule pins | Push the submodule commit to its origin **before** the superproject commit referencing it (gitlink) — fresh clones, CI and new worktrees fail with `upload-pack: not our ref` otherwise. Verify with `git -C <submodule> ls-remote origin`. When removing a submodule, also unset its `submodule.<name>.*` entries in `.git/config` (worktrees share that config). |
 | Ported PRs | When porting code from an upstream PR (Mihon/Komikku/SY or any fork), **co-author the PR author** on the porting commit: add `Co-authored-by: <author-name> <<author-email>>` (fetch from the PR's commits API — `https://api.github.com/repos/<owner>/<repo>/pulls/<n>/commits`). |
 | **Release notes** | **Always add user-facing entries to `RELEASE_NOTES.md` for any change a user could notice — before finishing work and committing.** See [Release notes](#release-notes). |
 
