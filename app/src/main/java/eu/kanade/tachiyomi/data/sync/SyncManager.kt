@@ -79,7 +79,7 @@ class SyncManager(
     suspend fun syncData() {
         // Same clock the last_modified_at triggers stamp with (SQLite strftime), so a skew between
         // kotlin.time.Clock and the DB cannot make getMangasModifiedSince skip recent edits.
-        val syncStart = handler.awaitOne { mangaQueries.sqliteNow() }
+        val syncStart = handler.awaitOneExecutable { mangaQueries.sqliteNow() }
         val lastPushed = syncPreferences.lastPushedAt().get()
         if (lastPushed > 0L && syncStart < lastPushed) {
             // Device clock stepped backwards: every stamp after the step is older than the cursor.
