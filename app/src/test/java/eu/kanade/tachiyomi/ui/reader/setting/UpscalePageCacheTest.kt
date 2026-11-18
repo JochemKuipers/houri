@@ -10,6 +10,8 @@ import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
 import java.io.File
 import java.nio.file.Path
+import upscale.identity.UpscaleIdentity
+import upscale.store.UpscalePageCache
 
 /**
  * The upscaled-page cache, exercised almost entirely through its failure paths.
@@ -28,7 +30,7 @@ import java.nio.file.Path
  * collapse two different pages onto one entry.
  */
 @Execution(ExecutionMode.CONCURRENT)
-class UpscaleCacheManagerTest {
+class UpscalePageCacheTest {
 
     private val now: Long get() = System.currentTimeMillis()
     private val dayMillis = 24L * 60 * 60 * 1000
@@ -48,11 +50,24 @@ class UpscaleCacheManagerTest {
         magic.copyInto(it)
     }
 
+    /** The old 3-arg `cacheKey`: blank extras are the same as none. */
+    private fun cacheKey(bytes: ByteArray, factor: Float, model: String): String =
+        UpscaleIdentity.key(bytes, factor, model, "", "")
+
+    /** The old 5-arg `cacheKeyDetailed`, now the spine's single identity site. */
+    private fun cacheKeyDetailed(
+        bytes: ByteArray,
+        factor: Float,
+        model: String,
+        extra1: String,
+        extra2: String,
+    ): String = UpscaleIdentity.key(bytes, factor, model, extra1, extra2)
+
     // ---------- key validity: the only thing standing between a caller and the filesystem ----------
 
     @Test
     fun `a key that was not minted here is refused rather than turned into a path`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         // Too short, and containing separators and traversal, so none of these may become a file.
         for (bad in listOf("", "x", "../../etc/passwd", "..%2F..%2Fetc", "/absolute/path")) {
             manager.putCached(bad, jpegPayload())
@@ -63,8 +78,8 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `uppercase hex is not a valid key even though it is the same digest`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
-        val real = manager.cacheKey(jpegPayload(), 2f, "model")
+        val manager = UpscalePageCache(root.toFile())
+        val real = cacheKey(jpegPayload(), 2f, "model")
         real shouldBe real.lowercase()
         manager.putCached(real.uppercase(), jpegPayload())
         cacheDir(root).listFiles().orEmpty().size shouldBe 0
@@ -72,8 +87,8 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `a sixty four character key with a non hex character in it is refused`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
-        val real = manager.cacheKey(jpegPayload(), 2f, "model")
+        val manager = UpscalePageCache(root.toFile())
+        val real = cacheKey(jpegPayload(), 2f, "model")
         val poisoned = real.dropLast(1) + "z"
         manager.putCached(poisoned, jpegPayload())
         manager.getCached(poisoned).shouldBeNull()
@@ -82,7 +97,7 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `a sixty four character all-hex key is accepted`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val key = "a".repeat(64)
         val payload = jpegPayload()
         manager.putCached(key, payload)
@@ -93,12 +108,12 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `a key with no file behind it reads as unavailable`(@TempDir root: Path) {
-        UpscaleCacheManager(root.toFile()).getCached("b".repeat(64)).shouldBeNull()
+        UpscalePageCache(root.toFile()).getCached("b".repeat(64)).shouldBeNull()
     }
 
     @Test
     fun `an empty cache file is deleted instead of returned as a finished page`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val key = "c".repeat(64)
         val file = File(cacheDir(root), "$key.webp")
         file.writeBytes(ByteArray(0))
@@ -109,7 +124,7 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `an entry with neither a JPEG nor a WebP header is deleted`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val key = "d".repeat(64)
         val file = File(cacheDir(root), "$key.webp")
         // Long enough to pass the size check, but it is not an image: the write died in compress.
@@ -121,7 +136,7 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `a truncated WebP shorter than its own magic is deleted`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val key = "e".repeat(64)
         val file = File(cacheDir(root), "$key.webp")
         file.writeBytes("RIFF".toByteArray()) // only the first four magic bytes landed
@@ -132,7 +147,7 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `both stored formats are accepted because the encoder picks by size`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val jpeg = jpegPayload()
         val webp = webpPayload()
         manager.putCached("1".repeat(64), jpeg)
@@ -143,13 +158,13 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `an entry older than the TTL is deleted on read`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val key = "2".repeat(64)
         val payload = jpegPayload()
         manager.putCached(key, payload)
 
         val file = File(cacheDir(root), "$key.webp")
-        assertTrue(file.setLastModified(now - (UpscaleCacheManager.TTL_DAYS + 1) * dayMillis), "clock stub failed")
+        assertTrue(file.setLastModified(now - (UpscalePageCache.TTL_DAYS + 1) * dayMillis), "clock stub failed")
 
         manager.getCached(key).shouldBeNull()
         assertTrue(!file.exists(), "an entry past its TTL must be dropped")
@@ -157,13 +172,13 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `reading an entry refreshes its timestamp so live pages outlive the sweep`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val key = "3".repeat(64)
         val payload = jpegPayload()
         manager.putCached(key, payload)
 
         val file = File(cacheDir(root), "$key.webp")
-        val aged = now - (UpscaleCacheManager.TTL_DAYS - 1) * dayMillis
+        val aged = now - (UpscalePageCache.TTL_DAYS - 1) * dayMillis
         assertTrue(file.setLastModified(aged), "clock stub failed")
 
         manager.getCached(key) shouldBe payload
@@ -174,14 +189,14 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `an empty payload is refused rather than cached`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         manager.putCached("4".repeat(64), ByteArray(0))
         cacheDir(root).listFiles().orEmpty().size shouldBe 0
     }
 
     @Test
     fun `a successful write leaves the entry and no temp file behind`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val payload = jpegPayload()
         manager.putCached("5".repeat(64), payload)
 
@@ -193,7 +208,7 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `writing the same key twice overwrites rather than accumulating`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val key = "6".repeat(64)
         manager.putCached(key, jpegPayload(64))
         manager.putCached(key, jpegPayload(128))
@@ -205,14 +220,14 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `a fresh cache reports nothing stored`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         manager.fileCount() shouldBe 0
         manager.sizeBytes() shouldBe 0L
     }
 
     @Test
     fun `size and count add up across a mix of entries`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         manager.putCached("7".repeat(64), jpegPayload(100))
         manager.putCached("8".repeat(64), jpegPayload(250))
         manager.fileCount() shouldBe 2
@@ -221,14 +236,14 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `pruning drops expired entries and keeps fresh ones`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val stale = "9".repeat(64)
         val fresh = "0".repeat(64)
         manager.putCached(stale, jpegPayload())
         manager.putCached(fresh, jpegPayload())
 
         val staleFile = File(cacheDir(root), "$stale.webp")
-        assertTrue(staleFile.setLastModified(now - (UpscaleCacheManager.TTL_DAYS + 2) * dayMillis), "clock stub failed")
+        assertTrue(staleFile.setLastModified(now - (UpscalePageCache.TTL_DAYS + 2) * dayMillis), "clock stub failed")
 
         manager.pruneExpired()
         assertTrue(!staleFile.exists(), "prune must drop the expired entry")
@@ -238,7 +253,7 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `pruning sweeps an abandoned temp file but spares a recent one`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val dir = cacheDir(root)
         val old = File(dir, "abandoned.tmp.111")
         val recent = File(dir, "inflight.tmp.222")
@@ -253,7 +268,7 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `a completed write leaves no temp file that could be mistaken for an entry`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         manager.putCached("a".repeat(64), jpegPayload())
         assertTrue(
             cacheDir(root).listFiles().orEmpty().none { ".tmp." in it.name },
@@ -263,7 +278,7 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `clear empties the cache and stays safe to call twice`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         manager.putCached("b".repeat(64), jpegPayload())
         manager.fileCount() shouldBe 1
 
@@ -279,76 +294,76 @@ class UpscaleCacheManagerTest {
 
     @Test
     fun `keys are sixty four lowercase hex characters`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
-        val key = manager.cacheKey(jpegPayload(), 2f, "model")
+        val manager = UpscalePageCache(root.toFile())
+        val key = cacheKey(jpegPayload(), 2f, "model")
         key.length shouldBe 64
         assertTrue(key.all { it in '0'..'9' || it in 'a'..'f' }, "key is not hex: $key")
     }
 
     @Test
     fun `the same input always derives the same key`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
-        val first = manager.cacheKey(jpegPayload(), 2f, "waifu2x")
-        val second = manager.cacheKey(jpegPayload(), 2f, "waifu2x")
+        val manager = UpscalePageCache(root.toFile())
+        val first = cacheKey(jpegPayload(), 2f, "waifu2x")
+        val second = cacheKey(jpegPayload(), 2f, "waifu2x")
         first shouldBe second
     }
 
     @Test
     fun `different content, factor or model never share a key`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
-        val base = manager.cacheKey(jpegPayload(64), 2f, "waifu2x")
+        val manager = UpscalePageCache(root.toFile())
+        val base = cacheKey(jpegPayload(64), 2f, "waifu2x")
 
-        assertTrue(manager.cacheKey(jpegPayload(65), 2f, "waifu2x") != base, "length must change the key")
-        assertTrue(manager.cacheKey(jpegPayload(64), 3f, "waifu2x") != base, "factor must change the key")
-        assertTrue(manager.cacheKey(jpegPayload(64), 2f, "realesrgan") != base, "model must change the key")
+        assertTrue(cacheKey(jpegPayload(65), 2f, "waifu2x") != base, "length must change the key")
+        assertTrue(cacheKey(jpegPayload(64), 3f, "waifu2x") != base, "factor must change the key")
+        assertTrue(cacheKey(jpegPayload(64), 2f, "realesrgan") != base, "model must change the key")
     }
 
     @Test
     fun `an empty page still derives a usable key rather than an empty one`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
-        val key = manager.cacheKey(ByteArray(0), 2f, "waifu2x")
+        val manager = UpscalePageCache(root.toFile())
+        val key = cacheKey(ByteArray(0), 2f, "waifu2x")
         key.length shouldBe 64
         // Two empty pages are the same page as far as the cache is concerned, which is fine:
         // the byte count is folded in, so an empty one cannot collide with a real one.
-        assertTrue(manager.cacheKey(ByteArray(0), 2f, "waifu2x") == key, "empty pages are stable")
-        assertTrue(manager.cacheKey(jpegPayload(), 2f, "waifu2x") != key, "empty must not collide with real")
+        assertTrue(cacheKey(ByteArray(0), 2f, "waifu2x") == key, "empty pages are stable")
+        assertTrue(cacheKey(jpegPayload(), 2f, "waifu2x") != key, "empty must not collide with real")
     }
 
     @Test
     fun `a non finite factor falls back to a fixed value instead of poisoning the digest`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val bytes = jpegPayload()
-        val normal = manager.cacheKey(bytes, 2f, "waifu2x")
-        assertTrue(manager.cacheKey(bytes, Float.NaN, "waifu2x") == normal, "NaN must normalise to 2")
-        assertTrue(manager.cacheKey(bytes, Float.POSITIVE_INFINITY, "waifu2x") == normal, "+inf must normalise")
-        assertTrue(manager.cacheKey(bytes, Float.NEGATIVE_INFINITY, "waifu2x") == normal, "-inf must normalise")
-        assertTrue(manager.cacheKey(bytes, 2.5f, "waifu2x") != normal, "a real factor must still differ")
+        val normal = cacheKey(bytes, 2f, "waifu2x")
+        assertTrue(cacheKey(bytes, Float.NaN, "waifu2x") == normal, "NaN must normalise to 2")
+        assertTrue(cacheKey(bytes, Float.POSITIVE_INFINITY, "waifu2x") == normal, "+inf must normalise")
+        assertTrue(cacheKey(bytes, Float.NEGATIVE_INFINITY, "waifu2x") == normal, "-inf must normalise")
+        assertTrue(cacheKey(bytes, 2.5f, "waifu2x") != normal, "a real factor must still differ")
     }
 
     @Test
     fun `model names are truncated to sixty four characters`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val shared = "m".repeat(64)
         // Everything past the cut is dropped, so these two are the same model as far as the key knows.
         assertTrue(
-            manager.cacheKey(jpegPayload(), 2f, shared + "-a") == manager.cacheKey(jpegPayload(), 2f, shared + "-b"),
+            cacheKey(jpegPayload(), 2f, shared + "-a") == cacheKey(jpegPayload(), 2f, shared + "-b"),
             "names differing only past the truncation must collide",
         )
         assertTrue(
-            manager.cacheKey(jpegPayload(), 2f, shared) != manager.cacheKey(jpegPayload(), 2f, "m".repeat(63)),
+            cacheKey(jpegPayload(), 2f, shared) != cacheKey(jpegPayload(), 2f, "m".repeat(63)),
             "names differing inside the cut must differ",
         )
     }
 
     @Test
     fun `blank extras are the same as passing none at all`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val bytes = jpegPayload()
-        val first = manager.cacheKeyDetailed(bytes, 2f, "m", "", "")
-        assertTrue(manager.cacheKey(bytes, 2f, "m") == first, "blank extras must be the same as no extras")
-        assertTrue(manager.cacheKeyDetailed(bytes, 2f, "m", "", "") == first, "repeat call must be stable")
-        assertTrue(manager.cacheKeyDetailed(bytes, 2f, "m", "x", "") != first, "extra1 must matter")
-        assertTrue(manager.cacheKeyDetailed(bytes, 2f, "m", "", "x") != first, "extra2 must matter")
+        val first = cacheKeyDetailed(bytes, 2f, "m", "", "")
+        assertTrue(cacheKey(bytes, 2f, "m") == first, "blank extras must be the same as no extras")
+        assertTrue(cacheKeyDetailed(bytes, 2f, "m", "", "") == first, "repeat call must be stable")
+        assertTrue(cacheKeyDetailed(bytes, 2f, "m", "x", "") != first, "extra1 must matter")
+        assertTrue(cacheKeyDetailed(bytes, 2f, "m", "", "x") != first, "extra2 must matter")
     }
 
     @Test
@@ -356,15 +371,15 @@ class UpscaleCacheManagerTest {
         // Empty slots are dropped from the digest instead of kept as placeholders, so a value in
         // the second slot cannot be told from the same value in the first. Pinned so the collision
         // is visible if the two slots are ever given values that must not be confused.
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val bytes = jpegPayload()
-        manager.cacheKeyDetailed(bytes, 2f, "m", "x", "") shouldBe
-            manager.cacheKeyDetailed(bytes, 2f, "m", "", "x")
+        cacheKeyDetailed(bytes, 2f, "m", "x", "") shouldBe
+            cacheKeyDetailed(bytes, 2f, "m", "", "x")
     }
 
     @Test
     fun `a page larger than the full-hash limit still keys on its middle`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         // Past 256 KB the digest stops reading everything and samples instead, which is where a
         // single-prefix hash used to collide two distinct pages from the same chapter.
         val shared = 300 * 1024
@@ -372,48 +387,48 @@ class UpscaleCacheManagerTest {
         val b = a.copyOf()
         b[shared / 2] = 0x22 // lands inside the middle sample
 
-        val keyA = manager.cacheKey(a, 2f, "waifu2x")
-        val keyB = manager.cacheKey(b, 2f, "waifu2x")
+        val keyA = cacheKey(a, 2f, "waifu2x")
+        val keyB = cacheKey(b, 2f, "waifu2x")
         assertTrue(keyA != keyB, "two large pages differing in the middle must not share a key")
         assertTrue(keyA.length == 64 && keyB.length == 64, "sampled keys stay the same shape")
     }
 
     @Test
     fun `a page past the hash limit keys on its tail as well as its body`(@TempDir root: Path) {
-        val manager = UpscaleCacheManager(root.toFile())
+        val manager = UpscalePageCache(root.toFile())
         val shared = 300 * 1024
         val a = ByteArray(shared) { 0x33 }
         val b = a.copyOf()
         b[shared - 1] = 0x44 // the very last byte, past every sample window
 
-        assertTrue(manager.cacheKey(a, 2f, "m") != manager.cacheKey(b, 2f, "m"), "the tail must be part of the key")
+        assertTrue(cacheKey(a, 2f, "m") != cacheKey(b, 2f, "m"), "the tail must be part of the key")
     }
 
     // ---------- formatting ----------
 
     @Test
     fun `byte formatting floors instead of rounding`() {
-        UpscaleCacheManager.formatBytes(0) shouldBe "0 MB"
-        UpscaleCacheManager.formatBytes(-1) shouldBe "0 MB"
-        UpscaleCacheManager.formatBytes(-Long.MAX_VALUE) shouldBe "0 MB"
-        UpscaleCacheManager.formatBytes(1) shouldBe "0 KB"
-        UpscaleCacheManager.formatBytes(1024) shouldBe "1 KB"
-        UpscaleCacheManager.formatBytes(1023 * 1024) shouldBe "1023 KB"
+        UpscalePageCache.formatBytes(0) shouldBe "0 MB"
+        UpscalePageCache.formatBytes(-1) shouldBe "0 MB"
+        UpscalePageCache.formatBytes(-Long.MAX_VALUE) shouldBe "0 MB"
+        UpscalePageCache.formatBytes(1) shouldBe "0 KB"
+        UpscalePageCache.formatBytes(1024) shouldBe "1 KB"
+        UpscalePageCache.formatBytes(1023 * 1024) shouldBe "1023 KB"
     }
 
     @Test
     fun `the megabyte fraction is truncated so it never rounds up past the real value`() {
         // 200 KB of 1024 KB is 0.195 MB, and the formatter truncates rather than rounding.
-        UpscaleCacheManager.formatBytes(1024 * 1024 + 200 * 1024) shouldBe "1.1 MB"
-        UpscaleCacheManager.formatBytes(1536 * 1024) shouldBe "1.5 MB"
-        UpscaleCacheManager.formatBytes(1024 * 1024) shouldBe "1.0 MB"
+        UpscalePageCache.formatBytes(1024 * 1024 + 200 * 1024) shouldBe "1.1 MB"
+        UpscalePageCache.formatBytes(1536 * 1024) shouldBe "1.5 MB"
+        UpscalePageCache.formatBytes(1024 * 1024) shouldBe "1.0 MB"
     }
 
     @Test
     fun `the summary reports the quota rather than the live size`() {
-        UpscaleCacheManager.formatSummary(0, 0) shouldBe
-            "0 MB of ${UpscaleCacheManager.formatBytes(UpscaleCacheManager.MAX_CACHE_BYTES)} • 0 files • " +
-            "${UpscaleCacheManager.TTL_DAYS}-day TTL"
-        assertTrue(UpscaleCacheManager.formatSummary(0, 0).contains("200.0 MB"), "quota should read 200 MB")
+        UpscalePageCache.formatSummary(0, 0) shouldBe
+            "0 MB of ${UpscalePageCache.formatBytes(UpscalePageCache.MAX_CACHE_BYTES)} • 0 files • " +
+            "${UpscalePageCache.TTL_DAYS}-day TTL"
+        assertTrue(UpscalePageCache.formatSummary(0, 0).contains("200.0 MB"), "quota should read 200 MB")
     }
 }
