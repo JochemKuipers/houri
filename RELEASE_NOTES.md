@@ -10,6 +10,7 @@ files moved. See .github/scripts/release_notes.py.
 
 ### New
 
+- **Delete downloads in bulk**: Settings → Data and storage gains two confirmed cleanup actions — delete the downloaded chapters of every entry that is no longer in your library, or wipe every downloaded chapter on the device. Library entries, bookmarks and reading progress are kept; failed downloads are removed with the rest.
 - **Built-in Komga source**: browse, search and read straight from a Komga server without installing an extension. EPUB books open in the book reader (downloaded to the app cache once, then read offline), comics read as image pages, and reading progress syncs through the existing Komga tracker. Configure the server address (and optional API key) in the source's settings.
 - **Page-turn animations for books** (paged reading): the old page now slides off the edge you are heading for, dissolves, or swings over on its spine — with an adjustable speed. Off by default; pick one in Reading appearance → Page turn.
 - **Footnote popups in books**: tapping a note reference now shows the note beside the text — a small window wearing the book's own typography, images included — instead of turning to the notes document. Notes that live in another file are read out of the book on the spot; anything that cannot be shown falls back to the ordinary link behaviour. Toggleable in Reading appearance.

@@ -853,6 +853,14 @@
     <string name="downloaded_content_delete_cached_chapter">Delete cached pages</string>
     <string name="downloaded_content_deleted">Deleted</string>
     <string name="downloaded_content_delete_error">Couldn\'t delete everything</string>
+    <string name="pref_delete_not_in_library_downloads">Delete downloads not in library</string>
+    <string name="pref_delete_not_in_library_downloads_summary">Remove downloaded chapters of entries that are no longer in your library</string>
+    <string name="pref_delete_not_in_library_downloads_confirm">Delete the downloaded chapters of every entry that is not in your library?</string>
+    <string name="pref_delete_all_downloads">Delete all downloads</string>
+    <string name="pref_delete_all_downloads_summary">Remove every downloaded chapter from this device. Library entries and reading progress are kept</string>
+    <string name="pref_delete_all_downloads_confirm">Delete every downloaded chapter from this device? This cannot be undone.</string>
+    <string name="downloads_deleted">Deleted %1$d downloads</string>
+    <string name="downloads_delete_error">Could not delete every download</string>
     <string name="chapter_cache_retention_title">Chapter cache retention</string>
     <string name="chapter_cache_retention_off">Until space is needed</string>
     <string name="chapter_cache_retention_12h">12 hours</string>

@@ -56,6 +56,7 @@ import eu.kanade.presentation.util.relativeTimeSpanString
 import eu.kanade.tachiyomi.data.backup.create.BackupCreateJob
 import eu.kanade.tachiyomi.data.backup.restore.BackupRestoreJob
 import eu.kanade.tachiyomi.data.database.DatabaseExporter
+import eu.kanade.tachiyomi.data.download.DownloadBulkDelete
 import eu.kanade.tachiyomi.data.export.LibraryExporter
 import eu.kanade.tachiyomi.data.export.LibraryExporter.ExportOptions
 import eu.kanade.tachiyomi.util.system.DeviceUtil
@@ -341,6 +342,81 @@ data object SettingsDataRoute : NavKey, SearchableRoute {
         var cacheReadableSizeSema by remember { mutableIntStateOf(0) }
         val cacheReadableSize = remember(cacheReadableSizeSema) { chapterCache.readableSize }
 
+        // KMK -->
+        // Bulk download deletion (issue #82). Built here rather than injected so the settings
+        // screen owns the whole action, and so the deletion rules stay a plain class that can be
+        // asserted without the Android framework.
+        var bulkDeleteScope by remember { mutableStateOf<BulkDeleteScope?>(null) }
+        val bulkDelete = remember {
+            DownloadBulkDelete(
+                downloadManager = globalAppGraph.downloadManager,
+                downloadCache = globalAppGraph.downloadCache,
+                downloadProvider = globalAppGraph.downloadProvider,
+                sourceManager = globalAppGraph.sourceManager,
+                getFavorites = globalAppGraph.getFavorites,
+                getNonLibraryManga = globalAppGraph.getNonLibraryManga,
+            )
+        }
+
+        bulkDeleteScope?.let { pending ->
+            AlertDialog(
+                onDismissRequest = { bulkDeleteScope = null },
+                title = {
+                    Text(
+                        text = stringResource(
+                            if (pending == BulkDeleteScope.All) {
+                                KMR.strings.pref_delete_all_downloads
+                            } else {
+                                KMR.strings.pref_delete_not_in_library_downloads
+                            },
+                        ),
+                    )
+                },
+                text = {
+                    Text(
+                        text = stringResource(
+                            if (pending == BulkDeleteScope.All) {
+                                KMR.strings.pref_delete_all_downloads_confirm
+                            } else {
+                                KMR.strings.pref_delete_not_in_library_downloads_confirm
+                            },
+                        ),
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            bulkDeleteScope = null
+                            scope.launchNonCancellable {
+                                val result = if (pending == BulkDeleteScope.All) {
+                                    bulkDelete.deleteAll()
+                                } else {
+                                    bulkDelete.deleteNotInLibrary()
+                                }
+                                withUIContext {
+                                    context.toast(
+                                        if (result.failed) {
+                                            context.stringResource(KMR.strings.downloads_delete_error)
+                                        } else {
+                                            context.stringResource(KMR.strings.downloads_deleted, result.deletedEntries)
+                                        },
+                                    )
+                                }
+                            }
+                        },
+                    ) {
+                        Text(text = stringResource(MR.strings.action_delete))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { bulkDeleteScope = null }) {
+                        Text(text = stringResource(MR.strings.action_cancel))
+                    }
+                },
+            )
+        }
+        // KMK <--
+
         // SY -->
         val pagePreviewCache = remember { globalAppGraph.pagePreviewCache }
         var pagePreviewReadableSizeSema by remember { mutableIntStateOf(0) }
@@ -424,6 +500,16 @@ data object SettingsDataRoute : NavKey, SearchableRoute {
                     title = stringResource(KMR.strings.pref_downloaded_content),
                     subtitle = stringResource(KMR.strings.pref_downloaded_content_support),
                     onClick = { backStack.add(DownloadedContentRoute) },
+                ),
+                Preference.PreferenceItem.TextPreference(
+                    title = stringResource(KMR.strings.pref_delete_not_in_library_downloads),
+                    subtitle = stringResource(KMR.strings.pref_delete_not_in_library_downloads_summary),
+                    onClick = { bulkDeleteScope = BulkDeleteScope.NotInLibrary },
+                ),
+                Preference.PreferenceItem.TextPreference(
+                    title = stringResource(KMR.strings.pref_delete_all_downloads),
+                    subtitle = stringResource(KMR.strings.pref_delete_all_downloads_summary),
+                    onClick = { bulkDeleteScope = BulkDeleteScope.All },
                 ),
                 // KMK <--
             ),
@@ -657,3 +743,17 @@ data object SettingsDataRoute : NavKey, SearchableRoute {
     }
     // KMK <--
 }
+
+// KMK -->
+/**
+ * Which bulk download deletion the settings screen is confirming. Both are ask-then-work: the
+ * dialog is the only place the scope is chosen, and the work runs off the main thread.
+ */
+private enum class BulkDeleteScope {
+    /** Every downloaded chapter, library entries included. */
+    All,
+
+    /** Only the entries that are not in the library. */
+    NotInLibrary,
+}
+// KMK <--
