@@ -65,7 +65,10 @@ never compiled into the app.
 
 **What it catches:** syntax errors, JVM declaration clashes (`getPackageHref()` colliding with a
 `packageHref` property), intra-module type errors, and anything a pure function can be asserted
-against. Add a new stub under `stubs/` when a fresh external class is needed.
+against. Add a new stub under `stubs/` when a fresh external class is needed. Test files check too:
+the classpath carries the cached JUnit/Kotest/MockK/coroutines-test jars, so a rewritten test
+(`FetchIntervalTest`) can be verified without Gradle — a mockk stub-scope error there usually means
+a missing `mockk-core`/`mockk-dsl`/`mockk-agent-api` jar in the spec list.
 
 `run-harness.sh` is the half that asserts behaviour rather than compilability: one `*Harness.kt` per
 subject in `scripts/kotlinc-check/harness/`, each linking the *real* project source (never a copy)

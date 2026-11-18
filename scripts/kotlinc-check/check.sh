@@ -101,7 +101,19 @@ for spec in "org.jetbrains.kotlinx/kotlinx-serialization-core-jvm:kotlinx-serial
             "dev.zacsweers.metro/runtime-jvm:metro-runtime" \
             "com.squareup.okhttp3/okhttp-jvm:okht" \
             "com.squareup.okio/okio-jvm:okio-jvm" \
-            "com.microsoft.onnxruntime/onnxruntime-android:onnxruntime:aar"; do
+            "com.microsoft.onnxruntime/onnxruntime-android:onnxruntime:aar" \
+            "org.junit.jupiter/junit-jupiter-api:junit-jupiter-api" \
+            "org.junit.platform/junit-platform-commons:junit-platform-commons" \
+            "io.mockk/mockk-jvm:mockk-jvm" \
+            "io.mockk/mockk-core-jvm:mockk-core" \
+            "io.mockk/mockk-dsl-jvm:mockk-dsl" \
+            "io.mockk/mockk-agent-jvm:mockk-agent" \
+            "io.mockk/mockk-agent-api-jvm:mockk-agent-api" \
+            "org.objenesis/objenesis:objenesis" \
+            "io.kotest/kotest-assertions-core-jvm:kotest-assertions-core" \
+            "io.kotest/kotest-assertions-shared-jvm:kotest-assertions-shared" \
+            "io.kotest/kotest-common-jvm:kotest-common" \
+            "org.jetbrains.kotlinx/kotlinx-coroutines-test-jvm:kotlinx-coroutines-test"; do
     dir="${spec%%:*}"; rest="${spec#*:}"; name="${rest%%:*}"; kind="${rest#*:}"
     if [ "$kind" = "aar" ]; then
         aar=$(find "$CACHE/$dir" -name "*.aar" 2>/dev/null | grep -v -- '-sources' | sort -V | tail -1)

@@ -232,11 +232,24 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
         RUN_CP=":$JSON_JAR:$CORE_JAR"
     fi
 
+    # The in-app updater's version math: the real interactor plus the model and service interface
+    # it is built from. Metro's @Inject marker is compile-only (annotations are erased), and
+    # runBlocking drives the suspend entry point. This is the code that decides whether a stable
+    # build compares semantic versions and a beta build compares `r<commitCount>` tags.
+    RELEASE_CP=""
+    if [ "$NAME" = "ReleaseVersionHarness" ]; then
+        SOURCES+=("$REPO_ROOT/domain/src/main/java/tachiyomi/domain/release/interactor/GetApplicationRelease.kt")
+        SOURCES+=("$REPO_ROOT/domain/src/main/java/tachiyomi/domain/release/model/Release.kt")
+        SOURCES+=("$REPO_ROOT/domain/src/main/java/tachiyomi/domain/release/service/ReleaseService.kt")
+        # @Inject lives in metro-runtime, not metro-common.
+        RELEASE_CP=":$COROUTINES:$(find_jar dev.zacsweers.metro runtime-jvm)"
+    fi
+
     OUT=$(mktemp -d)
     echo "== $NAME =="
     # A hard compile error must fail the run, not fall through to "class not found".
     if ! java -cp "$COMPILER_CP" org.jetbrains.kotlin.cli.jvm.K2JVMCompiler \
-            -no-stdlib -nowarn -cp "$STDLIB$KXML_CP$MTL_CP$UPSCALE_CP$BLACKLIST_CP" -d "$OUT/classes" "${SOURCES[@]}" "${OPF_SOURCES[@]}" "$MAIN" 2>&1 \
+            -no-stdlib -nowarn -cp "$STDLIB$KXML_CP$MTL_CP$UPSCALE_CP$BLACKLIST_CP$RELEASE_CP" -d "$OUT/classes" "${SOURCES[@]}" "${OPF_SOURCES[@]}" "$MAIN" 2>&1 \
             | grep -E 'error:' | grep -vE 'unresolved reference'; then
         :
     else
@@ -247,7 +260,7 @@ for MAIN in "$HARNESS_DIR"/*Harness.kt; do
     fi
 
     # Kotlin file-facade class for a top-level main() is the file name plus "Kt".
-    if java -cp "$OUT/classes:$STDLIB$KXML_CP$MTL_CP$UPSCALE_CP$RUN_CP" "${NAME}Kt" 2> "$OUT/run.err"; then
+    if java -cp "$OUT/classes:$STDLIB$KXML_CP$MTL_CP$UPSCALE_CP$RUN_CP$RELEASE_CP" "${NAME}Kt" 2> "$OUT/run.err"; then
         RAN=$((RAN + 1))
     else
         # A runtime crash must name the crash: everything above succeeds and passes silently
