@@ -6,12 +6,17 @@ import tachiyomi.domain.chapter.model.Chapter
 import tachiyomi.domain.manga.model.Manga
 import tachiyomi.domain.manga.model.MangaUpdate
 import java.time.Instant
-import java.time.LocalDateTime
-import java.time.ZoneId
 import java.time.ZonedDateTime
-import java.time.temporal.ChronoUnit
-import kotlin.math.absoluteValue
 
+/**
+ * Works out the entry's fetch interval and the next day to check it for new chapters, from the
+ * release schedule its chapter history shows (ported from Mihon, issue #81).
+ *
+ * A user-set interval (negative, and the disabled marker) is honoured as a fixed schedule counted
+ * from the last release; anything else is estimated from the chapters' release days, whose calendar
+ * pattern a plain day count cannot follow. The result is a [MangaUpdate] that also carries the
+ * interval, so the caller persists the two together.
+ */
 @Inject
 class FetchInterval(
     private val getChaptersByMangaId: GetChaptersByMangaId,
@@ -21,11 +26,15 @@ class FetchInterval(
         manga: Manga,
         dateTime: ZonedDateTime,
         window: Pair<Long, Long>,
+        foundRelease: Boolean = false,
+        excludedScanlators: Set<String> = emptySet(),
     ): MangaUpdate = toMangaUpdate(
         manga = manga,
         dateTime = dateTime,
         window = window,
-        chapters = getChaptersByMangaId.await(manga.id, applyFilter = true),
+        chapters = getChaptersByMangaId.await(manga.id),
+        foundRelease = foundRelease,
+        excludedScanlators = excludedScanlators,
     )
 
     /**
@@ -35,28 +44,71 @@ class FetchInterval(
      * (every entry of a Mihon-format backup, or one written before the schedule existed)
      * must have the schedule computed per entry, and reading it back from the table
      * re-fetched every chapter row the restore had just written - a third full chapter
-     * read per entry. Unlike the single-argument path this does not apply the bookmark
-     * filter: the restore is making these rows authoritative, so the cadence comes from
-     * all of them.
+     * read per entry. Unlike the single-argument path this applies no filters itself:
+     * the restore is making these rows authoritative, so the cadence comes from all of
+     * them unless an exclusion set is passed.
+     *
+     * The estimate is fed unfiltered chapters: the cadence must follow what the entry
+     * actually ships, not what the reader's display filter is currently set to show.
+     * User-excluded scanlators are dropped via [excludedScanlators] (Mihon's
+     * applyScanlatorFilter); the set lives outside this module, so callers pass it in.
      */
     suspend fun toMangaUpdate(
         manga: Manga,
         dateTime: ZonedDateTime,
         window: Pair<Long, Long>,
         chapters: List<Chapter>,
+        foundRelease: Boolean = false,
+        excludedScanlators: Set<String> = emptySet(),
     ): MangaUpdate {
-        val interval = manga.fetchInterval.takeIf { it < 0 } ?: calculateInterval(
-            chapters = chapters,
-            zone = dateTime.zone,
-        )
+        val zone = dateTime.zone
+        val today = dateTime.toLocalDate()
+        val allChapters = if (excludedScanlators.isEmpty()) chapters else chapters.filterNot { it.scanlator in excludedScanlators }
         val currentWindow = if (window.first == 0L && window.second == 0L) {
             getWindow(ZonedDateTime.now())
         } else {
             window
         }
-        val nextUpdate = calculateNextUpdate(manga, interval, dateTime, currentWindow)
 
-        return MangaUpdate(id = manga.id, nextUpdate = nextUpdate, fetchInterval = interval)
+        if (manga.fetchInterval == MANUAL_DISABLE) {
+            // A disabled entry is checked again effectively never. It must not go through the
+            // schedule machinery, whose checks are capped at MAX_INTERVAL days.
+            val farFuture = today.plusDays(MANUAL_DISABLE.toLong())
+                .atStartOfDay(zone).toInstant().toEpochMilli()
+            return MangaUpdate(id = manga.id, nextUpdate = farFuture, fetchInterval = MANUAL_DISABLE)
+        }
+
+        val schedule = if (manga.fetchInterval < 0) {
+            // The check that found a release is the entry's last update
+            val lastRelease = if (foundRelease) {
+                today
+            } else {
+                manga.lastUpdate.takeIf { it > 0L }
+                    ?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }
+            }
+            ReleaseSchedule.fixed(-manga.fetchInterval, lastRelease ?: today)
+        } else {
+            ReleaseSchedule.estimate(allChapters, zone, today)
+        }
+
+        val expected = manga.nextUpdate
+        val expectedDay = expected.takeIf { it > 0L }
+            ?.let { Instant.ofEpochMilli(it).atZone(zone).toLocalDate() }
+        // A release on or after the expected day means the next one is counted from it instead
+        val isAwaitingRelease = expectedDay != null &&
+            expected in currentWindow.first..currentWindow.second + 1L &&
+            (schedule.lastRelease == null || schedule.lastRelease < expectedDay)
+        val nextUpdate = when {
+            foundRelease -> schedule.nextCheckAfterRelease(today)
+            isAwaitingRelease -> expectedDay
+            else -> schedule.nextCheck(today)
+        }.atStartOfDay(zone).toInstant().toEpochMilli()
+
+        return MangaUpdate(
+            id = manga.id,
+            nextUpdate = nextUpdate,
+            fetchInterval = if (manga.fetchInterval < 0) manga.fetchInterval else schedule.interval,
+        )
     }
 
     fun getWindow(dateTime: ZonedDateTime): Pair<Long, Long> {
@@ -66,111 +118,8 @@ class FetchInterval(
         return Pair(lowerBound.toEpochSecond() * 1000, upperBound.toEpochSecond() * 1000 - 1)
     }
 
-    // KMK -->
-    internal fun calculateInterval(chapters: List<Chapter>, zone: ZoneId): Int {
-        val chapterWindow = if (chapters.size <= 8) 6 else 12
-
-        val uploadDates = chapters.asSequence()
-            .filter { it.dateUpload > 0L }
-            .sortedByDescending { it.dateUpload }
-            .map {
-                ZonedDateTime.ofInstant(Instant.ofEpochMilli(it.dateUpload), zone)
-                    .toLocalDate()
-                    .atStartOfDay()
-            }
-            .distinct()
-            .take(chapterWindow)
-            .toList()
-
-        val fetchDates = chapters.asSequence()
-            .sortedByDescending { it.dateFetch }
-            .map {
-                ZonedDateTime.ofInstant(Instant.ofEpochMilli(it.dateFetch), zone)
-                    .toLocalDate()
-                    .atStartOfDay()
-            }
-            .distinct()
-            .take(chapterWindow)
-            .toList()
-
-        val gaps = when {
-            // Prefer source upload dates; they describe the real release cadence.
-            uploadDates.size >= 4 -> dayGaps(uploadDates)
-            // Fall back to client-side fetch dates (in case the source drops upload dates).
-            fetchDates.size >= 4 -> dayGaps(fetchDates)
-            else -> emptyList()
-        }
-        if (gaps.size < 3) return DEFAULT_INTERVAL
-
-        val sorted = gaps.sorted()
-        val median = sorted[sorted.size / 2]
-
-        // Reject hiatus/binge outliers (single gap > 3x the median) before choosing the
-        // cadence; a 60-day pause between weekly chapters should not stretch the estimate.
-        val filtered = gaps.filter { it > 0 && it <= median * 3 }
-        if (filtered.isEmpty()) return median.toInt()
-
-        // A recurring cadence (e.g. weekly) is more predictive than the median of noisy
-        // history — the mode wins when the same gap repeats at least twice.
-        val mode = filtered.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
-        val interval = when {
-            mode != null && filtered.count { it == mode } >= 2 -> mode
-            else -> {
-                // Noisy history: the most recent gap best predicts the next release, but a
-                // single quick release (binge catch-up) must not override a slower cadence.
-                maxOf(median / 2, filtered.first())
-            }
-        }
-        return interval.coerceIn(1, MAX_INTERVAL.toLong()).toInt()
-    }
-
-    /** Day gaps between consecutive distinct release days, newest first. */
-    private fun dayGaps(days: List<LocalDateTime>): List<Long> =
-        days.windowed(2).map { it[1].until(it[0], ChronoUnit.DAYS) }
-    // KMK <--
-
-    private fun calculateNextUpdate(
-        manga: Manga,
-        interval: Int,
-        dateTime: ZonedDateTime,
-        window: Pair<Long, Long>,
-    ): Long {
-        if (manga.nextUpdate in window.first.rangeTo(window.second + 1)) {
-            return manga.nextUpdate
-        }
-
-        val latestDate = ZonedDateTime.ofInstant(
-            if (manga.lastUpdate > 0) Instant.ofEpochMilli(manga.lastUpdate) else Instant.now(),
-            dateTime.zone,
-        )
-            .toLocalDate()
-            .atStartOfDay()
-        val timeSinceLatest = ChronoUnit.DAYS.between(latestDate, dateTime).toInt()
-        val cycle = timeSinceLatest.floorDiv(
-            interval.absoluteValue.takeIf { interval < 0 }
-                ?: increaseInterval(interval, timeSinceLatest, increaseWhenOver = 10),
-        )
-        return latestDate.plusDays((cycle + 1) * interval.absoluteValue.toLong()).toEpochSecond(dateTime.offset) * 1000
-    }
-
-    private fun increaseInterval(delta: Int, timeSinceLatest: Int, increaseWhenOver: Int): Int {
-        if (delta >= MAX_INTERVAL) return MAX_INTERVAL
-
-        // double delta again if missed more than 9 check in new delta
-        val cycle = timeSinceLatest.floorDiv(delta) + 1
-        return if (cycle > increaseWhenOver) {
-            increaseInterval(delta * 2, timeSinceLatest, increaseWhenOver)
-        } else {
-            delta
-        }
-    }
-
     companion object {
         const val MAX_INTERVAL = 28
-
-        // KMK -->
-        private const val DEFAULT_INTERVAL = 7
-        // KMK <--
 
         private const val GRACE_PERIOD = 1L
 

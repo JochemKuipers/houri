@@ -100,6 +100,7 @@ files moved. See .github/scripts/release_notes.py.
 - Reader: WebGPU devices that black-screen without ever killing their GPU device (seen on PowerVR 32-bit phones) are now counted and remembered, and the reader falls back to the standard viewer on later launches instead of opening the same black screen again.
 - App: installing extensions no longer crashes the app on Android 15+ after the install service's daily background-data budget runs out — the service now degrades gracefully instead of taking the process down.
 - Library: completing a series that is not in your library no longer counts toward the "clear the backlog" achievements — the backlog is your shelved pile, so only shelved series can clear it.
+- **Smarter update scheduling (ported from Mihon).** Update checks now follow an entry's actual release calendar — fixed weekdays, days of the month, twice-monthly and batch-release patterns — instead of a rough day count, and after a missed or late release the next check keeps counting from the missed date instead of resetting, so a series is checked when its next chapter is actually due. Scanlators you excluded no longer skew the estimate.
 
 ### Improve
 

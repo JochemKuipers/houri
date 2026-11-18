@@ -15,6 +15,7 @@ import java.time.ZonedDateTime
 class UpdateManga(
     private val mangaRepository: MangaRepository,
     private val fetchInterval: FetchInterval,
+    private val getExcludedScanlators: GetExcludedScanlators,
 ) {
     // KMK -->
     private val appEventBus: AppEventBus get() = globalAppGraph.appEventBus
@@ -32,9 +33,17 @@ class UpdateManga(
         manga: Manga,
         dateTime: ZonedDateTime = ZonedDateTime.now(),
         window: Pair<Long, Long> = fetchInterval.getWindow(dateTime),
+        foundRelease: Boolean = false,
     ): Boolean {
         return mangaRepository.update(
-            fetchInterval.toMangaUpdate(manga, dateTime, window),
+            fetchInterval.toMangaUpdate(
+                manga = manga,
+                dateTime = dateTime,
+                window = window,
+                foundRelease = foundRelease,
+                // Excluded scanlators are user-preference, not release cadence
+                excludedScanlators = getExcludedScanlators.await(manga.id),
+            ),
         )
     }
 
