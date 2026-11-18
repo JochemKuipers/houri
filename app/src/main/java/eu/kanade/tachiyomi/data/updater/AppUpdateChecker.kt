@@ -43,11 +43,20 @@ class AppUpdateChecker(
 
 val GITHUB_REPO: String by lazy { getGithubRepo() }
 
+// KMK -->
+// Beta builds are published to their own repository by build_push, so a preview install checks
+// that repository instead of the stable one. Pointing both at the same place meant the beta
+// updater read stable tags and never saw a newer beta (issue #80), and the stable check relied on
+// GitHub's rename redirect to find the real repository.
+private const val STABLE_REPO = "PineappleTwilight/hyoukan"
+private const val BETA_REPO = "PineappleTwilight/houri-beta"
+// KMK <--
+
 fun getGithubRepo(peekIntoPreview: Boolean = false): String =
     if (isPreviewBuildType || peekIntoPreview) {
-        "PineappleTwilight/komikku-pineapple"
+        BETA_REPO
     } else {
-        "PineappleTwilight/komikku-pineapple"
+        STABLE_REPO
     }
 
 val RELEASE_TAG: String by lazy { getReleaseTag() }

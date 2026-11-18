@@ -74,6 +74,80 @@ class GetApplicationReleaseTest {
     }
 
     @Test
+    fun `When preview release is not a commit tag expect no new update`() = runTest {
+        // The beta repository also carries hand-made "2.0.0-alphaN" releases; they must not be
+        // read as a commit count (the old parser threw on them and the check failed entirely).
+        val release = Release(
+            "2.0.0-alpha4",
+            "info",
+            "http://example.com/release_link",
+            "http://example.com/release_link.apk",
+        )
+
+        coEvery { releaseService.latest(any()) } returns release
+
+        val result = getApplicationRelease.await(
+            GetApplicationRelease.Arguments(
+                isFoss = false,
+                isPreview = true,
+                commitCount = 1000,
+                versionName = "",
+                repository = "test",
+            ),
+        )
+
+        result shouldBe GetApplicationRelease.Result.NoNewUpdate
+    }
+
+    @Test
+    fun `When preview commit tag is older expect no new update`() = runTest {
+        val release = Release(
+            "r999",
+            "info",
+            "http://example.com/release_link",
+            "http://example.com/release_link.apk",
+        )
+
+        coEvery { releaseService.latest(any()) } returns release
+
+        val result = getApplicationRelease.await(
+            GetApplicationRelease.Arguments(
+                isFoss = false,
+                isPreview = true,
+                commitCount = 1000,
+                versionName = "",
+                repository = "test",
+            ),
+        )
+
+        result shouldBe GetApplicationRelease.Result.NoNewUpdate
+    }
+
+    @Test
+    fun `When release tag has fewer segments expect new update`() = runTest {
+        val release = Release(
+            "v2.0",
+            "info",
+            "http://example.com/release_link",
+            "http://example.com/release_link.apk",
+        )
+
+        coEvery { releaseService.latest(any()) } returns release
+
+        val result = getApplicationRelease.await(
+            GetApplicationRelease.Arguments(
+                isFoss = false,
+                isPreview = false,
+                commitCount = 0,
+                versionName = "v1.25.3",
+                repository = "test",
+            ),
+        )
+
+        result shouldBe GetApplicationRelease.Result.NewUpdate(release)
+    }
+
+    @Test
     fun `When has no update expect no new update`() = runTest {
         val release = Release(
             "v1.0.0",

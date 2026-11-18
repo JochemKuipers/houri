@@ -276,6 +276,15 @@ ignores Weblate-owned non-base locales), `build_preview` / `build_release` / `bu
 `todo_discord`, `delete_merged_branch`, `pr_label`. All actions SHA-pinned; all build workflows
 gate on `spotlessCheck`. JDK 21 in CI vs JVM 17 target is intentional.
 
+**Beta channel.** Every master push in `build_push` also publishes its preview build to
+`PineappleTwilight/houri-beta` as release `r<commitCount>` (all four MTL ABIs plus the two
+arm64/armeabi no-MTL ones), which the in-app updater reads via `AppUpdateChecker`'s
+`BETA_REPO`. Betas are preview builds — `initWith(release)`, minified — never `assembleDebug`:
+an unminified beta starts several times slower on low-end devices (issue #78). Publishing needs
+the `BETA_RELEASE_TOKEN` repository secret (a token with release write access to `houri-beta`;
+the default `GITHUB_TOKEN` cannot reach another repository). Without it the job warns and skips
+so master stays green.
+
 ## Release notes
 
 `RELEASE_NOTES.md` is the curated, human-readable staging area for the **next**

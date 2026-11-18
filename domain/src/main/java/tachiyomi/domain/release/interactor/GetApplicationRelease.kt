@@ -33,6 +33,12 @@ class GetApplicationRelease(
      * Release (stable) version will compare with current's [versionName] ("v0.1.2")
      *
      * Preview (beta) version will compare with current's [commitCount] ("r1234")
+     *
+     * The tag shapes are fixed by the publishing workflows: `build_push` tags beta releases
+     * `r<commitCount>` in the beta repository, `auto_release` tags stable ones `v<versionName>`.
+     * A tag that does not have the expected shape is treated as "no update" rather than throwing:
+     * the beta repository also carries hand-made `2.0.0-alphaN` releases, and the preview check
+     * used to parse their numbers with `toInt()` and fail on the second dot.
      */
     private fun isNewVersion(
         isPreview: Boolean,
@@ -40,30 +46,30 @@ class GetApplicationRelease(
         versionName: String,
         versionTag: String,
     ): Boolean {
-        // Removes prefixes like "r" or "v"
-        val newVersion = versionTag.replace("[^\\d.]".toRegex(), "")
         return if (isPreview) {
-            // Preview builds: based on releases in "PineappleTwilight/komikku-pineapple" repo
-            // tagged as something like "r1234"
-            newVersion.toInt() > commitCount
+            val newCommit = previewCommitOf(versionTag) ?: return false
+            newCommit > commitCount
         } else {
-            // Release builds: based on releases in "PineappleTwilight/komikku-pineapple" repo
-            // tagged as something like "v0.1.2"
-            val oldVersion = versionName.replace("[^\\d.]".toRegex(), "")
+            // Strips prefixes like "v" and compares numeric segments left to right. Missing
+            // segments count as 0 on either side, so "2.0" against "1.25.3" is an update and
+            // "1.25.3" against "1.25.3.1" is one too, instead of an index out of bounds.
+            val newSemVer = versionTag.removePrefix("v").split(".")
+            val oldSemVer = versionName.removePrefix("v").split(".")
 
-            val newSemVer = newVersion.split(".").map { it.toInt() }
-            val oldSemVer = oldVersion.split(".").map { it.toInt() }
-
-            oldSemVer.mapIndexed { index, i ->
-                if (newSemVer[index] > i) {
-                    return true
-                }
-                if (newSemVer[index] < i) return false
+            for (index in 0 until maxOf(newSemVer.size, oldSemVer.size)) {
+                val new = newSemVer.getOrNull(index)?.toIntOrNull() ?: 0
+                val old = oldSemVer.getOrNull(index)?.toIntOrNull() ?: 0
+                if (new > old) return true
+                if (new < old) return false
             }
 
             false
         }
     }
+
+    /** Reads the commit count out of a beta tag (`r1234`); null when the tag is not one. */
+    private fun previewCommitOf(versionTag: String): Int? =
+        PREVIEW_COMMIT_TAG.matchEntire(versionTag)?.groupValues?.get(1)?.toIntOrNull()
 
     data class Arguments(
         val isFoss: Boolean,
@@ -87,5 +93,9 @@ class GetApplicationRelease(
         data class NewUpdate(val release: Release) : Result
         data object NoNewUpdate : Result
         data object OsTooOld : Result
+    }
+
+    companion object {
+        private val PREVIEW_COMMIT_TAG = Regex("""^r(\d+)$""", RegexOption.IGNORE_CASE)
     }
 }
