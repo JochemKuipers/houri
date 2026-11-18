@@ -185,6 +185,13 @@
             android:configChanges="uiMode|orientation|screenSize"
             android:exported="false" />
 
+        <!-- KMK: visible Cloudflare challenge (issue #79) -->
+        <activity
+            android:name=".ui.webview.CloudflareChallengeActivity"
+            android:configChanges="uiMode|orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|density"
+            android:exported="false"
+            android:theme="@style/Theme.Tachiyomi.CloudflareChallenge" />
+
         <activity
             android:name=".extension.util.ExtensionInstallActivity"
             android:exported="false"

@@ -13,6 +13,7 @@ import android.os.Looper
 import android.webkit.WebView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
@@ -67,7 +68,9 @@ import eu.kanade.tachiyomi.di.PreferenceModule
 import eu.kanade.tachiyomi.di.SYPreferenceModule
 import eu.kanade.tachiyomi.extension.ExtensionAutoUpdateWorker
 import eu.kanade.tachiyomi.network.NetworkHelper
+import eu.kanade.tachiyomi.network.interceptor.CloudflareChallenge
 import eu.kanade.tachiyomi.ui.base.delegate.SecureActivityDelegate
+import eu.kanade.tachiyomi.ui.webview.CloudflareChallengeActivity
 import eu.kanade.tachiyomi.util.CrashLogUtil
 import eu.kanade.tachiyomi.util.system.GLUtil
 import eu.kanade.tachiyomi.util.system.WebViewUtil
@@ -102,6 +105,7 @@ import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.core.common.preference.Preference
 import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.util.lang.launchIO
+import tachiyomi.core.common.util.lang.launchUI
 import tachiyomi.core.common.util.system.AppMemoryMonitor
 import tachiyomi.core.common.util.system.DeviceTier
 import tachiyomi.core.common.util.system.ImageUtil
@@ -189,6 +193,20 @@ class App : Application(), DefaultLifecycleObserver, SingletonImageLoader.Factor
             runCatching { globalAppGraph.deleteOrphanedSubcategories.await() }
                 .onFailure { xLogE("Failed to delete orphaned subcategories", it) }
         }
+
+        // KMK --> Visible Cloudflare challenge (issue #79). A challenge that needs a human — a
+        // Turnstile checkbox — cannot be solved by the invisible WebView the interceptor falls back
+        // to, so while the app is in the foreground the request is parked on this popup instead.
+        // Registered here because core/common cannot reference an Activity.
+        CloudflareChallenge.isAppInForeground = {
+            ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }
+        CloudflareChallenge.show = {
+            ProcessLifecycleOwner.get().lifecycleScope.launchUI {
+                startActivity(CloudflareChallengeActivity.newIntent(this@App))
+            }
+        }
+        // KMK <--
 
         // KMK --> The update APK used to survive every install, because nothing ever removed it and
         // a release APK is tens of megabytes. Start is the only point where "is this still needed?"

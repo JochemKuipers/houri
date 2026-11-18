@@ -12,6 +12,7 @@ import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.util.system.isOutdated
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import logcat.LogPriority
 import okhttp3.Cookie
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -131,6 +132,12 @@ class CloudflareInterceptor(
     // KMK <--
 
     private fun resolveWithWebView(originalRequest: Request, oldCookie: Cookie?) {
+        // KMK --> While the user is looking at the app, hand the challenge to the UI instead of
+        // solving it in a WebView nobody can see: a challenge that needs a human (a Turnstile
+        // checkbox) otherwise just times out after 30s with a failure toast (issue #79).
+        if (solveInVisibleChallenge(originalRequest)) return
+        // KMK <--
+
         // We need to lock this thread until the WebView finds the challenge solution url, because
         // OkHttp doesn't support asynchronous interceptors.
         val latch = CountDownLatch(1)
@@ -209,7 +216,38 @@ class CloudflareInterceptor(
             throw CloudflareBypassException()
         }
     }
+
+    // KMK -->
+    /**
+     * Parks this request on the visible challenge screen for as long as the user needs (bounded by
+     * [VISIBLE_CHALLENGE_TIMEOUT_MS] so a forgotten popup cannot hang the request).
+     *
+     * Returns false when no screen could be shown — background app, no registered screen — and the
+     * invisible WebView path should run as before. A visible challenge the user closed without
+     * solving fails the request: silently retrying it in an invisible WebView would ignore what
+     * the user just did.
+     */
+    private fun solveInVisibleChallenge(request: Request): Boolean {
+        val result = CloudflareChallenge.request(
+            url = request.url.toString(),
+            headers = parseHeaders(request.headers),
+        ) ?: return false
+
+        val solved = runBlocking {
+            withTimeoutOrNull(VISIBLE_CHALLENGE_TIMEOUT_MS) { result.await() }
+        } == true
+
+        if (!solved) {
+            throw CloudflareBypassException()
+        }
+        return true
+    }
+    // KMK <--
 }
+
+// KMK --> How long a request waits on the visible challenge popup before it gives up. Long enough
+// for a person to tick a checkbox, short enough that a forgotten popup does not hang a download.
+private const val VISIBLE_CHALLENGE_TIMEOUT_MS = 120_000L
 
 private val ERROR_CODES = listOf(403, 503)
 private val SERVER_CHECK = arrayOf("cloudflare-nginx", "cloudflare")

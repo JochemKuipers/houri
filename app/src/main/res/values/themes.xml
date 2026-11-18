@@ -93,6 +93,17 @@
     <!--== Default Theme ==-->
     <style name="Theme.Tachiyomi" parent="Base.Theme.Tachiyomi" />
 
+    <!-- KMK -->
+    <!-- The Cloudflare challenge screen is a popup over whatever the user was doing: a
+         translucent window, dimmed behind, with the challenge page in a card. -->
+    <style name="Theme.Tachiyomi.CloudflareChallenge" parent="Theme.Tachiyomi">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+    <!-- KMK <-->
+
     <!-- Monet theme only support S+ -->
     <style name="Theme.Tachiyomi.Monet" />
 

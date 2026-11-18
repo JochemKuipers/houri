@@ -709,6 +709,8 @@
     <string name="flare_solver_user_agent_updated">FlareSolverr updated the user agent. Restart the app to apply it to every source</string>
     <string name="flare_solver_user_agent_reset">FlareSolverr is unavailable, user agent reset for the WebView bypass. Restart the app to apply it to every source</string>
     <string name="cloudflare_bypass_in_progress">Bypassing Cloudflare via %1$s \u00b7 %2$s</string>
+    <string name="cloudflare_challenge_title">Checking your browser</string>
+    <string name="cloudflare_challenge_message">This site is asking for a quick verification. Complete it here and the app carries on by itself.</string>
     <string name="cloudflare_bypass_method_flaresolverr">FlareSolverr</string>
     <string name="cloudflare_bypass_method_webview">WebView</string>
     <string name="pref_enable_flare_solverr">Enable FlareSolverr</string>
