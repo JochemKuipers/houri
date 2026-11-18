@@ -8,10 +8,10 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir
 import org.junit.jupiter.api.parallel.Execution
 import org.junit.jupiter.api.parallel.ExecutionMode
-import java.io.File
-import java.nio.file.Path
 import upscale.identity.UpscaleIdentity
 import upscale.store.UpscalePageCache
+import java.io.File
+import java.nio.file.Path
 
 /**
  * The upscaled-page cache, exercised almost entirely through its failure paths.
