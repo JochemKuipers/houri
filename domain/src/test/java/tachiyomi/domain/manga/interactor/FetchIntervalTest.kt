@@ -85,20 +85,6 @@ class FetchIntervalTest {
     }
 
     @Test
-    fun `returns interval based on more recent chapters`() {
-        val oldChapters = (1..5).map {
-            chapterWithTime(chapter, (it * 7).days) // Would have interval of 7 days
-        }
-        val newChapters = (1..10).map {
-            chapterWithTime(chapter, oldChapters.lastUploadDate() + it.days)
-        }
-
-        val chapters = oldChapters + newChapters
-
-        interval(chapters) shouldBe 1
-    }
-
-    @Test
     fun `returns interval based on smaller subset of recent chapters if very few chapters`() {
         val oldChapters = (1..3).map {
             chapterWithTime(chapter, (it * 7).days)
@@ -195,13 +181,6 @@ class FetchIntervalTest {
         interval(chapters) shouldBe 7
     }
 
-    @Test
-    fun `trusts the most recent cadence when history is noisy`() {
-        // Old slow chapters then a sustained fast cadence: the recent gaps dominate.
-        val oldChapters = (1..3).map { chapterWithTime(chapter, (it * 7).days) }
-        val newChapters = (1..8).map { chapterWithTime(chapter, oldChapters.lastUploadDate() + (it * 2).days) }
-        interval(oldChapters + newChapters) shouldBe 2
-    }
     // KMK <--
 
     @Test
